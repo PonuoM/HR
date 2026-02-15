@@ -10,6 +10,7 @@ interface ReportRow {
     base_salary: number;
     work_start_time: string;
     expected_work_days: number;
+    full_period_work_days: number;
     actual_work_days: number;
     absent_days: number;
     late_count: number;
@@ -24,6 +25,7 @@ interface ReportRow {
 interface ReportData {
     period: string;
     expected_work_days: number;
+    full_period_work_days: number;
     leave_types: { id: number; name: string; type: string }[];
     employees: ReportRow[];
     summary: {
@@ -272,7 +274,10 @@ const AdminAttendanceReportScreen: React.FC = () => {
                         {selectedEmployee && ` — ${report[0]?.employee_name || ''}`}
                     </h3>
                     <span className="text-xs text-gray-400">
-                        วันทำงานที่ควรมา: {data?.expected_work_days ?? '-'} วัน
+                        วันทำงาน (ถึงวันนี้): {data?.expected_work_days ?? '-'} วัน
+                        {data?.full_period_work_days !== data?.expected_work_days && (
+                            <span className="ml-1">(ทั้งเดือน: {data?.full_period_work_days} วัน)</span>
+                        )}
                     </span>
                 </div>
 
