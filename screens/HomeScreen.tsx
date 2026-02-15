@@ -156,15 +156,35 @@ const HomeScreen: React.FC = () => {
     const [confirmLoading, setConfirmLoading] = useState(false);
 
     const getCurrentPosition = (): Promise<{ latitude: number; longitude: number }> => {
-        return new Promise((resolve, reject) => {
+        return new Promise(async (resolve, reject) => {
             if (!navigator.geolocation) {
                 reject(new Error('เบราว์เซอร์ไม่รองรับ GPS'));
                 return;
             }
+
+            // Check permission state first (works in TWA / Android WebView)
+            try {
+                if (navigator.permissions) {
+                    const perm = await navigator.permissions.query({ name: 'geolocation' });
+                    if (perm.state === 'denied') {
+                        reject(new Error('สิทธิ์ Location ถูกปิด\n\nAndroid: ไปที่ ตั้งค่า → แอป → HR Connect → สิทธิ์ → ตำแหน่ง → เปิดใช้งาน\n\niOS: ไปที่ Settings → HR Connect → Location'));
+                        return;
+                    }
+                }
+            } catch { /* permissions API not available, proceed anyway */ }
+
             navigator.geolocation.getCurrentPosition(
                 (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
-                (err) => reject(new Error(err.code === 1 ? 'กรุณาเปิดสิทธิ์ Location ในเบราว์เซอร์' : 'ไม่สามารถดึงตำแหน่งได้')),
-                { enableHighAccuracy: true, timeout: 10000 }
+                (err) => {
+                    if (err.code === 1) {
+                        reject(new Error('สิทธิ์ Location ถูกปิด\n\nAndroid: ไปที่ ตั้งค่า → แอป → HR Connect → สิทธิ์ → ตำแหน่ง → เปิดใช้งาน\n\niOS: ไปที่ Settings → HR Connect → Location'));
+                    } else if (err.code === 2) {
+                        reject(new Error('ไม่สามารถหาตำแหน่งได้ กรุณาเปิด GPS'));
+                    } else {
+                        reject(new Error('ดึงตำแหน่งไม่สำเร็จ กรุณาลองใหม่'));
+                    }
+                },
+                { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
             );
         });
     };
