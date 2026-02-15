@@ -34,7 +34,7 @@ if ($method === 'GET') {
 
     // Query quotas with auto-calculated "used" from approved leave_requests
     $sql = "SELECT lq.id, lq.employee_id, lq.leave_type_id, lq.total, lq.year,
-                   lt.name AS leave_type_name, lt.color, lt.icon, lt.icon_url, lt.unit,
+                   lt.name AS leave_type_name, lt.type AS leave_category, lt.color, lt.icon, lt.icon_url, lt.unit,
                    COALESCE(used_calc.total_used, 0) AS used
             FROM leave_quotas lq
             JOIN leave_types lt ON lq.leave_type_id = lt.id
