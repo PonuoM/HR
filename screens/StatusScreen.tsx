@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { API_BASE } from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 
 interface LeaveRequest {
   id: number;
@@ -66,6 +67,8 @@ function getTierIcon(tierStatus: string): { icon: string; style: string; animate
 const StatusScreen: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
+  const { user: authUser } = useAuth();
+  const empId = authUser?.id || '';
   const [request, setRequest] = useState<LeaveRequest | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -73,18 +76,36 @@ const StatusScreen: React.FC = () => {
   useEffect(() => {
     if (!id) return;
     setLoading(true);
+
+    // Try fetching by specific ID first
     fetch(`${API_BASE}/leave_requests.php?id=${id}`)
       .then(res => res.json())
       .then((data: LeaveRequest[]) => {
         if (data.length > 0) {
           setRequest(data[0]);
+          setLoading(false);
+        } else if (empId) {
+          // Fallback: fetch the user's most recent leave request
+          return fetch(`${API_BASE}/leave_requests.php?employee_id=${empId}`)
+            .then(res => res.json())
+            .then((empData: LeaveRequest[]) => {
+              if (empData.length > 0) {
+                setRequest(empData[0]); // most recent (sorted by created_at DESC)
+              } else {
+                setError('ไม่พบคำขอลา');
+              }
+              setLoading(false);
+            });
         } else {
           setError('ไม่พบคำขอลานี้');
+          setLoading(false);
         }
       })
-      .catch(() => setError('เกิดข้อผิดพลาดในการโหลดข้อมูล'))
-      .finally(() => setLoading(false));
-  }, [id]);
+      .catch(() => {
+        setError('เกิดข้อผิดพลาดในการโหลดข้อมูล');
+        setLoading(false);
+      });
+  }, [id, empId]);
 
   if (loading) {
     return (
