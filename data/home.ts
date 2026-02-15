@@ -19,6 +19,8 @@ export const QUICK_MENU_ITEMS: QuickMenuItem[] = [
     { icon: 'event_available', label: 'ยื่นคำขอ', path: '/request/create' },
     { icon: 'receipt_long', label: 'สลิปเงินเดือน', path: '/payslips' },
     { icon: 'calendar_month', label: 'ปฏิทิน', path: '/calendar' },
+    { icon: 'history', label: 'ประวัติลา', path: '/leave/history' },
+    { icon: 'how_to_reg', label: 'อนุมัติลา', path: '/leave/approvals' },
 ];
 
 /** Attendance / clock-in data */
