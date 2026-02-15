@@ -201,16 +201,32 @@ export async function getDepartments() {
     return fetchApi<any[]>('departments.php');
 }
 
+export async function createDepartment(data: { name: string; work_start_time: string; work_end_time: string; is_admin_system?: number }) {
+    return fetchApi<any>('departments.php', { method: 'POST', body: JSON.stringify(data) });
+}
+
 export async function updateDepartment(id: number, data: { name: string; work_start_time: string; work_end_time: string; is_admin_system?: number }) {
     return fetchApi<any>(`departments.php?id=${id}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export async function deleteDepartment(id: number) {
+    return fetchApi<any>(`departments.php?id=${id}`, { method: 'DELETE' });
 }
 
 export async function getPositions() {
     return fetchApi<any[]>('departments.php?type=positions');
 }
 
+export async function createPosition(data: { name: string; can_have_subordinates?: number }) {
+    return fetchApi<any>('departments.php?type=positions', { method: 'POST', body: JSON.stringify(data) });
+}
+
 export async function updatePosition(id: number, data: { name: string; can_have_subordinates?: number }) {
     return fetchApi<any>(`departments.php?type=positions&id=${id}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export async function deletePosition(id: number) {
+    return fetchApi<any>(`departments.php?type=positions&id=${id}`, { method: 'DELETE' });
 }
 
 // --- FAQ ---
