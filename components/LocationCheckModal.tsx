@@ -24,7 +24,7 @@ const LocationCheckModal: React.FC<LocationCheckModalProps> = ({ result, action,
             <div className="fixed inset-0 bg-black/50 z-[9990]" onClick={onClose} />
 
             {/* Modal */}
-            <div className="fixed inset-0 z-[9991] flex items-end sm:items-center justify-center p-4">
+            <div className="fixed inset-0 z-[9991] flex items-center justify-center p-4">
                 <div
                     className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
                     style={{ animation: 'locModalSlideUp 0.3s ease-out' }}
@@ -32,8 +32,8 @@ const LocationCheckModal: React.FC<LocationCheckModalProps> = ({ result, action,
                     {/* Header icon */}
                     <div className={`flex items-center justify-center pt-8 pb-4`}>
                         <div className={`w-20 h-20 rounded-full flex items-center justify-center ${isAllowed
-                                ? 'bg-green-100 dark:bg-green-900/30'
-                                : 'bg-red-100 dark:bg-red-900/30'
+                            ? 'bg-green-100 dark:bg-green-900/30'
+                            : 'bg-red-100 dark:bg-red-900/30'
                             }`}>
                             <span className={`material-icons-round text-4xl ${isAllowed ? 'text-green-500' : 'text-red-500'
                                 }`}>
@@ -53,8 +53,8 @@ const LocationCheckModal: React.FC<LocationCheckModalProps> = ({ result, action,
 
                         {/* Distance info */}
                         <div className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl mb-6 ${isAllowed
-                                ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400'
-                                : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400'
+                            ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400'
+                            : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400'
                             }`}>
                             <span className="material-icons-round text-lg">
                                 {isAllowed ? 'check_circle' : 'error'}
@@ -87,8 +87,8 @@ const LocationCheckModal: React.FC<LocationCheckModalProps> = ({ result, action,
                                 onClick={onConfirm}
                                 disabled={loading}
                                 className={`flex-1 py-3 text-sm font-bold text-white rounded-xl shadow-md flex items-center justify-center gap-2 transition-all disabled:opacity-70 ${action === 'clock_in'
-                                        ? 'bg-primary hover:bg-blue-600 shadow-primary/30'
-                                        : 'bg-orange-500 hover:bg-orange-600 shadow-orange-500/30'
+                                    ? 'bg-primary hover:bg-blue-600 shadow-primary/30'
+                                    : 'bg-orange-500 hover:bg-orange-600 shadow-orange-500/30'
                                     }`}
                             >
                                 {loading ? (
