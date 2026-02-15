@@ -1,10 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { API_BASE } from '../../services/api';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../../components/Toast';
 import { useAuth } from '../../contexts/AuthContext';
-
-const BIOMETRIC_KEY = 'hr_biometric_enabled';
 
 const PasswordInput = ({ value, onChange, show, onToggle, placeholder }: {
   value: string; onChange: (v: string) => void; show: boolean; onToggle: () => void; placeholder?: string;
@@ -40,18 +38,6 @@ const SecurityScreen: React.FC = () => {
   const [showNew, setShowNew] = useState(false);
   const [showConfirmPw, setShowConfirmPw] = useState(false);
   const [saving, setSaving] = useState(false);
-
-  // Biometric
-  const [biometricEnabled, setBiometricEnabled] = useState(false);
-  const [biometricSupported, setBiometricSupported] = useState(false);
-  const [isEnrolling, setIsEnrolling] = useState(false);
-
-  useEffect(() => {
-    // Check WebAuthn support
-    setBiometricSupported(!!window.PublicKeyCredential);
-    // Restore saved state
-    setBiometricEnabled(localStorage.getItem(BIOMETRIC_KEY) === 'true');
-  }, []);
 
   // --- Change Password ---
   const handleChangePassword = async () => {
@@ -91,68 +77,9 @@ const SecurityScreen: React.FC = () => {
       setConfirmPw('');
     } catch (err: any) {
       toast(err.message || 'เกิดข้อผิดพลาด', 'error');
-    } finally {
-      setSaving(false);
     }
   };
 
-  // --- Biometric Toggle ---
-  const handleBiometricToggle = async () => {
-    if (biometricEnabled) {
-      if (await showConfirm({ message: 'ต้องการยกเลิกการเข้าสู่ระบบด้วยลายนิ้วมือ?', type: 'warning', confirmText: 'ยกเลิก' })) {
-        setBiometricEnabled(false);
-        localStorage.removeItem(BIOMETRIC_KEY);
-        toast('ยกเลิกการใช้งานลายนิ้วมือแล้ว', 'success');
-      }
-      return;
-    }
-
-    if (!biometricSupported) {
-      toast('อุปกรณ์นี้ไม่รองรับลายนิ้วมือ/FaceID', 'warning');
-      return;
-    }
-
-    setIsEnrolling(true);
-    try {
-      // Try to trigger WebAuthn platform authenticator
-      const credential = await navigator.credentials.create({
-        publicKey: {
-          challenge: crypto.getRandomValues(new Uint8Array(32)),
-          rp: { name: 'HR Connect', id: window.location.hostname },
-          user: {
-            id: new TextEncoder().encode(authUser?.id || 'user'),
-            name: authUser?.id || 'user',
-            displayName: authUser?.name || 'User',
-          },
-          pubKeyCredParams: [
-            { alg: -7, type: 'public-key' },   // ES256
-            { alg: -257, type: 'public-key' },  // RS256
-          ],
-          authenticatorSelection: {
-            authenticatorAttachment: 'platform', // Force built-in (fingerprint/face)
-            userVerification: 'required',
-          },
-          timeout: 60000,
-        },
-      });
-
-      if (credential) {
-        setBiometricEnabled(true);
-        localStorage.setItem(BIOMETRIC_KEY, 'true');
-        toast('ลงทะเบียนลายนิ้วมือเรียบร้อย! ครั้งถัดไปสามารถสแกนเพื่อเข้าสู่ระบบได้', 'success');
-      }
-    } catch (err: any) {
-      if (err.name === 'NotAllowedError') {
-        toast('ผู้ใช้ยกเลิกการลงทะเบียน', 'info');
-      } else if (err.name === 'NotSupportedError') {
-        toast('อุปกรณ์นี้ไม่รองรับลายนิ้วมือ', 'warning');
-      } else {
-        toast('ไม่สามารถลงทะเบียนได้: ' + (err.message || ''), 'error');
-      }
-    } finally {
-      setIsEnrolling(false);
-    }
-  };
 
   return (
     <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
@@ -210,43 +137,20 @@ const SecurityScreen: React.FC = () => {
           </div>
         </section>
 
-        {/* Biometrics Section */}
+        {/* Biometrics Section - Coming Soon */}
         <section className="bg-white dark:bg-gray-800 rounded-2xl overflow-hidden shadow-sm border border-gray-100 dark:border-gray-700">
           <div className="p-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${biometricEnabled ? 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500'}`}>
+              <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500">
                 <span className="material-icons-round text-xl">fingerprint</span>
               </div>
               <div>
                 <span className="font-medium text-gray-900 dark:text-white block">เข้าสู่ระบบด้วยลายนิ้วมือ</span>
-                <span className="text-xs text-gray-500">
-                  {biometricSupported ? 'รองรับ Passkeys (WebAuthn)' : 'อุปกรณ์ไม่รองรับ'}
-                </span>
+                <span className="text-xs text-gray-400">จะเปิดใช้งานในอนาคต</span>
               </div>
             </div>
-
-            <button
-              onClick={handleBiometricToggle}
-              disabled={isEnrolling || !biometricSupported}
-              className={`relative w-12 h-6 rounded-full p-1 transition-colors duration-300 ease-in-out ${biometricEnabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'} ${!biometricSupported ? 'opacity-40 cursor-not-allowed' : ''}`}
-            >
-              {isEnrolling ? (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                </div>
-              ) : (
-                <div className={`w-4 h-4 bg-white rounded-full shadow-sm transform transition-transform duration-300 ${biometricEnabled ? 'translate-x-6' : 'translate-x-0'}`}></div>
-              )}
-            </button>
+            <span className="text-xs text-gray-400 dark:text-gray-500 font-medium px-3 py-1 rounded-lg bg-gray-50 dark:bg-gray-700">เร็วๆ นี้</span>
           </div>
-          {biometricEnabled && (
-            <div className="px-4 pb-4">
-              <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1 bg-green-50 dark:bg-green-900/20 p-2 rounded-lg">
-                <span className="material-icons-round text-sm">check_circle</span>
-                อุปกรณ์นี้ถูกลงทะเบียนเรียบร้อยแล้ว
-              </p>
-            </div>
-          )}
         </section>
 
         {/* Info */}

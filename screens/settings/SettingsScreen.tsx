@@ -1,26 +1,27 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LANGUAGE_OPTIONS } from '../../data';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/Toast';
-import CustomSelect from '../../components/CustomSelect';
 
 const SettingsScreen: React.FC = () => {
   const navigate = useNavigate();
   const { logout } = useAuth();
   const { confirm: showConfirm } = useToast();
-  const [isDarkMode, setIsDarkMode] = useState(
-    () => document.documentElement.classList.contains('dark')
-  );
-  const [notifications, setNotifications] = useState(true);
-  const [language, setLanguage] = useState('th');
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    const saved = localStorage.getItem('hr_dark_mode');
+    if (saved !== null) return saved === 'true';
+    return document.documentElement.classList.contains('dark');
+  });
+
 
   const toggleDarkMode = () => {
     if (isDarkMode) {
       document.documentElement.classList.remove('dark');
+      localStorage.setItem('hr_dark_mode', 'false');
       setIsDarkMode(false);
     } else {
       document.documentElement.classList.add('dark');
+      localStorage.setItem('hr_dark_mode', 'true');
       setIsDarkMode(true);
     }
   };
@@ -59,16 +60,12 @@ const SettingsScreen: React.FC = () => {
                 <div className="w-8 h-8 rounded-lg bg-pink-100 text-pink-600 dark:bg-pink-900/30 dark:text-pink-400 flex items-center justify-center">
                   <span className="material-icons-round text-lg">language</span>
                 </div>
-                <span className="font-medium text-gray-900 dark:text-white">ภาษา</span>
+                <div>
+                  <span className="font-medium text-gray-900 dark:text-white block">ภาษา</span>
+                  <span className="text-xs text-gray-400">จะเพิ่มภาษาอื่นในอนาคต</span>
+                </div>
               </div>
-              <CustomSelect
-                value={language}
-                onChange={setLanguage}
-                options={[
-                  { value: 'th', label: 'ไทย' },
-                  { value: 'en', label: 'English' },
-                ]}
-              />
+              <span className="text-sm text-gray-400 dark:text-gray-500 font-medium px-3 py-1 rounded-lg bg-gray-50 dark:bg-gray-700">ไทย</span>
             </div>
           </div>
         </section>
@@ -84,15 +81,10 @@ const SettingsScreen: React.FC = () => {
                 </div>
                 <div>
                   <span className="font-medium text-gray-900 dark:text-white block">แจ้งเตือนทั่วไป</span>
-                  <span className="text-xs text-gray-500">ข่าวสาร, การอนุมัติ</span>
+                  <span className="text-xs text-gray-400">จะเปิดใช้งานในอนาคต</span>
                 </div>
               </div>
-              <button
-                onClick={() => setNotifications(prev => !prev)}
-                className={`w-12 h-6 rounded-full p-1 transition-colors duration-300 ease-in-out ${notifications ? 'bg-primary' : 'bg-gray-300 dark:bg-gray-600'}`}
-              >
-                <div className={`w-4 h-4 bg-white rounded-full shadow-sm transform transition-transform duration-300 ${notifications ? 'translate-x-6' : 'translate-x-0'}`}></div>
-              </button>
+              <span className="text-xs text-gray-400 dark:text-gray-500 font-medium px-3 py-1 rounded-lg bg-gray-50 dark:bg-gray-700">เร็วๆ นี้</span>
             </div>
           </div>
         </section>
