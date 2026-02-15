@@ -10,7 +10,7 @@ const AdminEmployeeScreen: React.FC = () => {
     const location = useLocation();
     const { toast, confirm } = useToast();
     const [showAddModal, setShowAddModal] = useState(false);
-    const [showConfigModal, setShowConfigModal] = useState(false);
+
     const [editingEmployee, setEditingEmployee] = useState<any>(null);
     const [suspendingEmployee, setSuspendingEmployee] = useState<any>(null);
     const [suspendDate, setSuspendDate] = useState(new Date().toISOString().split('T')[0]);
@@ -23,9 +23,7 @@ const AdminEmployeeScreen: React.FC = () => {
     const departments = (rawDepts || []).map((d: any) => d.name || d);
     const positions = (rawPositions || []).map((p: any) => p.name || p);
 
-    // Temporary states for inputs inside the config modal
-    const [newDept, setNewDept] = useState('');
-    const [newPos, setNewPos] = useState('');
+
 
     // Filter states
     const [filterDept, setFilterDept] = useState('');
@@ -55,43 +53,16 @@ const AdminEmployeeScreen: React.FC = () => {
     // Handle Navigation State from Dashboard
     useEffect(() => {
         if (location.state) {
-            const state = location.state as { openAddModal?: boolean; openConfigModal?: boolean };
+            const state = location.state as { openAddModal?: boolean };
             if (state.openAddModal) {
                 setShowAddModal(true);
-            }
-            if (state.openConfigModal) {
-                setShowConfigModal(true);
             }
             // Clear state to avoid reopening on refresh (optional, but good practice)
             window.history.replaceState({}, document.title);
         }
     }, [location]);
 
-    const handleAddDept = () => {
-        if (newDept.trim()) {
-            // TODO: call API to add department
-            setNewDept('');
-            refetchDepts();
-        }
-    };
 
-    const handleRemoveDept = (dept: string) => {
-        // TODO: call API to remove department
-        refetchDepts();
-    };
-
-    const handleAddPos = () => {
-        if (newPos.trim()) {
-            // TODO: call API to add position
-            setNewPos('');
-            refetchPositions();
-        }
-    };
-
-    const handleRemovePos = (pos: string) => {
-        // TODO: call API to remove position
-        refetchPositions();
-    };
 
     return (
         <div className="pt-6 md:pt-8 pb-8 px-4 md:px-8 max-w-[1600px] mx-auto min-h-full">
@@ -107,15 +78,6 @@ const AdminEmployeeScreen: React.FC = () => {
                 </div>
 
                 <div className="flex gap-3 w-full md:w-auto">
-                    {/* Config Button */}
-                    <button
-                        onClick={() => setShowConfigModal(true)}
-                        className="flex-1 md:flex-none bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 px-4 py-2.5 rounded-xl font-medium flex items-center justify-center gap-2 transition-all active:scale-95"
-                    >
-                        <span className="material-icons-round text-xl">settings</span>
-                        <span className="hidden md:inline">ตั้งค่าข้อมูล</span>
-                    </button>
-
                     {/* Add Employee Button */}
                     <button
                         onClick={() => setShowAddModal(true)}
@@ -434,88 +396,7 @@ const AdminEmployeeScreen: React.FC = () => {
                 </div >
             )}
 
-            {/* --- MODAL 2: ORGANIZATION SETTINGS (Manage Dept/Pos) --- */}
-            {
-                showConfigModal && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
-                        <div className="bg-white dark:bg-gray-900 w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-scale-in">
-                            <div className="flex items-center justify-between p-4 md:p-6 border-b border-gray-100 dark:border-gray-800">
-                                <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                                    <span className="material-icons-round text-primary">settings_suggest</span>
-                                    จัดการข้อมูลองค์กร
-                                </h2>
-                                <button onClick={() => setShowConfigModal(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors">
-                                    <span className="material-icons-round text-gray-500">close</span>
-                                </button>
-                            </div>
 
-                            <div className="p-4 md:p-6 overflow-y-auto flex-1 grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
-                                {/* Department Section */}
-                                <div className="flex flex-col">
-                                    <h3 className="font-bold text-gray-900 dark:text-white mb-3">รายชื่อแผนก</h3>
-                                    <div className="flex gap-2 mb-3">
-                                        <input
-                                            type="text"
-                                            value={newDept}
-                                            onChange={(e) => setNewDept(e.target.value)}
-                                            placeholder="เพิ่มแผนกใหม่..."
-                                            className="flex-1 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 dark:text-white"
-                                        />
-                                        <button onClick={handleAddDept} className="bg-primary hover:bg-primary-hover text-white p-2 rounded-lg shadow-sm">
-                                            <span className="material-icons-round text-lg">add</span>
-                                        </button>
-                                    </div>
-                                    <div className="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 flex-1 overflow-y-auto max-h-[300px] p-2 space-y-2">
-                                        {departments.length === 0 && <p className="text-xs text-gray-400 text-center py-4">ไม่มีข้อมูล</p>}
-                                        {departments.map((dept, index) => (
-                                            <div key={index} className="flex justify-between items-center p-2 bg-white dark:bg-gray-900/50 rounded-lg border border-gray-100 dark:border-gray-700/50">
-                                                <span className="text-sm text-gray-700 dark:text-gray-300">{dept}</span>
-                                                <button onClick={() => handleRemoveDept(dept)} className="text-gray-400 hover:text-red-500 p-1">
-                                                    <span className="material-icons-round text-sm">close</span>
-                                                </button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                {/* Position Section */}
-                                <div className="flex flex-col">
-                                    <h3 className="font-bold text-gray-900 dark:text-white mb-3">รายชื่อตำแหน่ง</h3>
-                                    <div className="flex gap-2 mb-3">
-                                        <input
-                                            type="text"
-                                            value={newPos}
-                                            onChange={(e) => setNewPos(e.target.value)}
-                                            placeholder="เพิ่มตำแหน่งใหม่..."
-                                            className="flex-1 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 dark:text-white"
-                                        />
-                                        <button onClick={handleAddPos} className="bg-primary hover:bg-primary-hover text-white p-2 rounded-lg shadow-sm">
-                                            <span className="material-icons-round text-lg">add</span>
-                                        </button>
-                                    </div>
-                                    <div className="bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 flex-1 overflow-y-auto max-h-[300px] p-2 space-y-2">
-                                        {positions.length === 0 && <p className="text-xs text-gray-400 text-center py-4">ไม่มีข้อมูล</p>}
-                                        {positions.map((pos, index) => (
-                                            <div key={index} className="flex justify-between items-center p-2 bg-white dark:bg-gray-900/50 rounded-lg border border-gray-100 dark:border-gray-700/50">
-                                                <span className="text-sm text-gray-700 dark:text-gray-300">{pos}</span>
-                                                <button onClick={() => handleRemovePos(pos)} className="text-gray-400 hover:text-red-500 p-1">
-                                                    <span className="material-icons-round text-sm">close</span>
-                                                </button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="p-4 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 text-right">
-                                <button onClick={() => setShowConfigModal(false)} className="bg-primary text-white px-6 py-2 rounded-lg font-medium text-sm shadow-lg shadow-primary/30">
-                                    เสร็จสิ้น
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )
-            }
             {/* --- MODAL 3: EDIT EMPLOYEE --- */}
             {
                 editingEmployee && (
