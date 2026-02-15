@@ -53,7 +53,7 @@ if ($method === 'POST') {
     $icon_url = $body['icon_url'] ?? null;
 
     $stmt = $conn->prepare("INSERT INTO leave_types (name, default_quota, unit, type, reset_cycle, color, icon, icon_url, is_active, requires_doc, probation_months, grant_timing, prorate_first_year, advance_notice_days) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param('sissssssiiiisii',
+    $stmt->bind_param('sissssssiiisii',
         $body['name'], $body['default_quota'], $body['unit'], $body['type'],
         $reset_cycle, $body['color'], $body['icon'], $icon_url,
         $body['is_active'], $body['requires_doc'],
@@ -85,7 +85,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
     $icon_url = $body['icon_url'] ?? null;
 
     $stmt = $conn->prepare("UPDATE leave_types SET name=?, default_quota=?, unit=?, type=?, reset_cycle=?, color=?, icon=?, icon_url=?, is_active=?, requires_doc=?, probation_months=?, grant_timing=?, prorate_first_year=?, advance_notice_days=? WHERE id=?");
-    $stmt->bind_param('sissssssiiiisii',
+    $stmt->bind_param('sissssssiiisiii',
         $body['name'], $body['default_quota'], $body['unit'], $body['type'],
         $reset_cycle, $body['color'], $body['icon'], $icon_url,
         $body['is_active'], $body['requires_doc'],
