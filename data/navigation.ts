@@ -29,6 +29,7 @@ export const SIDEBAR_ADMIN_ITEMS: NavItem[] = [
     { path: '/admin/cms', icon: 'article', label: 'จัดการข่าวสาร' },
     { path: '/admin/locations', icon: 'location_on', label: 'พื้นที่ทำงาน' },
     { path: '/admin/departments', icon: 'apartment', label: 'แผนกและตำแหน่ง' },
+    { path: '/admin/attendance-report', icon: 'summarize', label: 'รายงานเข้างาน' },
 ];
 
 /** Profile page — general menu items */

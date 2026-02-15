@@ -22,6 +22,7 @@ import AdminPayslipScreen from './screens/admin/AdminPayslipScreen';
 import AdminQuotaScreen from './screens/admin/AdminQuotaScreen';
 import AdminLocationScreen from './screens/admin/AdminLocationScreen';
 import AdminDepartmentScreen from './screens/admin/AdminDepartmentScreen';
+import AdminAttendanceReportScreen from './screens/admin/AdminAttendanceReportScreen';
 import SettingsScreen from './screens/settings/SettingsScreen';
 import SecurityScreen from './screens/settings/SecurityScreen';
 import HelpScreen from './screens/settings/HelpScreen';
@@ -138,6 +139,7 @@ const App: React.FC = () => {
                       <Route path="/admin/quotas" element={<AdminQuotaScreen />} />
                       <Route path="/admin/locations" element={<AdminLocationScreen />} />
                       <Route path="/admin/departments" element={<AdminDepartmentScreen />} />
+                      <Route path="/admin/attendance-report" element={<AdminAttendanceReportScreen />} />
                     </Routes>
                   </PageTransition>
                 </Layout>
