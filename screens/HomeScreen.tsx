@@ -557,22 +557,49 @@ const HomeScreen: React.FC = () => {
                         </div>
                     </section>
 
-                    {/* Quick Menu */}
-                    <section>
+                    {/* News Feed — Desktop only (in left column per wireframe) */}
+                    <section className="hidden md:block">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-white">ข่าวประชาสัมพันธ์</h3>
+                            <button onClick={() => navigate('/news')} className="text-sm font-medium text-primary hover:text-blue-600">ดูทั้งหมด</button>
+                        </div>
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl overflow-hidden shadow-sm border border-gray-100 dark:border-gray-700 relative group cursor-pointer">
+                            <div className="absolute top-3 right-3 z-10 bg-white/90 dark:bg-black/80 backdrop-blur-sm p-1.5 rounded-full shadow-sm">
+                                <span className="material-icons-round text-primary text-sm block">push_pin</span>
+                            </div>
+                            <div className="relative h-48 overflow-hidden">
+                                {featuredNews && <img alt="News" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" src={featuredNews.image} />}
+                                <div className="absolute top-3 left-3 bg-white/90 dark:bg-black/80 backdrop-blur-sm px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide text-gray-800 dark:text-white">
+                                    {featuredNews?.is_pinned ? 'ประกาศสำคัญ' : 'ข่าวสาร'}
+                                </div>
+                            </div>
+                            <div className="p-4">
+                                <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
+                                    <span className="font-medium text-primary">{featuredNews?.department || ''}</span>
+                                    <span>•</span>
+                                    <span>{featuredNews?.published_at ? new Date(featuredNews.published_at).toLocaleDateString('th-TH') : ''}</span>
+                                </div>
+                                <h4 className="font-bold text-gray-900 dark:text-white mb-2 text-lg">{featuredNews?.title || ''}</h4>
+                                <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2">{featuredNews?.content || ''}</p>
+                            </div>
+                        </div>
+                    </section>
+
+                    {/* Quick Menu — Mobile only (desktop version is in right column) */}
+                    <section className="md:hidden">
                         <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">เมนูด่วน</h3>
-                        <div className={`grid ${isAdmin ? 'grid-cols-4' : 'grid-cols-3'} md:grid-cols-2 gap-4`}>
+                        <div className={`grid ${isAdmin ? 'grid-cols-4' : 'grid-cols-3'} gap-4`}>
                             {QUICK_MENU_ITEMS.filter(item => !item.adminOnly || isAdmin).map((item, i) => {
                                 const action = item.path ? () => navigate(item.path!) : undefined;
                                 return (
-                                    <button key={i} onClick={action} className="flex flex-col items-center md:flex-row md:px-4 md:py-3 gap-2 md:gap-4 group md:bg-white md:dark:bg-gray-800 md:rounded-xl md:border md:border-gray-100 md:dark:border-gray-700 md:shadow-sm md:hover:shadow-md transition-all relative">
-                                        <div className="w-14 h-14 md:w-10 md:h-10 rounded-2xl md:rounded-lg bg-white dark:bg-gray-800 md:bg-primary/10 border border-gray-200 dark:border-gray-700 md:border-none flex items-center justify-center shadow-sm md:shadow-none group-active:scale-95 transition-transform relative">
-                                            <span className="material-icons-round text-primary text-2xl md:text-xl">{item.icon}</span>
-                                            {/* Notification Dot */}
+                                    <button key={i} onClick={action} className="flex flex-col items-center gap-2 group">
+                                        <div className="w-14 h-14 rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center justify-center shadow-sm group-active:scale-95 transition-transform relative">
+                                            <span className="material-icons-round text-primary text-2xl">{item.icon}</span>
                                             {item.hasNotif && (
-                                                <span className="absolute top-3 right-3 md:top-2 md:right-2 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white dark:border-gray-800"></span>
+                                                <span className="absolute top-3 right-3 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white dark:border-gray-800"></span>
                                             )}
                                         </div>
-                                        <span className="text-xs md:text-sm text-center md:text-left font-medium text-gray-600 dark:text-gray-300 md:group-hover:text-primary transition-colors">{item.label}</span>
+                                        <span className="text-xs text-center font-medium text-gray-600 dark:text-gray-300">{item.label}</span>
                                     </button>
                                 );
                             })}
@@ -624,95 +651,202 @@ const HomeScreen: React.FC = () => {
                     )}
                 </div>
 
-                {/* Right Column (Mobile: Bottom, Desktop: Right) */}
-                <div className="md:col-span-7 lg:col-span-8 space-y-8">
-                    {/* Quotas */}
-                    <section>
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold text-gray-900 dark:text-white">วันลาคงเหลือ</h3>
-                        </div>
-                        {/* Main 3 Leave Types as Cards */}
-                        <div className="flex md:grid md:grid-cols-3 gap-3 overflow-x-auto md:overflow-visible pb-3 md:pb-0 scrollbar-hide snap-x">
-                            {mainQuotas.map((q: any, idx: number) => (
-                                <div key={idx} className="snap-start min-w-[130px] bg-white dark:bg-gray-800 p-3.5 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-between hover:shadow-md transition-shadow">
-                                    <div className={`w-9 h-9 rounded-lg bg-${q.color}-100 dark:bg-${q.color}-900/30 flex items-center justify-center mb-2 overflow-hidden`}>
-                                        {q.icon_url ? (
-                                            <img src={q.icon_url.startsWith('http') ? q.icon_url : `${API_BASE}/${q.icon_url}`} alt="" className="w-7 h-7 object-contain" />
-                                        ) : (
-                                            <span className={`material-icons-round text-xl text-${q.color}-600 dark:text-${q.color}-400`}>{q.icon}</span>
-                                        )}
-                                    </div>
-                                    <div>
-                                        <p className="text-2xl font-bold text-gray-900 dark:text-white">{q.remaining < 0 ? '∞' : q.remaining}</p>
-                                        <p className="text-[11px] text-gray-500 dark:text-gray-400 font-medium leading-tight">{q.label.split(' (')[0]}</p>
-                                        <p className="text-[10px] text-gray-400 mt-0.5">ใช้ {q.used}/{q.total} {q.unit}</p>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
+                {/* Right Column — Quotas + Quick Menu (side by side) + Approvals */}
+                <div className="md:col-span-7 lg:col-span-8 space-y-6">
 
-                        {/* Other Leave Types — Compact Data Table */}
-                        {otherQuotas.length > 0 && (
-                            <div className="mt-3">
-                                <button onClick={() => setShowOtherQuotas(!showOtherQuotas)}
-                                    className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-primary transition-colors">
-                                    <span className="material-icons-round text-sm" style={{ transform: showOtherQuotas ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>expand_more</span>
-                                    วันลาอื่นๆ ({otherQuotas.length})
-                                </button>
-                                {showOtherQuotas && (
-                                    <div className="mt-2 bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
-                                        <table className="w-full text-sm">
-                                            <thead>
-                                                <tr className="border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
-                                                    <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500">ประเภท</th>
-                                                    <th className="text-center px-2 py-2 text-xs font-semibold text-gray-500">ใช้</th>
-                                                    <th className="text-center px-2 py-2 text-xs font-semibold text-gray-500">ทั้งหมด</th>
-                                                    <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500">คงเหลือ</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {otherQuotas.map((q: any, idx: number) => (
-                                                    <tr key={idx} className="border-b last:border-0 border-gray-50 dark:border-gray-800">
-                                                        <td className="px-3 py-2">
-                                                            <div className="flex items-center gap-2">
-                                                                {q.icon_url ? (
-                                                                    <img src={q.icon_url.startsWith('http') ? q.icon_url : `${API_BASE}/${q.icon_url}`} alt="" className="w-5 h-5 object-contain" />
-                                                                ) : (
-                                                                    <span className={`material-icons-round text-sm text-${q.color}-500`}>{q.icon}</span>
-                                                                )}
-                                                                <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{q.label.split(' (')[0]}</span>
-                                                            </div>
-                                                        </td>
-                                                        <td className="text-center px-2 py-2 text-xs text-gray-600 dark:text-gray-400">{q.used}</td>
-                                                        <td className="text-center px-2 py-2 text-xs text-gray-600 dark:text-gray-400">{q.total === 0 ? '∞' : q.total}</td>
-                                                        <td className="text-center px-3 py-2">
-                                                            <span className={`text-xs font-bold ${q.remaining < 0 ? 'text-green-600' : q.remaining === 0 ? 'text-red-500' : 'text-primary'}`}>
-                                                                {q.remaining < 0 ? '∞' : q.remaining} {q.unit}
-                                                            </span>
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
+                    {/* Top Row: Quotas Table + Quick Menu side-by-side on Desktop */}
+                    <div className="md:grid md:grid-cols-5 md:gap-6">
+
+                        {/* Quotas — Table on Desktop, Horizontal cards on Mobile */}
+                        <section className="md:col-span-3">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold text-gray-900 dark:text-white">วันลาคงเหลือ</h3>
+                            </div>
+
+                            {/* Mobile: Horizontal scroll cards */}
+                            <div className="flex gap-3 overflow-x-auto pb-3 scrollbar-hide snap-x md:hidden">
+                                {mainQuotas.map((q: any, idx: number) => (
+                                    <div key={idx} className="snap-start min-w-[130px] bg-white dark:bg-gray-800 p-3.5 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-between">
+                                        <div className={`w-9 h-9 rounded-lg bg-${q.color}-100 dark:bg-${q.color}-900/30 flex items-center justify-center mb-2 overflow-hidden`}>
+                                            {q.icon_url ? (
+                                                <img src={q.icon_url.startsWith('http') ? q.icon_url : `${API_BASE}/${q.icon_url}`} alt="" className="w-7 h-7 object-contain" />
+                                            ) : (
+                                                <span className={`material-icons-round text-xl text-${q.color}-600 dark:text-${q.color}-400`}>{q.icon}</span>
+                                            )}
+                                        </div>
+                                        <div>
+                                            <p className="text-2xl font-bold text-gray-900 dark:text-white">{q.remaining < 0 ? '∞' : q.remaining}</p>
+                                            <p className="text-[11px] text-gray-500 dark:text-gray-400 font-medium leading-tight">{q.label.split(' (')[0]}</p>
+                                            <p className="text-[10px] text-gray-400 mt-0.5">ใช้ {q.used}/{q.total} {q.unit}</p>
+                                        </div>
                                     </div>
+                                ))}
+                            </div>
+
+                            {/* Desktop: Compact table for ALL quotas */}
+                            <div className="hidden md:block bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+                                            <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500">ประเภทลา</th>
+                                            <th className="text-center px-2 py-2.5 text-xs font-semibold text-gray-500">ใช้</th>
+                                            <th className="text-center px-2 py-2.5 text-xs font-semibold text-gray-500">ทั้งหมด</th>
+                                            <th className="text-center px-3 py-2.5 text-xs font-semibold text-gray-500">คงเหลือ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {[...mainQuotas, ...otherQuotas].map((q: any, idx: number) => (
+                                            <tr key={idx} className="border-b last:border-0 border-gray-50 dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors">
+                                                <td className="px-3 py-2.5">
+                                                    <div className="flex items-center gap-2">
+                                                        {q.icon_url ? (
+                                                            <img src={q.icon_url.startsWith('http') ? q.icon_url : `${API_BASE}/${q.icon_url}`} alt="" className="w-5 h-5 object-contain" />
+                                                        ) : (
+                                                            <span className={`material-icons-round text-sm text-${q.color}-500`}>{q.icon}</span>
+                                                        )}
+                                                        <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{q.label.split(' (')[0]}</span>
+                                                    </div>
+                                                </td>
+                                                <td className="text-center px-2 py-2.5 text-xs text-gray-600 dark:text-gray-400">{q.used}</td>
+                                                <td className="text-center px-2 py-2.5 text-xs text-gray-600 dark:text-gray-400">{q.total === 0 ? '∞' : q.total}</td>
+                                                <td className="text-center px-3 py-2.5">
+                                                    <span className={`text-xs font-bold ${q.remaining < 0 ? 'text-green-600' : q.remaining === 0 ? 'text-red-500' : 'text-primary'}`}>
+                                                        {q.remaining < 0 ? '∞' : q.remaining} {q.unit}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            {/* Mobile: Other quotas expand */}
+                            {otherQuotas.length > 0 && (
+                                <div className="mt-3 md:hidden">
+                                    <button onClick={() => setShowOtherQuotas(!showOtherQuotas)}
+                                        className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-primary transition-colors">
+                                        <span className="material-icons-round text-sm" style={{ transform: showOtherQuotas ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>expand_more</span>
+                                        วันลาอื่นๆ ({otherQuotas.length})
+                                    </button>
+                                    {showOtherQuotas && (
+                                        <div className="mt-2 bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
+                                            <table className="w-full text-sm">
+                                                <thead>
+                                                    <tr className="border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+                                                        <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500">ประเภท</th>
+                                                        <th className="text-center px-2 py-2 text-xs font-semibold text-gray-500">ใช้</th>
+                                                        <th className="text-center px-2 py-2 text-xs font-semibold text-gray-500">ทั้งหมด</th>
+                                                        <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500">คงเหลือ</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {otherQuotas.map((q: any, idx: number) => (
+                                                        <tr key={idx} className="border-b last:border-0 border-gray-50 dark:border-gray-800">
+                                                            <td className="px-3 py-2">
+                                                                <div className="flex items-center gap-2">
+                                                                    {q.icon_url ? (
+                                                                        <img src={q.icon_url.startsWith('http') ? q.icon_url : `${API_BASE}/${q.icon_url}`} alt="" className="w-5 h-5 object-contain" />
+                                                                    ) : (
+                                                                        <span className={`material-icons-round text-sm text-${q.color}-500`}>{q.icon}</span>
+                                                                    )}
+                                                                    <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{q.label.split(' (')[0]}</span>
+                                                                </div>
+                                                            </td>
+                                                            <td className="text-center px-2 py-2 text-xs text-gray-600 dark:text-gray-400">{q.used}</td>
+                                                            <td className="text-center px-2 py-2 text-xs text-gray-600 dark:text-gray-400">{q.total === 0 ? '∞' : q.total}</td>
+                                                            <td className="text-center px-3 py-2">
+                                                                <span className={`text-xs font-bold ${q.remaining < 0 ? 'text-green-600' : q.remaining === 0 ? 'text-red-500' : 'text-primary'}`}>
+                                                                    {q.remaining < 0 ? '∞' : q.remaining} {q.unit}
+                                                                </span>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </section>
+
+                        {/* Quick Menu — Desktop only (beside quotas) */}
+                        <section className="hidden md:block md:col-span-2">
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">เมนูด่วน</h3>
+                            <div className="grid grid-cols-2 gap-3">
+                                {QUICK_MENU_ITEMS.filter(item => !item.adminOnly || isAdmin).map((item, i) => {
+                                    const action = item.path ? () => navigate(item.path!) : undefined;
+                                    return (
+                                        <button key={i} onClick={action} className="flex flex-row items-center px-3 py-2.5 gap-3 group bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-md transition-all text-left">
+                                            <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 relative">
+                                                <span className="material-icons-round text-primary text-lg">{item.icon}</span>
+                                                {item.hasNotif && (
+                                                    <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white dark:border-gray-800"></span>
+                                                )}
+                                            </div>
+                                            <span className="text-xs font-medium text-gray-600 dark:text-gray-300 group-hover:text-primary transition-colors leading-tight">{item.label}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </section>
+                    </div>
+
+                    {/* Pending Approvals (Approvers + Admin) */}
+                    {pendingCount > 0 && (
+                        <section>
+                            <div className="flex justify-between items-center mb-4">
+                                <div className="flex items-center gap-2">
+                                    <h3 className="text-lg font-bold text-gray-900 dark:text-white">รออนุมัติ</h3>
+                                    <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{pendingCount}</span>
+                                </div>
+                                {pendingCount > 3 && (
+                                    <button onClick={() => setShowAllApprovals(!showAllApprovals)} className="text-sm text-primary font-semibold hover:underline flex items-center gap-1">
+                                        {showAllApprovals ? 'ย่อ' : `ดูทั้งหมด (${pendingCount})`}
+                                        <span className="material-icons-round text-base">{showAllApprovals ? 'expand_less' : 'expand_more'}</span>
+                                    </button>
                                 )}
                             </div>
-                        )}
-                    </section>
+                            <div className="space-y-3">
+                                {([...pendingOT, ...pendingLeave].slice(0, showAllApprovals ? undefined : 3)).map((req: any) => {
+                                    const isOT = req.reason?.startsWith('[OT]');
+                                    return (
+                                        <button key={req.id} onClick={() => openApprovalDetail(req)}
+                                            className="w-full bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-3.5 shadow-sm hover:shadow-md transition-all active:scale-[0.99] text-left">
+                                            <div className="flex items-center gap-3">
+                                                <img src={req.employee_avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(req.employee_name || '')}
+                                                    alt="" className="w-10 h-10 rounded-full object-cover border-2 border-gray-100 dark:border-gray-700 shrink-0" />
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{req.employee_name}</p>
+                                                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${isOT ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : `bg-${req.leave_type_color || 'gray'}-100 dark:bg-${req.leave_type_color || 'gray'}-900/30 text-${req.leave_type_color || 'gray'}-600`}`}>
+                                                            {isOT ? 'OT' : req.leave_type_name}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                                        {req.department || 'ไม่ระบุแผนก'} · {isOT ? `${req.total_days} ชม.` : `${req.total_days} วัน`}
+                                                    </p>
+                                                </div>
+                                                <span className="material-icons-round text-gray-300 dark:text-gray-600 text-lg">chevron_right</span>
+                                            </div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </section>
+                    )}
 
-                    {/* News Feed Preview */}
-                    <section>
+                    {/* News Feed — Mobile only (desktop news is in left column) */}
+                    <section className="md:hidden">
                         <div className="flex justify-between items-center mb-4">
                             <h3 className="text-lg font-bold text-gray-900 dark:text-white">ข่าวประชาสัมพันธ์</h3>
                             <button onClick={() => navigate('/news')} className="text-sm font-medium text-primary hover:text-blue-600">ดูทั้งหมด</button>
                         </div>
-                        <div className="space-y-4 md:grid md:grid-cols-2 md:space-y-0 md:gap-4">
-                            {/* Featured News */}
-                            <div className="bg-white dark:bg-gray-800 rounded-2xl overflow-hidden shadow-sm border border-gray-100 dark:border-gray-700 relative md:col-span-2 group cursor-pointer">
+                        <div className="space-y-4">
+                            <div className="bg-white dark:bg-gray-800 rounded-2xl overflow-hidden shadow-sm border border-gray-100 dark:border-gray-700 relative group cursor-pointer">
                                 <div className="absolute top-3 right-3 z-10 bg-white/90 dark:bg-black/80 backdrop-blur-sm p-1.5 rounded-full shadow-sm">
                                     <span className="material-icons-round text-primary text-sm block">push_pin</span>
                                 </div>
-                                <div className="relative h-40 md:h-56 overflow-hidden">
+                                <div className="relative h-40 overflow-hidden">
                                     {featuredNews && <img alt="News" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" src={featuredNews.image} />}
                                     <div className="absolute top-3 left-3 bg-white/90 dark:bg-black/80 backdrop-blur-sm px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide text-gray-800 dark:text-white">
                                         {featuredNews?.is_pinned ? 'ประกาศสำคัญ' : 'ข่าวสาร'}
@@ -726,21 +860,6 @@ const HomeScreen: React.FC = () => {
                                     </div>
                                     <h4 className="font-bold text-gray-900 dark:text-white mb-2 text-lg">{featuredNews?.title || ''}</h4>
                                     <p className="text-sm text-gray-600 dark:text-gray-300 mb-4 line-clamp-2">{featuredNews?.content || ''}</p>
-                                    <div className="flex items-center justify-between border-t border-gray-100 dark:border-gray-700 pt-3">
-                                        <div className="flex gap-4">
-                                            <button className="flex items-center gap-1.5 text-gray-500 hover:text-primary transition-colors text-sm">
-                                                <span className="material-icons-round text-lg">favorite_border</span>
-                                                <span>{featuredNews?.likes || 0}</span>
-                                            </button>
-                                            <button className="flex items-center gap-1.5 text-gray-500 hover:text-primary transition-colors text-sm">
-                                                <span className="material-icons-round text-lg">chat_bubble_outline</span>
-                                                <span>{featuredNews?.comments || 0}</span>
-                                            </button>
-                                        </div>
-                                        <button className="ml-auto text-gray-400 hover:text-gray-600">
-                                            <span className="material-icons-round">share</span>
-                                        </button>
-                                    </div>
                                 </div>
                             </div>
                         </div>
