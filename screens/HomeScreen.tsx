@@ -557,34 +557,6 @@ const HomeScreen: React.FC = () => {
                         </div>
                     </section>
 
-                    {/* News Feed — Desktop only (in left column per wireframe) */}
-                    <section className="hidden md:block">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold text-gray-900 dark:text-white">ข่าวประชาสัมพันธ์</h3>
-                            <button onClick={() => navigate('/news')} className="text-sm font-medium text-primary hover:text-blue-600">ดูทั้งหมด</button>
-                        </div>
-                        <div className="bg-white dark:bg-gray-800 rounded-2xl overflow-hidden shadow-sm border border-gray-100 dark:border-gray-700 relative group cursor-pointer">
-                            <div className="absolute top-3 right-3 z-10 bg-white/90 dark:bg-black/80 backdrop-blur-sm p-1.5 rounded-full shadow-sm">
-                                <span className="material-icons-round text-primary text-sm block">push_pin</span>
-                            </div>
-                            <div className="relative h-48 overflow-hidden">
-                                {featuredNews && <img alt="News" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" src={featuredNews.image} />}
-                                <div className="absolute top-3 left-3 bg-white/90 dark:bg-black/80 backdrop-blur-sm px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide text-gray-800 dark:text-white">
-                                    {featuredNews?.is_pinned ? 'ประกาศสำคัญ' : 'ข่าวสาร'}
-                                </div>
-                            </div>
-                            <div className="p-4">
-                                <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
-                                    <span className="font-medium text-primary">{featuredNews?.department || ''}</span>
-                                    <span>•</span>
-                                    <span>{featuredNews?.published_at ? new Date(featuredNews.published_at).toLocaleDateString('th-TH') : ''}</span>
-                                </div>
-                                <h4 className="font-bold text-gray-900 dark:text-white mb-2 text-lg">{featuredNews?.title || ''}</h4>
-                                <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2">{featuredNews?.content || ''}</p>
-                            </div>
-                        </div>
-                    </section>
-
                     {/* Quick Menu — Mobile only (desktop version is in right column) */}
                     <section className="md:hidden">
                         <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">เมนูด่วน</h3>
@@ -606,23 +578,72 @@ const HomeScreen: React.FC = () => {
                         </div>
                     </section>
 
-                    {/* Pending Approvals (Approvers + Admin) */}
-                    {pendingCount > 0 && (
-                        <section>
-                            <div className="flex justify-between items-center mb-4">
-                                <div className="flex items-center gap-2">
-                                    <h3 className="text-lg font-bold text-gray-900 dark:text-white">รออนุมัติ</h3>
-                                    <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{pendingCount}</span>
-                                </div>
-                                {pendingCount > 3 && (
-                                    <button onClick={() => setShowAllApprovals(!showAllApprovals)} className="text-sm text-primary font-semibold hover:underline flex items-center gap-1">
-                                        {showAllApprovals ? 'ย่อ' : `ดูทั้งหมด (${pendingCount})`}
-                                        <span className="material-icons-round text-base">{showAllApprovals ? 'expand_less' : 'expand_more'}</span>
-                                    </button>
-                                )}
+                    {/* Pending Approvals — Always visible (Desktop: table in left column) */}
+                    <section>
+                        <div className="flex justify-between items-center mb-4">
+                            <div className="flex items-center gap-2">
+                                <h3 className="text-lg font-bold text-gray-900 dark:text-white">รออนุมัติ</h3>
+                                {pendingCount > 0 && <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{pendingCount}</span>}
                             </div>
-                            <div className="space-y-3">
-                                {([...pendingOT, ...pendingLeave].slice(0, showAllApprovals ? undefined : 3)).map((req: any) => {
+                            {pendingCount > 3 && (
+                                <button onClick={() => setShowAllApprovals(!showAllApprovals)} className="text-sm text-primary font-semibold hover:underline flex items-center gap-1">
+                                    {showAllApprovals ? 'ย่อ' : `ดูทั้งหมด (${pendingCount})`}
+                                    <span className="material-icons-round text-base">{showAllApprovals ? 'expand_less' : 'expand_more'}</span>
+                                </button>
+                            )}
+                        </div>
+
+                        {/* Desktop: Symmetrical table */}
+                        <div className="hidden md:block bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
+                            {pendingCount > 0 ? (
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+                                            <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500">พนักงาน</th>
+                                            <th className="text-center px-2 py-2.5 text-xs font-semibold text-gray-500">ประเภท</th>
+                                            <th className="text-center px-2 py-2.5 text-xs font-semibold text-gray-500">จำนวน</th>
+                                            <th className="text-center px-3 py-2.5 text-xs font-semibold text-gray-500">ดำเนินการ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {([...pendingOT, ...pendingLeave].slice(0, showAllApprovals ? undefined : 5)).map((req: any) => {
+                                            const isOT = req.reason?.startsWith('[OT]');
+                                            return (
+                                                <tr key={req.id} className="border-b last:border-0 border-gray-50 dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors cursor-pointer" onClick={() => openApprovalDetail(req)}>
+                                                    <td className="px-3 py-2.5">
+                                                        <div className="flex items-center gap-2">
+                                                            <img src={req.employee_avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(req.employee_name || '')} alt="" className="w-6 h-6 rounded-full object-cover" />
+                                                            <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{req.employee_name}</span>
+                                                        </div>
+                                                    </td>
+                                                    <td className="text-center px-2 py-2.5">
+                                                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${isOT ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : `bg-${req.leave_type_color || 'gray'}-100 dark:bg-${req.leave_type_color || 'gray'}-900/30 text-${req.leave_type_color || 'gray'}-600`}`}>
+                                                            {isOT ? 'OT' : req.leave_type_name}
+                                                        </span>
+                                                    </td>
+                                                    <td className="text-center px-2 py-2.5 text-xs text-gray-600 dark:text-gray-400">
+                                                        {isOT ? `${req.total_days} ชม.` : `${req.total_days} วัน`}
+                                                    </td>
+                                                    <td className="text-center px-3 py-2.5">
+                                                        <span className="material-icons-round text-primary text-base">open_in_new</span>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            ) : (
+                                <div className="py-8 text-center">
+                                    <span className="material-icons-round text-3xl text-gray-300 dark:text-gray-600 mb-2 block">check_circle_outline</span>
+                                    <p className="text-sm text-gray-400 dark:text-gray-500">ไม่มีผู้ขออนุมัติลา</p>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Mobile: Card list */}
+                        <div className="md:hidden space-y-3">
+                            {pendingCount > 0 ? (
+                                ([...pendingOT, ...pendingLeave].slice(0, showAllApprovals ? undefined : 3)).map((req: any) => {
                                     const isOT = req.reason?.startsWith('[OT]');
                                     return (
                                         <button key={req.id} onClick={() => openApprovalDetail(req)}
@@ -645,17 +666,22 @@ const HomeScreen: React.FC = () => {
                                             </div>
                                         </button>
                                     );
-                                })}
-                            </div>
-                        </section>
-                    )}
+                                })
+                            ) : (
+                                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-6 text-center">
+                                    <span className="material-icons-round text-3xl text-gray-300 dark:text-gray-600 mb-2 block">check_circle_outline</span>
+                                    <p className="text-sm text-gray-400 dark:text-gray-500">ไม่มีผู้ขออนุมัติลา</p>
+                                </div>
+                            )}
+                        </div>
+                    </section>
                 </div>
 
                 {/* Right Column — Quotas + Quick Menu (side by side) + Approvals */}
                 <div className="md:col-span-7 lg:col-span-8 space-y-6">
 
-                    {/* Top Row: Quotas Table + Quick Menu side-by-side on Desktop */}
-                    <div className="md:grid md:grid-cols-5 md:gap-6">
+                    {/* Top Row: Quotas Table + Quick Menu side-by-side on Desktop — items-start aligns top edges */}
+                    <div className="md:grid md:grid-cols-5 md:gap-6 md:items-start">
 
                         {/* Quotas — Table on Desktop, Horizontal cards on Mobile */}
                         <section className="md:col-span-3">
@@ -791,76 +817,30 @@ const HomeScreen: React.FC = () => {
                         </section>
                     </div>
 
-                    {/* Pending Approvals (Approvers + Admin) */}
-                    {pendingCount > 0 && (
-                        <section>
-                            <div className="flex justify-between items-center mb-4">
-                                <div className="flex items-center gap-2">
-                                    <h3 className="text-lg font-bold text-gray-900 dark:text-white">รออนุมัติ</h3>
-                                    <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{pendingCount}</span>
-                                </div>
-                                {pendingCount > 3 && (
-                                    <button onClick={() => setShowAllApprovals(!showAllApprovals)} className="text-sm text-primary font-semibold hover:underline flex items-center gap-1">
-                                        {showAllApprovals ? 'ย่อ' : `ดูทั้งหมด (${pendingCount})`}
-                                        <span className="material-icons-round text-base">{showAllApprovals ? 'expand_less' : 'expand_more'}</span>
-                                    </button>
-                                )}
-                            </div>
-                            <div className="space-y-3">
-                                {([...pendingOT, ...pendingLeave].slice(0, showAllApprovals ? undefined : 3)).map((req: any) => {
-                                    const isOT = req.reason?.startsWith('[OT]');
-                                    return (
-                                        <button key={req.id} onClick={() => openApprovalDetail(req)}
-                                            className="w-full bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-3.5 shadow-sm hover:shadow-md transition-all active:scale-[0.99] text-left">
-                                            <div className="flex items-center gap-3">
-                                                <img src={req.employee_avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(req.employee_name || '')}
-                                                    alt="" className="w-10 h-10 rounded-full object-cover border-2 border-gray-100 dark:border-gray-700 shrink-0" />
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex items-center gap-2">
-                                                        <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{req.employee_name}</p>
-                                                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${isOT ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : `bg-${req.leave_type_color || 'gray'}-100 dark:bg-${req.leave_type_color || 'gray'}-900/30 text-${req.leave_type_color || 'gray'}-600`}`}>
-                                                            {isOT ? 'OT' : req.leave_type_name}
-                                                        </span>
-                                                    </div>
-                                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                                                        {req.department || 'ไม่ระบุแผนก'} · {isOT ? `${req.total_days} ชม.` : `${req.total_days} วัน`}
-                                                    </p>
-                                                </div>
-                                                <span className="material-icons-round text-gray-300 dark:text-gray-600 text-lg">chevron_right</span>
-                                            </div>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        </section>
-                    )}
-
-                    {/* News Feed — Mobile only (desktop news is in left column) */}
-                    <section className="md:hidden">
+                    {/* News Feed — in right column on desktop, bottom on mobile */}
+                    <section>
                         <div className="flex justify-between items-center mb-4">
                             <h3 className="text-lg font-bold text-gray-900 dark:text-white">ข่าวประชาสัมพันธ์</h3>
                             <button onClick={() => navigate('/news')} className="text-sm font-medium text-primary hover:text-blue-600">ดูทั้งหมด</button>
                         </div>
-                        <div className="space-y-4">
-                            <div className="bg-white dark:bg-gray-800 rounded-2xl overflow-hidden shadow-sm border border-gray-100 dark:border-gray-700 relative group cursor-pointer">
-                                <div className="absolute top-3 right-3 z-10 bg-white/90 dark:bg-black/80 backdrop-blur-sm p-1.5 rounded-full shadow-sm">
-                                    <span className="material-icons-round text-primary text-sm block">push_pin</span>
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl overflow-hidden shadow-sm border border-gray-100 dark:border-gray-700 relative group cursor-pointer">
+                            <div className="absolute top-3 right-3 z-10 bg-white/90 dark:bg-black/80 backdrop-blur-sm p-1.5 rounded-full shadow-sm">
+                                <span className="material-icons-round text-primary text-sm block">push_pin</span>
+                            </div>
+                            <div className="relative h-40 md:h-48 overflow-hidden">
+                                {featuredNews && <img alt="News" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" src={featuredNews.image} />}
+                                <div className="absolute top-3 left-3 bg-white/90 dark:bg-black/80 backdrop-blur-sm px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide text-gray-800 dark:text-white">
+                                    {featuredNews?.is_pinned ? 'ประกาศสำคัญ' : 'ข่าวสาร'}
                                 </div>
-                                <div className="relative h-40 overflow-hidden">
-                                    {featuredNews && <img alt="News" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" src={featuredNews.image} />}
-                                    <div className="absolute top-3 left-3 bg-white/90 dark:bg-black/80 backdrop-blur-sm px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide text-gray-800 dark:text-white">
-                                        {featuredNews?.is_pinned ? 'ประกาศสำคัญ' : 'ข่าวสาร'}
-                                    </div>
+                            </div>
+                            <div className="p-4">
+                                <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
+                                    <span className="font-medium text-primary">{featuredNews?.department || ''}</span>
+                                    <span>•</span>
+                                    <span>{featuredNews?.published_at ? new Date(featuredNews.published_at).toLocaleDateString('th-TH') : ''}</span>
                                 </div>
-                                <div className="p-4">
-                                    <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
-                                        <span className="font-medium text-primary">{featuredNews?.department || ''}</span>
-                                        <span>•</span>
-                                        <span>{featuredNews?.published_at ? new Date(featuredNews.published_at).toLocaleDateString('th-TH') : ''}</span>
-                                    </div>
-                                    <h4 className="font-bold text-gray-900 dark:text-white mb-2 text-lg">{featuredNews?.title || ''}</h4>
-                                    <p className="text-sm text-gray-600 dark:text-gray-300 mb-4 line-clamp-2">{featuredNews?.content || ''}</p>
-                                </div>
+                                <h4 className="font-bold text-gray-900 dark:text-white mb-2 text-lg">{featuredNews?.title || ''}</h4>
+                                <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2">{featuredNews?.content || ''}</p>
                             </div>
                         </div>
                     </section>
