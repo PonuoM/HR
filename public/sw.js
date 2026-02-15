@@ -1,5 +1,5 @@
 // HR Connect — Service Worker
-const CACHE_NAME = 'hr-connect-v1';
+const CACHE_NAME = 'hr-connect-v2';
 const STATIC_ASSETS = [
     '/',
     '/index.html',
@@ -24,7 +24,7 @@ self.addEventListener('activate', (event) => {
     self.clients.claim();
 });
 
-// Fetch: Network-first for API, Cache-first for assets
+// Fetch: Network-first for everything (always try fresh content)
 self.addEventListener('fetch', (event) => {
     const url = new URL(event.request.url);
 
@@ -33,19 +33,17 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
+    // Network-first: try network, fall back to cache if offline
     event.respondWith(
-        caches.match(event.request).then((cached) => {
-            const fetched = fetch(event.request).then((response) => {
-                // Cache successful responses
+        fetch(event.request)
+            .then((response) => {
                 if (response.ok) {
                     const clone = response.clone();
                     caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
                 }
                 return response;
-            }).catch(() => cached); // Offline fallback to cache
-
-            return cached || fetched;
-        })
+            })
+            .catch(() => caches.match(event.request))
     );
 });
 
