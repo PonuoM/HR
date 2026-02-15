@@ -22,6 +22,7 @@ const HomeScreen: React.FC = () => {
     const [approvalDetail, setApprovalDetail] = useState<any>(null);
     const [approvalAttachments, setApprovalAttachments] = useState<any[]>([]);
     const [approvalLoading, setApprovalLoading] = useState<string | null>(null);
+    const [showAllApprovals, setShowAllApprovals] = useState(false);
 
     // Live clock + greeting
     const [now, setNow] = useState(new Date());
@@ -38,6 +39,17 @@ const HomeScreen: React.FC = () => {
         if (empId) {
             subscribeToPush(empId).catch(() => { });
         }
+    }, [empId]);
+
+    // Auto-refresh: poll notifications + pending requests every 30 seconds
+    useEffect(() => {
+        if (!empId) return;
+        const interval = setInterval(() => {
+            refetchNotifs();
+            refetchPending();
+            refetchAttendance();
+        }, 30000);
+        return () => clearInterval(interval);
     }, [empId]);
 
     // Fetch data from API
@@ -575,9 +587,15 @@ const HomeScreen: React.FC = () => {
                                     <h3 className="text-lg font-bold text-gray-900 dark:text-white">รออนุมัติ</h3>
                                     <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{pendingCount}</span>
                                 </div>
+                                {pendingCount > 3 && (
+                                    <button onClick={() => setShowAllApprovals(!showAllApprovals)} className="text-sm text-primary font-semibold hover:underline flex items-center gap-1">
+                                        {showAllApprovals ? 'ย่อ' : `ดูทั้งหมด (${pendingCount})`}
+                                        <span className="material-icons-round text-base">{showAllApprovals ? 'expand_less' : 'expand_more'}</span>
+                                    </button>
+                                )}
                             </div>
-                            <div className="space-y-3 max-h-[400px] overflow-y-auto scrollbar-hide pr-1">
-                                {[...pendingOT, ...pendingLeave].map((req: any) => {
+                            <div className="space-y-3">
+                                {([...pendingOT, ...pendingLeave].slice(0, showAllApprovals ? undefined : 3)).map((req: any) => {
                                     const isOT = req.reason?.startsWith('[OT]');
                                     return (
                                         <button key={req.id} onClick={() => openApprovalDetail(req)}
