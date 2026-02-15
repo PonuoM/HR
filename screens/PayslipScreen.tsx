@@ -1,14 +1,30 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Payslip } from '../types';
 import { useApi } from '../hooks/useApi';
 import { getPayslips } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
+const SEEN_KEY = 'hr_payslips_seen';
+
+const getSeenIds = (): Set<string> => {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(SEEN_KEY) || '[]'));
+  } catch { return new Set(); }
+};
+
+const markSeen = (id: string): Set<string> => {
+  const seen = getSeenIds();
+  seen.add(id);
+  localStorage.setItem(SEEN_KEY, JSON.stringify([...seen]));
+  return seen;
+};
+
 const PayslipScreen: React.FC = () => {
   const navigate = useNavigate();
   const { user: authUser } = useAuth();
   const [selectedSlip, setSelectedSlip] = useState<Payslip | null>(null);
+  const [seenIds, setSeenIds] = useState<Set<string>>(getSeenIds);
   const { data: rawPayslips, loading } = useApi(() => getPayslips(authUser?.id || ''), [authUser?.id]);
 
   // Map DB fields to frontend Payslip type
@@ -23,6 +39,15 @@ const PayslipScreen: React.FC = () => {
     sentAt: p.sent_at,
     imageUrl: p.image_url,
   }));
+
+  const handleSlipClick = useCallback((slip: Payslip) => {
+    setSelectedSlip(slip);
+    // Mark as seen in localStorage
+    const updated = markSeen(slip.id);
+    setSeenIds(new Set(updated));
+  }, []);
+
+  const isNew = (slip: Payslip) => !seenIds.has(slip.id);
 
   return (
     <div className="flex flex-col h-full bg-background-light dark:bg-background-dark relative">
@@ -48,39 +73,42 @@ const PayslipScreen: React.FC = () => {
         {/* List by Year */}
         <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3 ml-1">ปี 2024</h2>
         <div className="space-y-3">
-          {payslips.map((slip) => (
-            <button
-              key={slip.id}
-              onClick={() => setSelectedSlip(slip)}
-              className="w-full bg-white dark:bg-gray-800 rounded-2xl p-4 flex items-center justify-between shadow-sm border border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all group relative overflow-hidden"
-            >
-              {/* New Indicator */}
-              {slip.status === 'new' && (
-                <div className="absolute top-0 right-0">
-                  <div className="bg-red-500 text-white text-[9px] font-bold px-2 py-1 rounded-bl-lg shadow-sm">ใหม่</div>
-                </div>
-              )}
-
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl bg-gray-100 dark:bg-gray-700 flex flex-col items-center justify-center border border-gray-200 dark:border-gray-600 shrink-0">
-                  <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">{slip.month}</span>
-                  <span className="material-icons-round text-gray-400 text-lg">receipt</span>
-                </div>
-                <div className="text-left">
-                  <p className="font-bold text-gray-900 dark:text-white text-base">เงินเดือน {slip.month}</p>
-                  <p className="text-xs text-gray-500">ส่งเมื่อ: {new Date(slip.sentAt).toLocaleDateString('th-TH')}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                {slip.status === 'read' ? (
-                  <span className="material-icons-round text-green-500 text-lg">check_circle</span>
-                ) : (
-                  <span className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></span>
+          {payslips.map((slip) => {
+            const slipIsNew = isNew(slip);
+            return (
+              <button
+                key={slip.id}
+                onClick={() => handleSlipClick(slip)}
+                className="w-full bg-white dark:bg-gray-800 rounded-2xl p-4 flex items-center justify-between shadow-sm border border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all group relative overflow-hidden"
+              >
+                {/* New Indicator */}
+                {slipIsNew && (
+                  <div className="absolute top-0 right-0">
+                    <div className="bg-red-500 text-white text-[9px] font-bold px-2 py-1 rounded-bl-lg shadow-sm">ใหม่</div>
+                  </div>
                 )}
-                <span className="material-icons-round text-gray-300 group-hover:text-primary transition-colors">chevron_right</span>
-              </div>
-            </button>
-          ))}
+
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-gray-100 dark:bg-gray-700 flex flex-col items-center justify-center border border-gray-200 dark:border-gray-600 shrink-0">
+                    <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">{slip.month}</span>
+                    <span className="material-icons-round text-gray-400 text-lg">receipt</span>
+                  </div>
+                  <div className="text-left">
+                    <p className="font-bold text-gray-900 dark:text-white text-base">เงินเดือน {slip.month}</p>
+                    <p className="text-xs text-gray-500">ส่งเมื่อ: {new Date(slip.sentAt).toLocaleDateString('th-TH')}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  {slipIsNew ? (
+                    <span className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></span>
+                  ) : (
+                    <span className="material-icons-round text-green-500 text-lg">check_circle</span>
+                  )}
+                  <span className="material-icons-round text-gray-300 group-hover:text-primary transition-colors">chevron_right</span>
+                </div>
+              </button>
+            );
+          })}
         </div>
       </main>
 

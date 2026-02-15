@@ -17,7 +17,7 @@ export const LEAVE_QUOTAS: LeaveQuota[] = [
 /** Quick menu items on home screen */
 export const QUICK_MENU_ITEMS: QuickMenuItem[] = [
     { icon: 'event_available', label: 'ยื่นคำขอ', path: '/request/create' },
-    { icon: 'receipt_long', label: 'สลิปเงินเดือน', path: '/payslips', hasNotif: true },
+    { icon: 'receipt_long', label: 'สลิปเงินเดือน', path: '/payslips' },
     { icon: 'groups', label: 'ทีมของฉัน', path: '/admin/employees', adminOnly: true },
     { icon: 'calendar_month', label: 'ปฏิทิน', path: '/calendar' },
 ];
