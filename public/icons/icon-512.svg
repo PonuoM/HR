@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1e94f8"/>
+      <stop offset="100%" stop-color="#0b62c4"/>
+    </linearGradient>
+    <linearGradient id="leaf1" x1="0" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#8bc34a"/>
+      <stop offset="100%" stop-color="#689f38"/>
+    </linearGradient>
+    <linearGradient id="leaf2" x1="0.5" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#8bc34a"/>
+      <stop offset="100%" stop-color="#689f38"/>
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="115%" height="115%">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+  <!-- Background rounded square -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- Subtle inner glow -->
+  <rect width="512" height="512" rx="112" fill="none" stroke="white" stroke-width="1" opacity="0.1"/>
+
+  <!-- PP Logo - white on blue -->
+  <g transform="translate(256, 230)" filter="url(#shadow)">
+    <!-- Left P (mirrored) -->
+    <g transform="translate(-108, -100)">
+      <!-- Vertical bar -->
+      <rect x="72" y="0" width="36" height="200" rx="4" fill="white" opacity="0.95"/>
+      <!-- P curve (reversed/left-facing) -->
+      <path d="M72 4 L72 4 Q72 0 68 0 L20 0 Q-40 0 -40 60 Q-40 120 20 120 L68 120 Q72 120 72 116" 
+            fill="white" opacity="0.95" stroke="none"/>
+      <!-- Left green leaf -->
+      <path d="M10 30 Q-10 70 30 100 Q60 70 40 30 Q30 10 10 30 Z" 
+            fill="url(#leaf1)"/>
+      <!-- Leaf vein -->
+      <path d="M25 40 Q22 65 30 90" fill="none" stroke="white" stroke-width="2.5" opacity="0.6"/>
+    </g>
+    
+    <!-- Right P -->
+    <g transform="translate(0, -100)">
+      <!-- Vertical bar -->
+      <rect x="0" y="0" width="36" height="200" rx="4" fill="white" opacity="0.95"/>
+      <!-- P curve (right-facing) -->
+      <path d="M36 4 L36 4 Q36 0 40 0 L88 0 Q148 0 148 60 Q148 120 88 120 L40 120 Q36 120 36 116" 
+            fill="white" opacity="0.95" stroke="none"/>
+      <!-- Right green leaf -->
+      <path d="M98 30 Q118 70 78 100 Q48 70 68 30 Q78 10 98 30 Z" 
+            fill="url(#leaf2)"/>
+      <!-- Leaf vein -->
+      <path d="M83 40 Q86 65 78 90" fill="none" stroke="white" stroke-width="2.5" opacity="0.6"/>
+    </g>
+  </g>
+
+  <!-- "HR" small text at bottom -->
+  <text x="256" y="370" text-anchor="middle" font-family="sans-serif" font-weight="600" font-size="28" fill="white" opacity="0.7" letter-spacing="6">HR CONNECT</text>
+</svg>
