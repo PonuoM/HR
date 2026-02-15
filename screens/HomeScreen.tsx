@@ -404,8 +404,7 @@ const HomeScreen: React.FC = () => {
                                                 <button
                                                     onClick={() => {
                                                         if (!notif.isRead) markAsRead(notif.id);
-                                                        if (notif.type === 'leave') navigate('/request/create');
-                                                        else if (notif.type === 'payslip') navigate('/payslips');
+                                                        if (notif.type === 'payslip') navigate('/payslips');
                                                         else if (notif.type === 'news') navigate('/news');
                                                         setShowNotifications(false);
                                                     }}
