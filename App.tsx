@@ -9,6 +9,8 @@ import LoginScreen from './screens/LoginScreen';
 import HomeScreen from './screens/HomeScreen';
 import CreateRequestScreen from './screens/CreateRequestScreen';
 import StatusScreen from './screens/StatusScreen';
+import LeaveHistoryScreen from './screens/LeaveHistoryScreen';
+import LeaveApprovalScreen from './screens/LeaveApprovalScreen';
 import NewsScreen from './screens/NewsScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import PayslipScreen from './screens/PayslipScreen';
@@ -115,6 +117,8 @@ const App: React.FC = () => {
                       <Route path="/news" element={<NewsScreen />} />
                       <Route path="/request/create" element={<CreateRequestScreen />} />
                       <Route path="/request/status/:id" element={<StatusScreen />} />
+                      <Route path="/leave/history" element={<LeaveHistoryScreen />} />
+                      <Route path="/leave/approvals" element={<LeaveApprovalScreen />} />
                       <Route path="/profile" element={<ProfileScreen />} />
 
                       {/* Employee Payslips */}

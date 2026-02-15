@@ -120,8 +120,9 @@ export async function deleteNotification(id: number) {
 }
 
 // --- News ---
-export async function getNews() {
-    return fetchApi<any[]>('news.php');
+export async function getNews(employeeId?: string) {
+    const qs = employeeId ? `?employee_id=${employeeId}` : '';
+    return fetchApi<any[]>(`news.php${qs}`);
 }
 
 export async function createNewsArticle(data: any) {
@@ -134,6 +135,28 @@ export async function updateNewsArticle(id: number, data: any) {
 
 export async function deleteNewsArticle(id: number) {
     return fetchApi<any>(`news.php?id=${id}`, { method: 'DELETE' });
+}
+
+export async function toggleNewsLike(articleId: number, employeeId: string) {
+    return fetchApi<{ liked: boolean }>(`news.php?action=like&id=${articleId}`, {
+        method: 'POST',
+        body: JSON.stringify({ employee_id: employeeId }),
+    });
+}
+
+export async function getNewsComments(articleId: number) {
+    return fetchApi<any[]>(`news.php?action=comments&id=${articleId}`);
+}
+
+export async function addNewsComment(articleId: number, employeeId: string, content: string) {
+    return fetchApi<any>(`news.php?action=comment&id=${articleId}`, {
+        method: 'POST',
+        body: JSON.stringify({ employee_id: employeeId, content }),
+    });
+}
+
+export async function deleteNewsComment(commentId: number) {
+    return fetchApi<any>(`news.php?action=comment&id=${commentId}`, { method: 'DELETE' });
 }
 
 // --- Payslips ---
