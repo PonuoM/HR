@@ -319,7 +319,7 @@ const AdminHolidayScreen: React.FC = () => {
 
             {/* ═══ ADD/EDIT MODAL ═══ */}
             {showForm && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowForm(false)}>
+                <div className="fixed inset-0 z-50 flex items-start pt-[10vh] justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowForm(false)}>
                     <div className="bg-white dark:bg-gray-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-scale-in" onClick={e => e.stopPropagation()}>
                         <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
                             <h2 className="text-lg font-bold text-gray-900 dark:text-white">
