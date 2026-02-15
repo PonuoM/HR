@@ -155,54 +155,38 @@ const HomeScreen: React.FC = () => {
     const [pendingAction, setPendingAction] = useState<'clock_in' | 'clock_out'>('clock_in');
     const [confirmLoading, setConfirmLoading] = useState(false);
 
-    // Location permission states
-    const [showLocationGuide, setShowLocationGuide] = useState(false);
-    const [locationPermState, setLocationPermState] = useState<'prompt' | 'granted' | 'denied' | 'unknown'>('unknown');
     const [gpsLoading, setGpsLoading] = useState(false);
-
-    const checkLocationPermission = async (): Promise<'prompt' | 'granted' | 'denied' | 'unknown'> => {
-        try {
-            if (navigator.permissions) {
-                const perm = await navigator.permissions.query({ name: 'geolocation' });
-                return perm.state as any;
-            }
-        } catch { /* */ }
-        return 'unknown';
-    };
 
     const getCurrentPosition = (): Promise<{ latitude: number; longitude: number }> => {
         return new Promise((resolve, reject) => {
             if (!navigator.geolocation) {
-                reject(new Error('NO_GPS'));
+                reject(new Error('เบราว์เซอร์ไม่รองรับ GPS'));
                 return;
             }
+
+            // Try high accuracy first
             navigator.geolocation.getCurrentPosition(
                 (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
-                (err) => reject(new Error(err.code === 1 ? 'DENIED' : err.code === 2 ? 'GPS_OFF' : 'TIMEOUT')),
-                { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+                (highAccErr) => {
+                    // If high accuracy failed, try low accuracy as fallback
+                    if (highAccErr.code === 2 || highAccErr.code === 3) {
+                        navigator.geolocation.getCurrentPosition(
+                            (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+                            (lowAccErr) => reject(lowAccErr),
+                            { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
+                        );
+                    } else {
+                        reject(highAccErr);
+                    }
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
             );
         });
     };
 
-    // Step 1: Check permission → show guide OR proceed directly
+    // Clock action: just call getCurrentPosition directly — browser auto-prompts for permission
     const handleClockAction = async () => {
         if (clockStatus === 'completed' || clockLoading) return;
-
-        const permState = await checkLocationPermission();
-        setLocationPermState(permState);
-
-        // If granted or unknown, try immediately
-        if (permState === 'granted') {
-            await proceedWithLocation();
-        } else {
-            // Show guide modal first (for both 'prompt' and 'denied')
-            setShowLocationGuide(true);
-        }
-    };
-
-    // Step 2: User taps "ตกลง" in guide modal → actually request GPS
-    const proceedWithLocation = async () => {
-        setShowLocationGuide(false);
         setClockLoading(true);
         setGpsLoading(true);
         try {
@@ -215,13 +199,13 @@ const HomeScreen: React.FC = () => {
             setShowLocationModal(true);
         } catch (err: any) {
             setGpsLoading(false);
-            if (err.message === 'DENIED') {
-                setLocationPermState('denied');
-                setShowLocationGuide(true);
-            } else if (err.message === 'GPS_OFF') {
-                toast('กรุณาเปิด GPS บนเครื่องก่อน', 'error');
+            if (err.code === 1) {
+                // Permission denied OR Location Services off
+                toast('ไม่สามารถเข้าถึงตำแหน่งได้ กรุณาเปิด Location/GPS ในตั้งค่าเครื่อง แล้วลองใหม่', 'error');
+            } else if (err.code === 2) {
+                toast('ไม่พบตำแหน่ง กรุณาเปิด GPS แล้วลองใหม่', 'error');
             } else {
-                toast('ดึงตำแหน่งไม่สำเร็จ กรุณาลองใหม่', 'error');
+                toast('ดึงตำแหน่งไม่สำเร็จ กรุณาลองใหม่อีกครั้ง', 'error');
             }
         } finally {
             setClockLoading(false);
@@ -742,68 +726,7 @@ const HomeScreen: React.FC = () => {
                 />
             )}
 
-            {/* Location Permission Guide Modal */}
-            {showLocationGuide && (
-                <>
-                    <div className="fixed inset-0 bg-black/50 z-[9990]" onClick={() => setShowLocationGuide(false)} />
-                    <div className="fixed inset-0 z-[9991] flex items-end sm:items-center justify-center p-4">
-                        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" style={{ animation: 'notifSlideIn 0.2s ease-out' }}>
-                            <div className="p-6 text-center">
-                                {locationPermState === 'denied' ? (
-                                    <>
-                                        <div className="w-16 h-16 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mx-auto mb-4">
-                                            <span className="material-icons-round text-3xl text-red-500">location_off</span>
-                                        </div>
-                                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">สิทธิ์ตำแหน่งถูกปิด</h3>
-                                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">เคยกด "ไม่อนุญาต" ไปก่อนหน้า ต้องรีเซ็ตสิทธิ์ในเบราว์เซอร์</p>
-                                        <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-4 text-left mb-4">
-                                            <p className="text-xs font-bold text-amber-700 dark:text-amber-400 mb-2">📱 วิธีเปิดสิทธิ์:</p>
-                                            <ol className="text-xs text-amber-700 dark:text-amber-400 space-y-1.5 list-decimal list-inside">
-                                                <li>เปิดแอป <strong>Chrome</strong></li>
-                                                <li>ไปที่ <strong>hr.prima49.com</strong></li>
-                                                <li>กดไอคอน <strong>🔒 ข้างช่อง URL</strong></li>
-                                                <li>กด <strong>"สิทธิ์"</strong> หรือ <strong>"Permissions"</strong></li>
-                                                <li>กด <strong>"ตำแหน่ง"</strong> → เปลี่ยนเป็น <strong>"อนุญาต"</strong></li>
-                                                <li>กลับมากดลงเวลาอีกครั้ง</li>
-                                            </ol>
-                                        </div>
-                                    </>
-                                ) : (
-                                    <>
-                                        <div className="w-16 h-16 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center mx-auto mb-4">
-                                            <span className="material-icons-round text-3xl text-primary">location_on</span>
-                                        </div>
-                                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">ต้องการเข้าถึงตำแหน่ง</h3>
-                                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">ระบบต้องตรวจสอบว่าคุณอยู่ในพื้นที่ทำงานก่อนลงเวลา</p>
-                                        <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 mb-4">
-                                            <p className="text-xs text-blue-600 dark:text-blue-400">
-                                                💡 เมื่อกด "ตกลง" เบราว์เซอร์จะถามสิทธิ์ —<br />กรุณากด <strong>"อนุญาต" / "Allow"</strong>
-                                            </p>
-                                        </div>
-                                    </>
-                                )}
-                            </div>
-                            <div className="px-6 pb-6 flex gap-3">
-                                <button
-                                    onClick={() => setShowLocationGuide(false)}
-                                    className="flex-1 py-3 rounded-xl bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 font-semibold text-sm"
-                                >
-                                    ยกเลิก
-                                </button>
-                                {locationPermState !== 'denied' && (
-                                    <button
-                                        onClick={proceedWithLocation}
-                                        className="flex-1 py-3 rounded-xl bg-primary text-white font-semibold text-sm shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
-                                    >
-                                        <span className="material-icons-round text-lg">check_circle</span>
-                                        ตกลง
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                </>
-            )}
+
 
             {/* Location Check Modal */}
             {showLocationModal && locationResult && (
