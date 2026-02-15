@@ -3,7 +3,8 @@ import ReactDOM from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { QUICK_MENU_ITEMS } from '../data';
 import { useApi } from '../hooks/useApi';
-import { API_BASE, getNotifications, getLeaveQuotas, getAttendance, getNews, getEmployee, markNotificationRead, markAllNotificationsRead, deleteNotification, clockIn, clockOut, getLeaveRequests, updateLeaveRequest, getUploads } from '../services/api';
+import { API_BASE, getNotifications, getLeaveQuotas, getAttendance, getNews, getEmployee, markNotificationRead, markAllNotificationsRead, deleteNotification, clockIn, clockOut, checkLocation, getLeaveRequests, updateLeaveRequest, getUploads } from '../services/api';
+import LocationCheckModal from '../components/LocationCheckModal';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -148,6 +149,11 @@ const HomeScreen: React.FC = () => {
 
     // Clock-in/out handler
     const [clockLoading, setClockLoading] = useState(false);
+    const [showLocationModal, setShowLocationModal] = useState(false);
+    const [locationResult, setLocationResult] = useState<{ matched: boolean; location_name: string; distance: number } | null>(null);
+    const [pendingCoords, setPendingCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+    const [pendingAction, setPendingAction] = useState<'clock_in' | 'clock_out'>('clock_in');
+    const [confirmLoading, setConfirmLoading] = useState(false);
 
     const getCurrentPosition = (): Promise<{ latitude: number; longitude: number }> => {
         return new Promise((resolve, reject) => {
@@ -163,21 +169,40 @@ const HomeScreen: React.FC = () => {
         });
     };
 
+    // Step 1: Get GPS → check location → show modal
     const handleClockAction = async () => {
         if (clockStatus === 'completed' || clockLoading) return;
         setClockLoading(true);
         try {
             const coords = await getCurrentPosition();
-            if (clockStatus === 'not_clocked_in') {
-                await clockIn({ employee_id: empId, latitude: coords.latitude, longitude: coords.longitude });
-            } else if (clockStatus === 'clocked_in' && todayRecord?.id) {
-                await clockOut(Number(todayRecord.id), coords);
-            }
-            refetchAttendance();
+            const result = await checkLocation(coords.latitude, coords.longitude);
+            setPendingCoords(coords);
+            setPendingAction(clockStatus === 'not_clocked_in' ? 'clock_in' : 'clock_out');
+            setLocationResult(result);
+            setShowLocationModal(true);
         } catch (err: any) {
             toast(err.message || 'เกิดข้อผิดพลาด', 'error');
         } finally {
             setClockLoading(false);
+        }
+    };
+
+    // Step 2: User confirms in modal → actually record
+    const handleConfirmClock = async () => {
+        if (!pendingCoords) return;
+        setConfirmLoading(true);
+        try {
+            if (pendingAction === 'clock_in') {
+                await clockIn({ employee_id: empId, latitude: pendingCoords.latitude, longitude: pendingCoords.longitude });
+            } else if (todayRecord?.id) {
+                await clockOut(Number(todayRecord.id), pendingCoords);
+            }
+            setShowLocationModal(false);
+            refetchAttendance();
+        } catch (err: any) {
+            toast(err.message || 'เกิดข้อผิดพลาด', 'error');
+        } finally {
+            setConfirmLoading(false);
         }
     };
 
@@ -673,6 +698,17 @@ const HomeScreen: React.FC = () => {
                     loading={approvalLoading}
                     isAdmin={isAdmin}
                     empId={empId}
+                />
+            )}
+
+            {/* Location Check Modal */}
+            {showLocationModal && locationResult && (
+                <LocationCheckModal
+                    result={locationResult}
+                    action={pendingAction}
+                    loading={confirmLoading}
+                    onConfirm={handleConfirmClock}
+                    onClose={() => setShowLocationModal(false)}
                 />
             )}
 
