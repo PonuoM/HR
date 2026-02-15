@@ -114,7 +114,7 @@ const LoginScreen: React.FC = () => {
                                 <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-1 hidden md:block">เข้าสู่ระบบ</h3>
                                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 hidden md:block">กรอกข้อมูลเพื่อเข้าใช้งาน</p>
 
-                                <form onSubmit={handleSubmit} className="space-y-4">
+                                <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
                                     {/* Employee ID */}
                                     <div>
                                         <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">
@@ -128,7 +128,7 @@ const LoginScreen: React.FC = () => {
                                                 onChange={e => setEmployeeId(e.target.value.toUpperCase())}
                                                 placeholder="เช่น EMP001"
                                                 className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all dark:text-white"
-                                                autoComplete="username"
+                                                autoComplete="off"
                                                 autoFocus
                                             />
                                         </div>
@@ -147,7 +147,7 @@ const LoginScreen: React.FC = () => {
                                                 onChange={e => setPassword(e.target.value)}
                                                 placeholder="กรอกรหัสผ่าน"
                                                 className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl pl-10 pr-11 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all dark:text-white"
-                                                autoComplete="current-password"
+                                                autoComplete="new-password"
                                             />
                                             <button
                                                 type="button"
@@ -165,8 +165,8 @@ const LoginScreen: React.FC = () => {
                                             type="button"
                                             onClick={() => setRememberMe(!rememberMe)}
                                             className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${rememberMe
-                                                    ? 'bg-blue-500 border-blue-500'
-                                                    : 'border-gray-300 dark:border-gray-600 hover:border-blue-400'
+                                                ? 'bg-blue-500 border-blue-500'
+                                                : 'border-gray-300 dark:border-gray-600 hover:border-blue-400'
                                                 }`}
                                         >
                                             {rememberMe && (
