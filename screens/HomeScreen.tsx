@@ -162,26 +162,28 @@ const HomeScreen: React.FC = () => {
                 return;
             }
 
-            // Check permission state first (works in TWA / Android WebView)
+            // Check permission state first
+            let permState = 'unknown';
             try {
                 if (navigator.permissions) {
                     const perm = await navigator.permissions.query({ name: 'geolocation' });
+                    permState = perm.state;
                     if (perm.state === 'denied') {
-                        reject(new Error('สิทธิ์ Location ถูกปิด\n\nAndroid: ไปที่ ตั้งค่า → แอป → HR Connect → สิทธิ์ → ตำแหน่ง → เปิดใช้งาน\n\niOS: ไปที่ Settings → HR Connect → Location'));
+                        reject(new Error('DENIED'));
                         return;
                     }
                 }
-            } catch { /* permissions API not available, proceed anyway */ }
+            } catch { /* proceed */ }
 
             navigator.geolocation.getCurrentPosition(
                 (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
                 (err) => {
                     if (err.code === 1) {
-                        reject(new Error('สิทธิ์ Location ถูกปิด\n\nAndroid: ไปที่ ตั้งค่า → แอป → HR Connect → สิทธิ์ → ตำแหน่ง → เปิดใช้งาน\n\niOS: ไปที่ Settings → HR Connect → Location'));
+                        reject(new Error('DENIED'));
                     } else if (err.code === 2) {
-                        reject(new Error('ไม่สามารถหาตำแหน่งได้ กรุณาเปิด GPS'));
+                        reject(new Error('GPS_OFF'));
                     } else {
-                        reject(new Error('ดึงตำแหน่งไม่สำเร็จ กรุณาลองใหม่'));
+                        reject(new Error('TIMEOUT'));
                     }
                 },
                 { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
@@ -201,7 +203,25 @@ const HomeScreen: React.FC = () => {
             setLocationResult(result);
             setShowLocationModal(true);
         } catch (err: any) {
-            toast(err.message || 'เกิดข้อผิดพลาด', 'error');
+            if (err.message === 'DENIED') {
+                alert(
+                    '⚠️ ไม่สามารถเข้าถึงตำแหน่งได้\n\n' +
+                    '📱 วิธีเปิดสิทธิ์:\n\n' +
+                    '1. เปิดแอป Chrome\n' +
+                    '2. ไปที่ hr.prima49.com\n' +
+                    '3. กดไอคอน 🔒 ข้างช่อง URL\n' +
+                    '4. กด "สิทธิ์" หรือ "Permissions"\n' +
+                    '5. เปิด "ตำแหน่ง" / "Location"\n\n' +
+                    'หรือ: ตั้งค่า Android → แอป → Chrome → สิทธิ์ → ตำแหน่ง → อนุญาต\n\n' +
+                    'จากนั้นกลับมากดลงเวลาอีกครั้ง'
+                );
+            } else if (err.message === 'GPS_OFF') {
+                alert('📍 กรุณาเปิด GPS / Location Service บนเครื่อง');
+            } else if (err.message === 'TIMEOUT') {
+                toast('ดึงตำแหน่งไม่สำเร็จ กรุณาลองใหม่', 'error');
+            } else {
+                toast(err.message || 'เกิดข้อผิดพลาด', 'error');
+            }
         } finally {
             setClockLoading(false);
         }
