@@ -4,6 +4,9 @@
  * Database connection and utility functions
  */
 
+// --- Timezone (Thailand UTC+7) ---
+date_default_timezone_set('Asia/Bangkok');
+
 // --- CORS ---
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
@@ -23,6 +26,7 @@ $DB_NAME = 'hr_mobile_connect';
 
 $conn = new mysqli($DB_HOST, $DB_USER, $DB_PASS, $DB_NAME);
 $conn->set_charset('utf8mb4');
+$conn->query("SET time_zone = '+07:00'");
 
 if ($conn->connect_error) {
     http_response_code(500);
