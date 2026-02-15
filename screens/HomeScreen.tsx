@@ -22,6 +22,16 @@ const HomeScreen: React.FC = () => {
     const [approvalAttachments, setApprovalAttachments] = useState<any[]>([]);
     const [approvalLoading, setApprovalLoading] = useState<string | null>(null);
 
+    // Live clock + greeting
+    const [now, setNow] = useState(new Date());
+    useEffect(() => {
+        const timer = setInterval(() => setNow(new Date()), 30000); // update every 30s
+        return () => clearInterval(timer);
+    }, []);
+    const hour = now.getHours();
+    const greeting = hour >= 5 && hour < 12 ? 'สวัสดีตอนเช้า' : hour >= 12 && hour < 17 ? 'สวัสดีตอนบ่าย' : hour >= 17 && hour < 20 ? 'สวัสดีตอนเย็น' : 'สวัสดีตอนค่ำ';
+    const clockStr = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+
     // Fetch data from API
     const { data: rawNotifications, refetch: refetchNotifs } = useApi(() => getNotifications(empId), [empId]);
     const { data: rawQuotas } = useApi(() => getLeaveQuotas(empId), [empId]);
@@ -284,7 +294,7 @@ const HomeScreen: React.FC = () => {
             {/* Header */}
             <header className="mb-6 md:mb-10 flex justify-between items-center">
                 <div>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">สวัสดีตอนเช้า,</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">{greeting}, <span className="font-medium">{clockStr}</span></p>
                     <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">{currentUser?.name || 'ผู้ใช้งาน'}</h1>
                 </div>
                 <div className="flex items-center gap-3">
