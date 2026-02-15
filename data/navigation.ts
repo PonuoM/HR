@@ -30,6 +30,7 @@ export const SIDEBAR_ADMIN_ITEMS: NavItem[] = [
     { path: '/admin/locations', icon: 'location_on', label: 'พื้นที่ทำงาน' },
     { path: '/admin/departments', icon: 'apartment', label: 'แผนกและตำแหน่ง' },
     { path: '/admin/attendance-report', icon: 'summarize', label: 'รายงานเข้างาน' },
+    { path: '/admin/holidays', icon: 'celebration', label: 'วันหยุดบริษัท' },
 ];
 
 /** Profile page — general menu items */
@@ -49,4 +50,5 @@ export const PROFILE_ADMIN_ITEMS: ProfileMenuItem[] = [
     { icon: 'location_on', label: 'พื้นที่ทำงาน', path: '/admin/locations', color: 'bg-teal-100 text-teal-600' },
     { icon: 'apartment', label: 'แผนกและตำแหน่ง', path: '/admin/departments', color: 'bg-indigo-100 text-indigo-600' },
     { icon: 'summarize', label: 'รายงานเข้างาน', path: '/admin/attendance-report', color: 'bg-emerald-100 text-emerald-600' },
+    { icon: 'celebration', label: 'วันหยุดบริษัท', path: '/admin/holidays', color: 'bg-rose-100 text-rose-600' },
 ];
