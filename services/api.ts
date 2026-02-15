@@ -3,9 +3,9 @@
  * Centralized API communication with PHP backend
  */
 
-// Dynamic API base: '/HR/api' in production (host mode), '/hr-mobile-connect/api' in dev
+// Dynamic API base: '/api' in production (host mode), '/hr-mobile-connect/api' in dev
 export const API_BASE = import.meta.env.MODE === 'host'
-    ? '/HR/api'
+    ? '/api'
     : '/hr-mobile-connect/api';
 
 // --- Generic fetch wrapper ---

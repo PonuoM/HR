@@ -3,6 +3,9 @@
  * Bundles frontend (Vite dist) + backend (PHP) + PWA assets into a single folder
  * for deployment to /domains/prima49.com/public_html/HR/
  *
+ * Since hr.prima49.com points directly to /public_html/HR/,
+ * all paths are ROOT-relative (no /HR/ prefix needed).
+ *
  * Usage: npm run host:build
  */
 
@@ -17,8 +20,6 @@ const __dirname = dirname(__filename);
 const ROOT = __dirname;
 const DIST = join(ROOT, 'dist');        // Vite build output
 const OUT = join(ROOT, 'host-build');   // Final deployable folder
-
-const BASE_PATH = '/HR';
 
 console.log('\n🔨 HR Mobile Connect — Host Build\n');
 
@@ -88,48 +89,18 @@ if (existsSync(logoSrc)) {
     console.log('🖼️  Copied logoapp.png');
 }
 
-// ── Step 8: Copy & patch PWA manifest ──
+// ── Step 8: Copy PWA manifest (no path patching needed) ──
 const manifestSrc = join(ROOT, 'public', 'manifest.json');
 if (existsSync(manifestSrc)) {
-    const manifest = JSON.parse(readFileSync(manifestSrc, 'utf-8'));
-
-    // Patch start_url
-    manifest.start_url = `${BASE_PATH}/`;
-
-    // Patch icon paths
-    if (manifest.icons) {
-        manifest.icons = manifest.icons.map(icon => ({
-            ...icon,
-            src: icon.src.startsWith('/') ? `${BASE_PATH}${icon.src}` : icon.src,
-        }));
-    }
-
-    writeFileSync(join(OUT, 'manifest.json'), JSON.stringify(manifest, null, 4));
-    console.log('📝 Patched manifest.json with /HR/ paths');
+    cpSync(manifestSrc, join(OUT, 'manifest.json'));
+    console.log('📝 Copied manifest.json');
 }
 
-// ── Step 9: Copy & patch Service Worker ──
+// ── Step 9: Copy Service Worker (no path patching needed) ──
 const swSrc = join(ROOT, 'public', 'sw.js');
 if (existsSync(swSrc)) {
-    let swContent = readFileSync(swSrc, 'utf-8');
-
-    // Patch static asset paths
-    swContent = swContent.replace(
-        "    '/',\n    '/index.html',",
-        `    '${BASE_PATH}/',\n    '${BASE_PATH}/index.html',`
-    );
-
-    // Patch icon paths
-    swContent = swContent.replace(/'\/(icons\/[^']+)'/g, `'${BASE_PATH}/$1'`);
-
-    // Patch API path check
-    swContent = swContent.replace(
-        "url.pathname.startsWith('/api/')",
-        `url.pathname.startsWith('${BASE_PATH}/api/')`
-    );
-
-    writeFileSync(join(OUT, 'sw.js'), swContent);
-    console.log('📝 Patched sw.js with /HR/ paths');
+    cpSync(swSrc, join(OUT, 'sw.js'));
+    console.log('📝 Copied sw.js');
 }
 
 // ── Step 10: Copy PWA icons ──
@@ -147,19 +118,10 @@ if (existsSync(rootIconsSrc)) {
     cpSync(rootIconsSrc, rootIconsDst, { recursive: true });
 }
 
-// ── Step 11: Patch index.html for /HR/ base ──
+// ── Step 11: Clean index.html (remove dev-only artifacts) ──
 const indexPath = join(OUT, 'index.html');
 if (existsSync(indexPath)) {
     let html = readFileSync(indexPath, 'utf-8');
-
-    // Patch manifest link
-    html = html.replace('href="/manifest.json"', `href="${BASE_PATH}/manifest.json"`);
-
-    // Patch apple touch icon
-    html = html.replace('href="/icons/icon-512.png"', `href="${BASE_PATH}/icons/icon-512.png"`);
-
-    // Patch service worker registration path
-    html = html.replace("register('/sw.js')", `register('${BASE_PATH}/sw.js')`);
 
     // Remove phantom index.css link (file doesn't exist, all CSS is inline)
     html = html.replace(/\s*<link rel="stylesheet" href="[^"]*index\.css">\s*/g, '\n');
@@ -168,15 +130,15 @@ if (existsSync(indexPath)) {
     html = html.replace(/\s*<script type="importmap">[\s\S]*?<\/script>\s*/g, '\n');
 
     writeFileSync(indexPath, html);
-    console.log('📝 Patched index.html references');
+    console.log('📝 Cleaned index.html (removed dev-only artifacts)');
 }
 
 // ── Step 12: Create .htaccess ──
 const htaccess = `# HR Mobile Connect — Apache SPA Routing
-# Place this in /domains/prima49.com/public_html/HR/
+# Deployed at hr.prima49.com (subdomain points to /public_html/HR/)
 
 RewriteEngine On
-RewriteBase /HR/
+RewriteBase /
 
 # Don't rewrite API calls
 RewriteRule ^api/ - [L]
