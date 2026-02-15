@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { API_BASE } from '../../services/api';
 import { useApi } from '../../hooks/useApi';
@@ -37,6 +37,40 @@ interface ReportData {
     };
 }
 
+interface DailyRow {
+    date: string;
+    day_of_week: number;
+    status: 'present' | 'late' | 'leave' | 'absent' | 'holiday' | 'weekend' | 'future';
+    clock_in: string | null;
+    clock_out: string | null;
+    late_minutes: number;
+    work_hours: number;
+    leave_type: string | null;
+    holiday_name: string | null;
+}
+
+interface DailyData {
+    employee_id: string;
+    employee_name: string;
+    department: string;
+    work_start_time: string;
+    work_end_time: string;
+    month: string;
+    days: DailyRow[];
+}
+
+const DOW_TH = ['', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.', 'อา.'];
+
+const STATUS_CONFIG: Record<string, { label: string; icon: string; bg: string; text: string }> = {
+    present: { label: 'มาปกติ', icon: 'check_circle', bg: 'bg-green-100 dark:bg-green-900/30', text: 'text-green-700 dark:text-green-300' },
+    late: { label: 'สาย', icon: 'alarm', bg: 'bg-orange-100 dark:bg-orange-900/30', text: 'text-orange-700 dark:text-orange-300' },
+    leave: { label: 'ลา', icon: 'beach_access', bg: 'bg-purple-100 dark:bg-purple-900/30', text: 'text-purple-700 dark:text-purple-300' },
+    absent: { label: 'ขาด', icon: 'event_busy', bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-700 dark:text-red-300' },
+    holiday: { label: 'วันหยุด', icon: 'celebration', bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-700 dark:text-blue-300' },
+    weekend: { label: 'วันหยุด', icon: 'weekend', bg: 'bg-gray-100 dark:bg-gray-700/50', text: 'text-gray-500 dark:text-gray-400' },
+    future: { label: '-', icon: 'schedule', bg: 'bg-gray-50 dark:bg-gray-800/30', text: 'text-gray-400 dark:text-gray-500' },
+};
+
 const AdminAttendanceReportScreen: React.FC = () => {
     const navigate = useNavigate();
     const now = new Date();
@@ -46,6 +80,11 @@ const AdminAttendanceReportScreen: React.FC = () => {
     const [selectedEmployee, setSelectedEmployee] = useState('');
     const [viewMode, setViewMode] = useState<'monthly' | 'yearly'>('monthly');
     const [selectedYear, setSelectedYear] = useState(now.getFullYear());
+
+    // Daily detail modal state
+    const [detailEmpId, setDetailEmpId] = useState<string | null>(null);
+    const [detailData, setDetailData] = useState<DailyData | null>(null);
+    const [detailLoading, setDetailLoading] = useState(false);
 
     // Build API URL
     const apiUrl = useMemo(() => {
@@ -85,6 +124,16 @@ const AdminAttendanceReportScreen: React.FC = () => {
         return `${API_BASE}/attendance_report.php?${params.toString()}`;
     }, [viewMode, selectedMonth, selectedYear, selectedEmployee]);
 
+    // Fetch daily detail when an employee is selected
+    useEffect(() => {
+        if (!detailEmpId || viewMode !== 'monthly') return;
+        setDetailLoading(true);
+        fetch(`${API_BASE}/attendance_report.php?action=daily&month=${selectedMonth}&employee_id=${detailEmpId}`)
+            .then(r => r.json())
+            .then(d => { setDetailData(d); setDetailLoading(false); })
+            .catch(() => setDetailLoading(false));
+    }, [detailEmpId, selectedMonth, viewMode]);
+
     // Get leave days for a specific type
     const getLeave = (row: ReportRow, typeId: number) => {
         const found = row.leave_by_type.find(l => l.leave_type_id === typeId);
@@ -101,6 +150,16 @@ const AdminAttendanceReportScreen: React.FC = () => {
         return d.toLocaleDateString('th-TH', { month: 'long', year: 'numeric' });
     };
 
+    // Format time
+    const fmtTime = (t: string | null) => t ? t.substring(0, 5) : '-';
+
+    // Open daily detail
+    const openDetail = (empId: string) => {
+        if (viewMode !== 'monthly') return;
+        setDetailEmpId(empId);
+        setDetailData(null);
+    };
+
     return (
         <div className="pt-6 md:pt-8 pb-8 px-4 md:px-8 max-w-[1800px] mx-auto min-h-full">
             {/* Header */}
@@ -110,7 +169,7 @@ const AdminAttendanceReportScreen: React.FC = () => {
                 </button>
                 <div className="flex-1">
                     <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">รายงานเข้างาน</h1>
-                    <p className="text-xs md:text-sm text-gray-500 dark:text-gray-400">สรุปการมาทำงาน สาย ลา OT เบี้ยขยัน</p>
+                    <p className="text-xs md:text-sm text-gray-500 dark:text-gray-400">สรุปการมาทำงาน สาย ลา OT เบี้ยขยัน • กดที่ชื่อพนักงานเพื่อดูรายวัน</p>
                 </div>
             </header>
 
@@ -248,11 +307,20 @@ const AdminAttendanceReportScreen: React.FC = () => {
                             </thead>
                             <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
                                 {report.map(row => (
-                                    <tr key={row.employee_id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors text-sm">
+                                    <tr
+                                        key={row.employee_id}
+                                        onClick={() => openDetail(row.employee_id)}
+                                        className={`hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors text-sm ${viewMode === 'monthly' ? 'cursor-pointer' : ''}`}
+                                    >
                                         <td className="p-3 sticky left-0 bg-white dark:bg-gray-800 z-10">
-                                            <div>
-                                                <p className="font-semibold text-gray-900 dark:text-white text-xs">{row.employee_name}</p>
-                                                <p className="text-[10px] text-gray-400">{row.employee_id}</p>
+                                            <div className="flex items-center gap-2">
+                                                <div>
+                                                    <p className="font-semibold text-primary text-xs underline decoration-dotted underline-offset-2">{row.employee_name}</p>
+                                                    <p className="text-[10px] text-gray-400">{row.employee_id}</p>
+                                                </div>
+                                                {viewMode === 'monthly' && (
+                                                    <span className="material-icons-round text-gray-300 text-sm">chevron_right</span>
+                                                )}
                                             </div>
                                         </td>
                                         <td className="p-3 text-center text-xs text-gray-600 dark:text-gray-300">{row.department}</td>
@@ -308,10 +376,14 @@ const AdminAttendanceReportScreen: React.FC = () => {
             {/* Mobile Card View (for small screens) */}
             <div className="md:hidden mt-4 space-y-3">
                 {!loading && report.map(row => (
-                    <div key={row.employee_id} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
+                    <div
+                        key={row.employee_id}
+                        onClick={() => openDetail(row.employee_id)}
+                        className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4 active:bg-gray-50 dark:active:bg-gray-700 cursor-pointer"
+                    >
                         <div className="flex items-center justify-between mb-3">
                             <div>
-                                <h4 className="font-bold text-gray-900 dark:text-white text-sm">{row.employee_name}</h4>
+                                <h4 className="font-bold text-primary text-sm">{row.employee_name} <span className="material-icons-round text-xs text-gray-300 align-middle">chevron_right</span></h4>
                                 <p className="text-[11px] text-gray-500">{row.department} • {row.employee_id}</p>
                             </div>
                             {row.diligence_eligible ? (
@@ -351,6 +423,108 @@ const AdminAttendanceReportScreen: React.FC = () => {
                     </div>
                 ))}
             </div>
+
+            {/* ═══ DAILY DETAIL MODAL ═══ */}
+            {detailEmpId && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setDetailEmpId(null)}>
+                    <div className="bg-white dark:bg-gray-900 w-full max-w-2xl max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden animate-scale-in flex flex-col" onClick={e => e.stopPropagation()}>
+                        {/* Modal Header */}
+                        <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800 shrink-0">
+                            <div>
+                                <h2 className="text-lg font-bold text-gray-900 dark:text-white">
+                                    📅 รายวัน — {detailData?.employee_name || '...'}
+                                </h2>
+                                <p className="text-xs text-gray-500">
+                                    {detailData?.department} • {monthLabel(selectedMonth)} • เข้างาน {fmtTime(detailData?.work_start_time || null)}
+                                </p>
+                            </div>
+                            <button onClick={() => setDetailEmpId(null)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-500">
+                                <span className="material-icons-round">close</span>
+                            </button>
+                        </div>
+
+                        {/* Modal Body — scrollable */}
+                        <div className="flex-1 overflow-y-auto p-4">
+                            {detailLoading ? (
+                                <div className="flex justify-center py-12">
+                                    <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full"></div>
+                                </div>
+                            ) : detailData ? (
+                                <>
+                                    {/* Legend */}
+                                    <div className="flex flex-wrap gap-2 mb-4">
+                                        {['present', 'late', 'leave', 'absent', 'holiday', 'weekend'].map(s => {
+                                            const cfg = STATUS_CONFIG[s];
+                                            return (
+                                                <span key={s} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${cfg.bg} ${cfg.text}`}>
+                                                    <span className="material-icons-round text-xs">{cfg.icon}</span>
+                                                    {cfg.label}
+                                                </span>
+                                            );
+                                        })}
+                                    </div>
+
+                                    {/* Daily Table */}
+                                    <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+                                        <table className="w-full text-sm">
+                                            <thead>
+                                                <tr className="bg-gray-50 dark:bg-gray-800/80 text-[11px] text-gray-500 uppercase tracking-wider">
+                                                    <th className="p-2 text-left font-semibold">วันที่</th>
+                                                    <th className="p-2 text-center font-semibold">สถานะ</th>
+                                                    <th className="p-2 text-center font-semibold">เข้า</th>
+                                                    <th className="p-2 text-center font-semibold">ออก</th>
+                                                    <th className="p-2 text-center font-semibold">ชม.</th>
+                                                    <th className="p-2 text-left font-semibold">หมายเหตุ</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                                                {detailData.days.map(day => {
+                                                    const cfg = STATUS_CONFIG[day.status] || STATUS_CONFIG.future;
+                                                    const dateObj = new Date(day.date);
+                                                    const isWeekendOrHoliday = day.status === 'weekend' || day.status === 'holiday';
+                                                    return (
+                                                        <tr key={day.date} className={`${isWeekendOrHoliday ? 'opacity-60' : ''} ${day.status === 'absent' ? 'bg-red-50/50 dark:bg-red-900/10' : ''} ${day.status === 'late' ? 'bg-orange-50/50 dark:bg-orange-900/10' : ''}`}>
+                                                            <td className="p-2">
+                                                                <span className="font-semibold text-gray-900 dark:text-white">{dateObj.getDate()}</span>
+                                                                <span className={`ml-1 text-xs ${day.day_of_week >= 6 ? 'text-red-400' : 'text-gray-400'}`}>
+                                                                    {DOW_TH[day.day_of_week]}
+                                                                </span>
+                                                            </td>
+                                                            <td className="p-2 text-center">
+                                                                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${cfg.bg} ${cfg.text}`}>
+                                                                    <span className="material-icons-round text-xs">{cfg.icon}</span>
+                                                                    {cfg.label}
+                                                                </span>
+                                                            </td>
+                                                            <td className={`p-2 text-center text-xs font-mono ${day.status === 'late' ? 'text-orange-600 font-bold' : 'text-gray-600 dark:text-gray-300'}`}>
+                                                                {fmtTime(day.clock_in)}
+                                                            </td>
+                                                            <td className="p-2 text-center text-xs font-mono text-gray-600 dark:text-gray-300">
+                                                                {fmtTime(day.clock_out)}
+                                                            </td>
+                                                            <td className="p-2 text-center text-xs text-gray-600 dark:text-gray-300">
+                                                                {day.work_hours > 0 ? day.work_hours : '-'}
+                                                            </td>
+                                                            <td className="p-2 text-xs text-gray-500">
+                                                                {day.status === 'late' && <span className="text-orange-600">สาย {day.late_minutes} นาที</span>}
+                                                                {day.status === 'leave' && <span className="text-purple-600">{day.leave_type}</span>}
+                                                                {day.status === 'holiday' && <span className="text-blue-600">{day.holiday_name}</span>}
+                                                                {day.status === 'absent' && <span className="text-red-600">ไม่มาทำงาน</span>}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="text-center py-12 text-gray-500">ไม่พบข้อมูล</div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
