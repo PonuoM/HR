@@ -150,6 +150,7 @@ if ($action === 'daily' && $employee_id && $month) {
 }
 
 // ─── Determine date range ───
+$today = date('Y-m-d');
 if ($month) {
     $startDate = $month . '-01';
     $endDate = date('Y-m-t', strtotime($startDate));
@@ -159,6 +160,8 @@ if ($month) {
     $endDate = $year . '-12-31';
     $periodLabel = $year;
 }
+// Cap end date at today for expected-work-days (don't count future days as absent)
+$effectiveEndDate = ($endDate > $today) ? $today : $endDate;
 
 // ─── Helper: Count working days (Mon-Fri) minus holidays ───
 function getWorkingDays($conn, $start, $end) {
@@ -214,7 +217,10 @@ if ($empTypes) {
     $empResult = $conn->query($empSql);
 }
 
-$expectedWorkDays = getWorkingDays($conn, $startDate, $endDate);
+// Expected work days up to today (for absence calculation)
+$expectedWorkDays = getWorkingDays($conn, $startDate, $effectiveEndDate);
+// Full month/year expected work days (for display)
+$fullPeriodWorkDays = getWorkingDays($conn, $startDate, $endDate);
 
 $report = [];
 
@@ -318,6 +324,7 @@ while ($emp = $empResult->fetch_assoc()) {
         'base_salary' => (float)($emp['base_salary'] ?? 0),
         'work_start_time' => $workStart,
         'expected_work_days' => $expectedWorkDays,
+        'full_period_work_days' => $fullPeriodWorkDays,
         'actual_work_days' => $actualWorkDays,
         'absent_days' => $absentDays,
         'late_count' => $lateDays,
@@ -407,6 +414,7 @@ json_response([
     'start_date' => $startDate,
     'end_date' => $endDate,
     'expected_work_days' => $expectedWorkDays,
+    'full_period_work_days' => $fullPeriodWorkDays,
     'leave_types' => $leaveTypes,
     'employees' => $report,
     'summary' => [
