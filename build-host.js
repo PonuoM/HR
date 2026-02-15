@@ -137,6 +137,11 @@ if (existsSync(indexPath)) {
 const htaccess = `# HR Mobile Connect — Apache SPA Routing
 # Deployed at hr.prima49.com (subdomain points to /public_html/HR/)
 
+# Allow Geolocation API (fixes "Permissions policy violation" error)
+<IfModule mod_headers.c>
+    Header always set Permissions-Policy "geolocation=(self)"
+</IfModule>
+
 RewriteEngine On
 RewriteBase /
 
