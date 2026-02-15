@@ -9,7 +9,26 @@
  * PUT  /api/leave_requests.php?id=X           - Multi-tier approve/reject
  */
 require_once __DIR__ . '/config.php';
-require_once __DIR__ . '/send_push.php';
+
+// Load push notification helper safely — push failures must never break core functionality
+$_push_available = false;
+try {
+    require_once __DIR__ . '/send_push.php';
+    $_push_available = function_exists('send_push_to_employee');
+} catch (Throwable $e) {
+    error_log('Push module load failed: ' . $e->getMessage());
+}
+
+// Safe wrapper: push notification errors should never cause 500 on leave requests
+function safe_send_push($conn, $employee_id, $title, $body) {
+    global $_push_available;
+    if (!$_push_available) return;
+    try {
+        send_push_to_employee($conn, $employee_id, $title, $body);
+    } catch (Throwable $e) {
+        error_log('Push send failed: ' . $e->getMessage());
+    }
+}
 
 $method = get_method();
 
@@ -117,7 +136,7 @@ if ($method === 'POST') {
             'leave',
             'text-amber-600'
         );
-        send_push_to_employee($conn, $approver1_id, 'คำขอรออนุมัติ', ($emp['name'] ?? $employee_id) . " ส่งคำขอ{$requestType} รอการอนุมัติของคุณ");
+        safe_send_push($conn, $approver1_id, 'คำขอรออนุมัติ', ($emp['name'] ?? $employee_id) . " ส่งคำขอ{$requestType} รอการอนุมัติของคุณ");
     } else {
         // No specific approver — notify all HR admins
         $hrResult = $conn->query("SELECT id FROM employees WHERE is_admin = 1 AND is_active = 1");
@@ -130,7 +149,7 @@ if ($method === 'POST') {
                 'leave',
                 'text-amber-600'
             );
-            send_push_to_employee($conn, $hr['id'], 'คำขอรออนุมัติ', ($emp['name'] ?? $employee_id) . " ส่งคำขอ{$requestType} (ไม่มีผู้อนุมัติขั้น 1)");
+            safe_send_push($conn, $hr['id'], 'คำขอรออนุมัติ', ($emp['name'] ?? $employee_id) . " ส่งคำขอ{$requestType} (ไม่มีผู้อนุมัติขั้น 1)");
         }
     }
 
@@ -197,7 +216,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
             'leave',
             'text-red-600'
         );
-        send_push_to_employee($conn, $req['employee_id'], 'คำขอไม่อนุมัติ', "คำขอของคุณถูกปฏิเสธโดย {$actorName}");
+        safe_send_push($conn, $req['employee_id'], 'คำขอไม่อนุมัติ', "คำขอของคุณถูกปฏิเสธโดย {$actorName}");
 
         json_response(['message' => 'Rejected']);
     }
@@ -223,7 +242,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
                 'leave',
                 'text-green-600'
             );
-            send_push_to_employee($conn, $req['employee_id'], 'คำขออนุมัติแล้ว', "คำขอของคุณได้รับการอนุมัติโดย {$actorName} (Bypass)");
+            safe_send_push($conn, $req['employee_id'], 'คำขออนุมัติแล้ว', "คำขอของคุณได้รับการอนุมัติโดย {$actorName} (Bypass)");
 
             json_response(['message' => 'Approved (bypass)']);
         }
@@ -244,7 +263,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
                     'leave',
                     'text-amber-600'
                 );
-                send_push_to_employee($conn, $tier2Approver, 'คำขอรออนุมัติขั้น 2', "{$req['employee_name']} ผ่านการอนุมัติขั้น 1 แล้ว รอการอนุมัติของคุณ");
+                safe_send_push($conn, $tier2Approver, 'คำขอรออนุมัติขั้น 2', "{$req['employee_name']} ผ่านการอนุมัติขั้น 1 แล้ว รอการอนุมัติของคุณ");
 
                 // Also notify employee that tier1 approved
                 create_notification($conn, $req['employee_id'],
@@ -255,7 +274,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
                     'leave',
                     'text-blue-600'
                 );
-                send_push_to_employee($conn, $req['employee_id'], 'อนุมัติขั้นที่ 1 แล้ว', "คำขอของคุณผ่านการอนุมัติขั้นที่ 1 โดย {$actorName} รอขั้นที่ 2");
+                safe_send_push($conn, $req['employee_id'], 'อนุมัติขั้นที่ 1 แล้ว', "คำขอของคุณผ่านการอนุมัติขั้นที่ 1 โดย {$actorName} รอขั้นที่ 2");
 
                 json_response(['message' => 'Tier 1 approved, pending tier 2']);
             } else {
@@ -273,7 +292,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
                     'leave',
                     'text-green-600'
                 );
-                send_push_to_employee($conn, $req['employee_id'], 'คำขออนุมัติแล้ว', "คำขอของคุณได้รับการอนุมัติโดย {$actorName}");
+                safe_send_push($conn, $req['employee_id'], 'คำขออนุมัติแล้ว', "คำขอของคุณได้รับการอนุมัติโดย {$actorName}");
 
                 json_response(['message' => 'Approved (no tier 2)']);
             }
@@ -294,7 +313,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
                 'leave',
                 'text-green-600'
             );
-            send_push_to_employee($conn, $req['employee_id'], 'คำขออนุมัติแล้ว', "คำขอของคุณได้รับการอนุมัติโดย {$actorName}");
+            safe_send_push($conn, $req['employee_id'], 'คำขออนุมัติแล้ว', "คำขอของคุณได้รับการอนุมัติโดย {$actorName}");
 
             json_response(['message' => 'Approved']);
         }

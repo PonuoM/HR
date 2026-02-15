@@ -7,9 +7,15 @@
  */
 
 // VAPID keys
-define('VAPID_PUBLIC_KEY', 'BCwSjv55yp7HKvPYV52l2yYpxdW-rrDWc3aCiWI5UIaBEY_qQuufaW6ye8nuM_ZeHSAQEqeh22-HHvy6T5meU7M');
-define('VAPID_PRIVATE_KEY', 'ZsWKT0fQA0rNVL7R5Z2Vb_xhAH5A8sRaI-h55DhGMuA');
-define('VAPID_SUBJECT', 'mailto:hr@prima49.com');
+if (!defined('VAPID_PUBLIC_KEY')) {
+    define('VAPID_PUBLIC_KEY', 'BCwSjv55yp7HKvPYV52l2yYpxdW-rrDWc3aCiWI5UIaBEY_qQuufaW6ye8nuM_ZeHSAQEqeh22-HHvy6T5meU7M');
+}
+if (!defined('VAPID_PRIVATE_KEY')) {
+    define('VAPID_PRIVATE_KEY', 'ZsWKT0fQA0rNVL7R5Z2Vb_xhAH5A8sRaI-h55DhGMuA');
+}
+if (!defined('VAPID_SUBJECT')) {
+    define('VAPID_SUBJECT', 'mailto:hr@prima49.com');
+}
 
 /**
  * Send push notification to all subscriptions of an employee
