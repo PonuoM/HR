@@ -71,27 +71,8 @@ function send_web_push($endpoint, $p256dh, $auth, $payload) {
 
     $signingInput = "$header.$jwtPayload";
 
-    // Decode private key
+    // Decode and load VAPID private key as PKCS#8 PEM
     $privateKeyRaw = base64url_decode(VAPID_PRIVATE_KEY);
-
-    // Build PEM from raw private key + public key
-    $publicKeyRaw = base64url_decode(VAPID_PUBLIC_KEY);
-
-    // Create EC key from raw bytes
-    $keyData = "\x30\x77\x02\x01\x01\x04\x20" . $privateKeyRaw .
-        "\xa0\x0a\x30\x08\x06\x06\x2b\x81\x04\x00\x22" . // This is wrong for P-256, using openssl instead
-        "\xa1\x44\x03\x42\x00\x04" . $publicKeyRaw;
-
-    // Use openssl directly with proper DER encoding for P-256
-    // DER encoding for EC private key on P-256 (secp256r1)
-    $der = "\x30\x77" .
-        "\x02\x01\x01" . // version
-        "\x04\x20" . $privateKeyRaw . // private key (32 bytes)
-        "\xa0\x0a\x30\x08\x06\x06" . // parameters: OID for secp256r1
-        "\x2b\x81\x04\x00\x0a" . // This needs to be the P-256 OID
-        "\xa1\x44\x03\x42\x00\x04" . substr($publicKeyRaw, 1); // public key (uncompressed, skip 0x04 prefix... no)
-
-    // Simpler approach: use openssl_sign with PEM
     $pem = "-----BEGIN EC PRIVATE KEY-----\n" .
         chunk_split(base64_encode(
             "\x30\x41\x02\x01\x00\x30\x13\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x08\x2a\x86\x48\xce\x3d\x03\x01\x07\x04\x27\x30\x25\x02\x01\x01\x04\x20" . $privateKeyRaw
@@ -100,13 +81,14 @@ function send_web_push($endpoint, $p256dh, $auth, $payload) {
 
     $key = openssl_pkey_get_private($pem);
     if (!$key) {
-        error_log("VAPID: Failed to load private key");
+        error_log("VAPID: Failed to load private key: " . openssl_error_string());
         return false;
     }
 
+    // Sign JWT with ES256
     $signature = '';
     if (!openssl_sign($signingInput, $signature, $key, OPENSSL_ALGO_SHA256)) {
-        error_log("VAPID: Failed to sign JWT");
+        error_log("VAPID: Failed to sign JWT: " . openssl_error_string());
         return false;
     }
 
@@ -156,19 +138,25 @@ function encrypt_payload($clientPublicKey, $clientAuth, $payload) {
     $clientPublicKeyRaw = base64url_decode($clientPublicKey);
     $clientAuthRaw = base64url_decode($clientAuth);
 
-    // Generate server key pair
+    // Generate ephemeral server key pair
     $serverKey = openssl_pkey_new([
         'curve_name' => 'prime256v1',
         'private_key_type' => OPENSSL_KEYTYPE_EC,
     ]);
-    if (!$serverKey) return false;
+    if (!$serverKey) {
+        error_log("Push encrypt: Failed to generate server key: " . openssl_error_string());
+        return false;
+    }
 
     $serverKeyDetails = openssl_pkey_get_details($serverKey);
     $serverPublicKey = chr(4) . $serverKeyDetails['ec']['x'] . $serverKeyDetails['ec']['y'];
 
     // Compute shared secret using ECDH
     $sharedSecret = compute_ecdh($serverKey, $clientPublicKeyRaw);
-    if (!$sharedSecret) return false;
+    if (!$sharedSecret) {
+        error_log("Push encrypt: ECDH failed");
+        return false;
+    }
 
     // Generate salt
     $salt = random_bytes(16);
@@ -195,7 +183,10 @@ function encrypt_payload($clientPublicKey, $clientAuth, $payload) {
     $encrypted = openssl_encrypt(
         $padded, 'aes-128-gcm', $cek, OPENSSL_RAW_DATA, $nonce, $tag, '', 16
     );
-    if ($encrypted === false) return false;
+    if ($encrypted === false) {
+        error_log("Push encrypt: AES-GCM failed: " . openssl_error_string());
+        return false;
+    }
 
     // Build aes128gcm payload
     // Header: salt(16) + rs(4) + idlen(1) + keyid(65)
@@ -207,23 +198,26 @@ function encrypt_payload($clientPublicKey, $clientAuth, $payload) {
 
 /**
  * Compute ECDH shared secret
+ * FIX: openssl_pkey_derive expects (peer_public_key, our_private_key)
  */
 function compute_ecdh($serverPrivateKey, $clientPublicKeyRaw) {
-    // Extract x, y from uncompressed public key (skip 0x04 prefix)
-    $x = substr($clientPublicKeyRaw, 1, 32);
-    $y = substr($clientPublicKeyRaw, 33, 32);
-
-    // Build PEM for client public key
+    // Build SPKI DER for client public key
     $der = "\x30\x59\x30\x13\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x08\x2a\x86\x48\xce\x3d\x03\x01\x07\x03\x42\x00" . $clientPublicKeyRaw;
     $pem = "-----BEGIN PUBLIC KEY-----\n" . chunk_split(base64_encode($der), 64, "\n") . "-----END PUBLIC KEY-----\n";
 
     $clientKey = openssl_pkey_get_public($pem);
     if (!$clientKey) {
-        error_log("ECDH: Failed to load client public key");
+        error_log("ECDH: Failed to load client public key: " . openssl_error_string());
         return false;
     }
 
-    $shared = openssl_pkey_derive($serverPrivateKey, $clientKey, 256);
+    // CRITICAL FIX: Parameter order is (peer_public_key, our_private_key)
+    // Previously was swapped causing d2i_ECPrivateKey error on OpenSSL 1.0.2k
+    $shared = openssl_pkey_derive($clientKey, $serverPrivateKey, 256);
+    if ($shared === false) {
+        error_log("ECDH: Key derivation failed: " . openssl_error_string());
+        return false;
+    }
     return $shared;
 }
 
@@ -241,14 +235,23 @@ function hkdf_expand($prk, $info, $length) {
 }
 
 /**
- * Convert DER signature to raw r||s format
+ * Convert DER-encoded ECDSA signature to raw r||s format (64 bytes for ES256)
  */
 function der_to_raw($der) {
-    $offset = 3; // skip 0x30 + length
+    // DER format: 0x30 [total-len] 0x02 [r-len] [r] 0x02 [s-len] [s]
+    $offset = 2; // skip SEQUENCE tag + length byte
+    
+    // Read r
+    if (ord($der[$offset]) !== 0x02) return $der; // not valid DER
+    $offset++;
     $rLen = ord($der[$offset]);
     $offset++;
     $r = substr($der, $offset, $rLen);
-    $offset += $rLen + 1; // skip to s length
+    $offset += $rLen;
+    
+    // Read s
+    if (ord($der[$offset]) !== 0x02) return $der;
+    $offset++;
     $sLen = ord($der[$offset]);
     $offset++;
     $s = substr($der, $offset, $sLen);
