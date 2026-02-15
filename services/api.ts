@@ -153,6 +153,12 @@ export async function getAttendance(employeeId: string, date?: string) {
     return fetchApi<any>(`attendance.php?${params}`);
 }
 
+export async function checkLocation(lat: number, lng: number) {
+    return fetchApi<{ matched: boolean; location_name: string; distance: number }>(
+        `attendance.php?action=check_location&lat=${lat}&lng=${lng}`
+    );
+}
+
 export async function clockIn(data: { employee_id: string; latitude?: number; longitude?: number }) {
     return fetchApi<any>('attendance.php', { method: 'POST', body: JSON.stringify(data) });
 }

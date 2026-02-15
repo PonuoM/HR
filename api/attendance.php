@@ -56,6 +56,23 @@ function checkWorkLocation($conn, $lat, $lng) {
 
 $method = get_method();
 
+// ─── GET ?action=check_location: Pre-check GPS before clock-in ───
+if ($method === 'GET' && isset($_GET['action']) && $_GET['action'] === 'check_location') {
+    $lat = isset($_GET['lat']) ? (float)$_GET['lat'] : null;
+    $lng = isset($_GET['lng']) ? (float)$_GET['lng'] : null;
+
+    if ($lat === null || $lng === null) {
+        json_response(['error' => 'lat and lng are required'], 400);
+    }
+
+    $locCheck = checkWorkLocation($conn, $lat, $lng);
+    json_response([
+        'matched' => $locCheck['matched'],
+        'location_name' => $locCheck['location_name'],
+        'distance' => $locCheck['distance'],
+    ]);
+}
+
 // ─── GET: Today's attendance + clock status ───
 if ($method === 'GET') {
     $employee_id = $conn->real_escape_string($_GET['employee_id'] ?? 'EMP001');
@@ -124,6 +141,15 @@ if ($method === 'POST') {
         $location_text = $locCheck['matched']
             ? $locCheck['location_name']
             : 'ต่างสถานที่ (ห่าง ' . $locCheck['distance'] . 'm จาก ' . $locCheck['location_name'] . ')';
+
+        // Block offsite clock-in
+        if ($is_offsite) {
+            json_response([
+                'error' => 'ไม่สามารถลงเวลาได้ เนื่องจากอยู่นอกพื้นที่ทำงาน (ห่าง ' . $locCheck['distance'] . ' เมตร จาก ' . $locCheck['location_name'] . ')',
+                'distance' => $locCheck['distance'],
+                'location_name' => $locCheck['location_name'],
+            ], 403);
+        }
     }
 
     $stmt = $conn->prepare(
