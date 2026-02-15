@@ -6,7 +6,7 @@
  * Usage: npm run host:build
  */
 
-import { existsSync, mkdirSync, cpSync, readFileSync, writeFileSync, readdirSync, statSync } from 'fs';
+import { existsSync, mkdirSync, cpSync, readFileSync, writeFileSync, readdirSync, statSync, rmSync } from 'fs';
 import { join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
@@ -31,8 +31,7 @@ console.log('✅ Vite build output found at dist/');
 
 // ── Step 2: Clean & create output directory ──
 if (existsSync(OUT)) {
-    // Remove old build
-    import('fs').then(fs => fs.rmSync(OUT, { recursive: true, force: true }));
+    rmSync(OUT, { recursive: true, force: true });
 }
 mkdirSync(OUT, { recursive: true });
 console.log('📁 Created host-build/');
@@ -162,8 +161,11 @@ if (existsSync(indexPath)) {
     // Patch service worker registration path
     html = html.replace("register('/sw.js')", `register('${BASE_PATH}/sw.js')`);
 
-    // Patch index.css link if present
-    html = html.replace('href="/index.css"', `href="${BASE_PATH}/index.css"`);
+    // Remove phantom index.css link (file doesn't exist, all CSS is inline)
+    html = html.replace(/\s*<link rel="stylesheet" href="[^"]*index\.css">\s*/g, '\n');
+
+    // Remove importmap block (dev-only, Vite bundles everything in production)
+    html = html.replace(/\s*<script type="importmap">[\s\S]*?<\/script>\s*/g, '\n');
 
     writeFileSync(indexPath, html);
     console.log('📝 Patched index.html references');
