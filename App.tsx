@@ -23,6 +23,7 @@ import AdminQuotaScreen from './screens/admin/AdminQuotaScreen';
 import AdminLocationScreen from './screens/admin/AdminLocationScreen';
 import AdminDepartmentScreen from './screens/admin/AdminDepartmentScreen';
 import AdminAttendanceReportScreen from './screens/admin/AdminAttendanceReportScreen';
+import AdminHolidayScreen from './screens/admin/AdminHolidayScreen';
 import SettingsScreen from './screens/settings/SettingsScreen';
 import SecurityScreen from './screens/settings/SecurityScreen';
 import HelpScreen from './screens/settings/HelpScreen';
@@ -140,6 +141,7 @@ const App: React.FC = () => {
                       <Route path="/admin/locations" element={<AdminLocationScreen />} />
                       <Route path="/admin/departments" element={<AdminDepartmentScreen />} />
                       <Route path="/admin/attendance-report" element={<AdminAttendanceReportScreen />} />
+                      <Route path="/admin/holidays" element={<AdminHolidayScreen />} />
                     </Routes>
                   </PageTransition>
                 </Layout>
