@@ -9,6 +9,44 @@ require_once __DIR__ . '/config.php';
 
 $method = get_method();
 
+// Create new employee
+if ($method === 'POST') {
+    $body = json_decode(file_get_contents('php://input'), true);
+
+    $id = trim($body['id'] ?? '');
+    $name = trim($body['name'] ?? '');
+    $email = trim($body['email'] ?? '');
+    $password = $body['password'] ?? '1234';
+    $department_id = isset($body['department_id']) && $body['department_id'] ? intval($body['department_id']) : null;
+    $position_id = isset($body['position_id']) && $body['position_id'] ? intval($body['position_id']) : null;
+    $base_salary = isset($body['base_salary']) && $body['base_salary'] !== '' ? floatval($body['base_salary']) : null;
+    $hire_date = isset($body['hire_date']) && $body['hire_date'] ? $body['hire_date'] : null;
+    $approver_id = isset($body['approver_id']) && $body['approver_id'] ? $body['approver_id'] : null;
+
+    if (!$id) json_response(['error' => 'กรุณาระบุรหัสพนักงาน'], 400);
+    if (!$name) json_response(['error' => 'กรุณาระบุชื่อพนักงาน'], 400);
+
+    // Check duplicate ID
+    $check = $conn->prepare("SELECT id FROM employees WHERE id = ?");
+    $check->bind_param('s', $id);
+    $check->execute();
+    if ($check->get_result()->num_rows > 0) {
+        json_response(['error' => 'รหัสพนักงานนี้มีอยู่แล้ว'], 400);
+    }
+
+    $hashed = password_hash($password, PASSWORD_BCRYPT);
+
+    $stmt = $conn->prepare("INSERT INTO employees (id, name, email, password, department_id, position_id, base_salary, hire_date, approver_id, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)");
+    $stmt->bind_param('ssssiidss', $id, $name, $email, $hashed, $department_id, $position_id, $base_salary, $hire_date, $approver_id);
+    $stmt->execute();
+
+    if ($stmt->affected_rows > 0) {
+        json_response(['message' => 'Employee created', 'id' => $id], 201);
+    } else {
+        json_response(['error' => 'ไม่สามารถสร้างพนักงานได้: ' . $conn->error], 500);
+    }
+}
+
 if ($method === 'GET') {
     // Single employee by ID
     if (isset($_GET['id'])) {

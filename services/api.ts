@@ -27,6 +27,10 @@ export async function getEmployees() {
     return fetchApi<any[]>('employees.php');
 }
 
+export async function createEmployee(data: { id: string; name: string; email?: string; password?: string; department_id?: number; position_id?: number; base_salary?: number | null; hire_date?: string | null; approver_id?: string | null }) {
+    return fetchApi<any>('employees.php', { method: 'POST', body: JSON.stringify(data) });
+}
+
 export async function getEmployee(id: string) {
     return fetchApi<any>(`employees.php?id=${id}`);
 }

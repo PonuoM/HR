@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
-import { getDepartments, getPositions, getEmployees, resetEmployeePassword, deleteEmployee, suspendEmployee, unsuspendEmployee } from '../../services/api';
+import { getDepartments, getPositions, getEmployees, createEmployee, resetEmployeePassword, deleteEmployee, suspendEmployee, unsuspendEmployee } from '../../services/api';
 import { useToast } from '../../components/Toast';
 import CustomSelect from '../../components/CustomSelect';
 
@@ -289,111 +289,155 @@ const AdminEmployeeScreen: React.FC = () => {
                             </button>
                         </div>
 
-                        <div className="p-4 md:p-6 overflow-y-auto space-y-4 md:space-y-6 flex-1">
-                            <div className="flex justify-center mb-2">
-                                <div className="relative group cursor-pointer">
-                                    <div className="w-24 h-24 rounded-full bg-gray-100 dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-600 flex items-center justify-center">
-                                        <span className="material-icons-round text-gray-400 text-3xl">add_a_photo</span>
+                        <form onSubmit={async (e) => {
+                            e.preventDefault();
+                            const form = e.target as HTMLFormElement;
+                            const formData = new FormData(form);
+                            const firstName = (formData.get('first_name') as string || '').trim();
+                            const lastName = (formData.get('last_name') as string || '').trim();
+                            const empId = (formData.get('emp_id') as string || '').trim();
+                            const email = (formData.get('email') as string || '').trim();
+                            const salary = formData.get('base_salary') as string;
+
+                            if (!empId) { toast('กรุณาระบุรหัสพนักงาน', 'error'); return; }
+                            if (!firstName) { toast('กรุณาระบุชื่อจริง', 'error'); return; }
+
+                            const fullName = lastName ? `${firstName} ${lastName}` : firstName;
+
+                            // Find department_id and position_id from name
+                            const deptObj = (rawDepts || []).find((d: any) => (d.name || d) === addDepartment);
+                            const posObj = (rawPositions || []).find((p: any) => (p.name || p) === addPosition);
+
+                            try {
+                                const result = await createEmployee({
+                                    id: empId,
+                                    name: fullName,
+                                    email: email || undefined,
+                                    password: '1234',
+                                    department_id: deptObj?.id ? Number(deptObj.id) : undefined,
+                                    position_id: posObj?.id ? Number(posObj.id) : undefined,
+                                    base_salary: salary ? Number(salary) : null,
+                                    approver_id: addApprover || null,
+                                });
+                                if (result?.error) {
+                                    toast(result.error, 'error');
+                                    return;
+                                }
+                                toast('เพิ่มพนักงานเรียบร้อย', 'success');
+                                setShowAddModal(false);
+                                setAddPosition('');
+                                setAddDepartment('');
+                                setAddApprover('');
+                                window.location.reload();
+                            } catch (err: any) {
+                                toast(err?.message || 'เกิดข้อผิดพลาด', 'error');
+                            }
+                        }} className="flex flex-col flex-1 overflow-hidden">
+                            <div className="p-4 md:p-6 overflow-y-auto space-y-4 md:space-y-6 flex-1">
+                                <div className="flex justify-center mb-2">
+                                    <div className="relative group cursor-pointer">
+                                        <div className="w-24 h-24 rounded-full bg-gray-100 dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-600 flex items-center justify-center">
+                                            <span className="material-icons-round text-gray-400 text-3xl">add_a_photo</span>
+                                        </div>
+                                        <div className="absolute bottom-0 right-0 bg-primary text-white p-1.5 rounded-full shadow-sm">
+                                            <span className="material-icons-round text-sm block">edit</span>
+                                        </div>
                                     </div>
-                                    <div className="absolute bottom-0 right-0 bg-primary text-white p-1.5 rounded-full shadow-sm">
-                                        <span className="material-icons-round text-sm block">edit</span>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">ชื่อจริง <span className="text-red-500">*</span></label>
+                                        <input type="text" name="first_name" className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-gray-900 dark:text-white" placeholder="เช่น สมชาย" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">นามสกุล</label>
+                                        <input type="text" name="last_name" className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-gray-900 dark:text-white" placeholder="เช่น ใจดี" />
                                     </div>
                                 </div>
-                            </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">ชื่อจริง</label>
-                                    <input type="text" className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-gray-900 dark:text-white" placeholder="เช่น สมชาย" />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">นามสกุล</label>
-                                    <input type="text" className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-gray-900 dark:text-white" placeholder="เช่น ใจดี" />
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">รหัสพนักงาน</label>
-                                    <input type="text" className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-gray-900 dark:text-white" placeholder="เช่น EMP-001" />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">อีเมล</label>
-                                    <input type="email" className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-gray-900 dark:text-white" placeholder="email@company.com" />
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">ตำแหน่ง</label>
-                                    <CustomSelect
-                                        value={addPosition}
-                                        onChange={setAddPosition}
-                                        placeholder="-- เลือกตำแหน่ง --"
-                                        options={positions.map(pos => ({ value: pos, label: pos }))}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">แผนก</label>
-                                    <CustomSelect
-                                        value={addDepartment}
-                                        onChange={setAddDepartment}
-                                        placeholder="-- เลือกแผนก --"
-                                        options={departments.map(dept => ({ value: dept, label: dept }))}
-                                    />
-                                </div>
-                            </div>
-
-                            {/* SALARY INPUT (New) */}
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">เงินเดือนพื้นฐาน (บาท)</label>
-                                <div className="relative">
-                                    <input type="number" className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-gray-900 dark:text-white pl-10" placeholder="0.00" />
-                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                        <span className="text-gray-500 font-bold">฿</span>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">รหัสพนักงาน <span className="text-red-500">*</span></label>
+                                        <input type="text" name="emp_id" className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-gray-900 dark:text-white" placeholder="เช่น EMP006" />
                                     </div>
-                                    <p className="text-[10px] text-gray-400 mt-1 absolute right-1 -bottom-5">ใช้สำหรับคำนวณ OT</p>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">อีเมล</label>
+                                        <input type="email" name="email" className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-gray-900 dark:text-white" placeholder="email@company.com" />
+                                    </div>
                                 </div>
-                            </div>
 
-                            <div className="border-t border-gray-100 dark:border-gray-800 pt-4 mt-2">
-                                <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
-                                    <span className="material-icons-round text-primary text-base">supervisor_account</span>
-                                    ผู้อนุมัติ (ขั้น 1)
-                                </h3>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">ตำแหน่ง</label>
+                                        <CustomSelect
+                                            value={addPosition}
+                                            onChange={setAddPosition}
+                                            placeholder="-- เลือกตำแหน่ง --"
+                                            options={(rawPositions || []).map((p: any) => ({ value: p.name || p, label: p.name || p }))}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">แผนก</label>
+                                        <CustomSelect
+                                            value={addDepartment}
+                                            onChange={setAddDepartment}
+                                            placeholder="-- เลือกแผนก --"
+                                            options={(rawDepts || []).map((d: any) => ({ value: d.name || d, label: d.name || d }))}
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* SALARY INPUT */}
                                 <div>
-                                    <CustomSelect
-                                        value={addApprover}
-                                        onChange={setAddApprover}
-                                        placeholder="-- ไม่มี (ส่งตรงไป HR) --"
-                                        options={(employees || []).filter((emp: any) =>
-                                            (String(emp.can_have_subordinates) === '1' || String(emp.is_admin) === '1') &&
-                                            (String(emp.is_active) !== '0')
-                                        ).map((emp: any) => ({
-                                            value: emp.id,
-                                            label: `${emp.name} (${emp.position || 'ไม่ระบุตำแหน่ง'})`,
-                                        }))}
-                                    />
-                                    <p className="text-[10px] text-gray-400 mt-1">เลือกหัวหน้าที่จะอนุมัติคำขอลา/OT ก่อนส่งต่อ HR</p>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">เงินเดือนพื้นฐาน (บาท)</label>
+                                    <div className="relative">
+                                        <input type="number" name="base_salary" className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-gray-900 dark:text-white pl-10" placeholder="0.00" />
+                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                            <span className="text-gray-500 font-bold">฿</span>
+                                        </div>
+                                        <p className="text-[10px] text-gray-400 mt-1 absolute right-1 -bottom-5">ใช้สำหรับคำนวณ OT</p>
+                                    </div>
+                                </div>
+
+                                <div className="border-t border-gray-100 dark:border-gray-800 pt-4 mt-2">
+                                    <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
+                                        <span className="material-icons-round text-primary text-base">supervisor_account</span>
+                                        ผู้อนุมัติ (ขั้น 1)
+                                    </h3>
+                                    <div>
+                                        <CustomSelect
+                                            value={addApprover}
+                                            onChange={setAddApprover}
+                                            placeholder="-- ไม่มี (ส่งตรงไป HR) --"
+                                            options={(employees || []).filter((emp: any) =>
+                                                (String(emp.can_have_subordinates) === '1' || String(emp.is_admin) === '1') &&
+                                                (String(emp.is_active) !== '0')
+                                            ).map((emp: any) => ({
+                                                value: emp.id,
+                                                label: `${emp.name} (${emp.position || 'ไม่ระบุตำแหน่ง'})`,
+                                            }))}
+                                        />
+                                        <p className="text-[10px] text-gray-400 mt-1">เลือกหัวหน้าที่จะอนุมัติคำขอลา/OT ก่อนส่งต่อ HR</p>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">รหัสผ่านเริ่มต้น</label>
+                                    <div className="relative">
+                                        <input type="text" value="1234" readOnly className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-gray-500 dark:text-gray-400" />
+                                    </div>
+                                    <p className="text-xs text-gray-400 mt-1">พนักงานสามารถเปลี่ยนรหัสผ่านได้ภายหลัง</p>
                                 </div>
                             </div>
 
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">รหัสผ่านเริ่มต้น</label>
-                                <div className="relative">
-                                    <input type="text" value="P@ssw0rd1234" readOnly className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 text-gray-500 dark:text-gray-400" />
-                                    <button className="absolute right-3 top-2.5 text-primary text-sm font-bold">เปลี่ยน</button>
-                                </div>
-                                <p className="text-xs text-gray-400 mt-1">พนักงานจะต้องเปลี่ยนรหัสผ่านเมื่อเข้าสู่ระบบครั้งแรก</p>
+                            <div className="p-4 md:p-6 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 flex gap-3">
+                                <button type="button" onClick={() => setShowAddModal(false)} className="flex-1 py-3 rounded-xl border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-semibold hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">ยกเลิก</button>
+                                <button type="submit" className="flex-1 py-3 rounded-xl bg-primary text-white font-semibold hover:bg-primary-hover shadow-lg shadow-primary/30 transition-all">บันทึกข้อมูล</button>
                             </div>
-                        </div>
-
-                        <div className="p-4 md:p-6 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 flex gap-3">
-                            <button onClick={() => setShowAddModal(false)} className="flex-1 py-3 rounded-xl border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-semibold hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">ยกเลิก</button>
-                            <button onClick={() => { toast('บันทึกข้อมูลเรียบร้อย', 'success'); setShowAddModal(false); }} className="flex-1 py-3 rounded-xl bg-primary text-white font-semibold hover:bg-primary-hover shadow-lg shadow-primary/30 transition-all">บันทึกข้อมูล</button>
-                        </div>
-                    </div >
-                </div >
+                        </form>
+                    </div>
+                </div>
             )}
 
 
