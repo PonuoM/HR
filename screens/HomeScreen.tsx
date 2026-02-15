@@ -823,6 +823,9 @@ const HomeScreen: React.FC = () => {
           to { opacity: 1; transform: translateY(0) scale(1); }
         }
       `}</style>
+
+            {/* Version badge for deployment verification */}
+            <div className="fixed bottom-20 left-4 z-10 opacity-30 text-[10px] text-gray-400 font-mono">v2.1</div>
         </div>
     );
 };
