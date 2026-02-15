@@ -36,7 +36,7 @@ const LeaveHistoryScreen: React.FC = () => {
 
     // Filter by selected year
     const requests = useMemo(() => {
-        return allRequests.filter((r: any) => {
+        return (allRequests || []).filter((r: any) => {
             const year = new Date(r.created_at).getFullYear();
             return year === selectedYear;
         });

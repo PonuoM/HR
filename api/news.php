@@ -13,6 +13,23 @@
  */
 require_once __DIR__ . '/config.php';
 
+// Auto-create supporting tables if they don't exist
+$conn->query("CREATE TABLE IF NOT EXISTS `news_likes` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `article_id` INT NOT NULL,
+  `employee_id` VARCHAR(20) NOT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uq_article_employee` (`article_id`, `employee_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+$conn->query("CREATE TABLE IF NOT EXISTS `news_comments` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `article_id` INT NOT NULL,
+  `employee_id` VARCHAR(20) NOT NULL,
+  `content` TEXT NOT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
 $method = get_method();
 $action = $_GET['action'] ?? null;
 

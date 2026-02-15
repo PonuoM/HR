@@ -237,9 +237,9 @@ const NewsScreen: React.FC = () => {
 
       {/* Comments Drawer */}
       {openCommentId !== null && (
-        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setOpenCommentId(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setOpenCommentId(null)}>
           <div
-            className="bg-white dark:bg-gray-900 w-full md:max-w-lg md:rounded-2xl rounded-t-2xl shadow-2xl max-h-[80vh] flex flex-col"
+            className="bg-white dark:bg-gray-900 w-full max-w-lg rounded-2xl shadow-2xl max-h-[70vh] flex flex-col"
             onClick={e => e.stopPropagation()}
             style={{ animation: 'toast-scale-in 0.2s ease-out' }}
           >

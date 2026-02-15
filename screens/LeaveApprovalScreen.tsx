@@ -40,7 +40,7 @@ const LeaveApprovalScreen: React.FC = () => {
     );
 
     // Combine: use approverRequests for non-admin, allRequests for admin
-    const requests = isAdmin ? allRequests : approverRequests;
+    const requests = isAdmin ? (allRequests || []) : (approverRequests || []);
     const pendingRequests = requests.filter((r: any) => r.status === 'pending');
     const historyRequests = requests.filter((r: any) => r.status !== 'pending');
     const displayRequests = tab === 'pending' ? pendingRequests : historyRequests;
