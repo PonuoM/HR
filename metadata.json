@@ -1,0 +1,7 @@
+{
+  "name": "HR Mobile Connect",
+  "description": "A comprehensive employee self-service mobile web application featuring attendance tracking, leave requests, approval workflows, and corporate news feed.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
