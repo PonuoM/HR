@@ -48,4 +48,5 @@ export const PROFILE_ADMIN_ITEMS: ProfileMenuItem[] = [
     { icon: 'article', label: 'จัดการข่าวสาร', path: '/admin/cms', color: 'bg-orange-100 text-orange-600' },
     { icon: 'location_on', label: 'พื้นที่ทำงาน', path: '/admin/locations', color: 'bg-teal-100 text-teal-600' },
     { icon: 'apartment', label: 'แผนกและตำแหน่ง', path: '/admin/departments', color: 'bg-indigo-100 text-indigo-600' },
+    { icon: 'summarize', label: 'รายงานเข้างาน', path: '/admin/attendance-report', color: 'bg-emerald-100 text-emerald-600' },
 ];
