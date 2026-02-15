@@ -151,6 +151,7 @@ const HomeScreen: React.FC = () => {
     const quotas = (rawQuotas || []).map((q: any) => ({
         id: Number(q.leave_type_id),
         type: q.leave_type_name,
+        category: q.leave_category || '',
         label: q.leave_type_name,
         remaining: Number(q.remaining || 0),
         total: Number(q.total || 0),
@@ -160,10 +161,9 @@ const HomeScreen: React.FC = () => {
         icon_url: q.icon_url || '',
         unit: q.unit || 'วัน',
     }));
-    const mainQuotaIds = [1, 2, 3]; // ลาพักร้อน, ลาป่วย, ลากิจ
-    const mainQuotas = quotas.filter((q: any) => mainQuotaIds.includes(q.id));
-    const otherQuotas = quotas.filter((q: any) => !mainQuotaIds.includes(q.id));
-    const [showOtherQuotas, setShowOtherQuotas] = useState(false);
+    const mainQuotas = quotas.filter((q: any) => q.category === 'seniority' || q.category === 'annual');
+    const otherQuotas = quotas.filter((q: any) => q.category !== 'seniority' && q.category !== 'annual');
+    const [showAllQuotas, setShowAllQuotas] = useState(false);
 
     // Map attendance from DB
     const clockStatus: 'not_clocked_in' | 'clocked_in' | 'completed' = rawAttendance?.clockStatus || 'not_clocked_in';
@@ -686,6 +686,13 @@ const HomeScreen: React.FC = () => {
                         <section className="md:col-span-3">
                             <div className="flex justify-between items-center mb-4">
                                 <h3 className="text-lg font-bold text-gray-900 dark:text-white">วันลาคงเหลือ</h3>
+                                {otherQuotas.length > 0 && (
+                                    <button onClick={() => setShowAllQuotas(true)}
+                                        className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors">
+                                        <span className="material-icons-round text-sm">visibility</span>
+                                        ดูทั้งหมด
+                                    </button>
+                                )}
                             </div>
 
                             {/* Mobile: Horizontal scroll cards */}
@@ -708,7 +715,7 @@ const HomeScreen: React.FC = () => {
                                 ))}
                             </div>
 
-                            {/* Desktop: Compact table for ALL quotas */}
+                            {/* Desktop: Compact table for main quotas only */}
                             <div className="hidden md:block bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
                                 <table className="w-full text-sm">
                                     <thead>
@@ -720,7 +727,7 @@ const HomeScreen: React.FC = () => {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {[...mainQuotas, ...otherQuotas].map((q: any, idx: number) => (
+                                        {mainQuotas.map((q: any, idx: number) => (
                                             <tr key={idx} className="border-b last:border-0 border-gray-50 dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors">
                                                 <td className="px-3 py-2.5">
                                                     <div className="flex items-center gap-2">
@@ -744,54 +751,6 @@ const HomeScreen: React.FC = () => {
                                     </tbody>
                                 </table>
                             </div>
-
-                            {/* Mobile: Other quotas expand */}
-                            {otherQuotas.length > 0 && (
-                                <div className="mt-3 md:hidden">
-                                    <button onClick={() => setShowOtherQuotas(!showOtherQuotas)}
-                                        className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-primary transition-colors">
-                                        <span className="material-icons-round text-sm" style={{ transform: showOtherQuotas ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>expand_more</span>
-                                        วันลาอื่นๆ ({otherQuotas.length})
-                                    </button>
-                                    {showOtherQuotas && (
-                                        <div className="mt-2 bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
-                                            <table className="w-full text-sm">
-                                                <thead>
-                                                    <tr className="border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
-                                                        <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500">ประเภท</th>
-                                                        <th className="text-center px-2 py-2 text-xs font-semibold text-gray-500">ใช้</th>
-                                                        <th className="text-center px-2 py-2 text-xs font-semibold text-gray-500">ทั้งหมด</th>
-                                                        <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500">คงเหลือ</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {otherQuotas.map((q: any, idx: number) => (
-                                                        <tr key={idx} className="border-b last:border-0 border-gray-50 dark:border-gray-800">
-                                                            <td className="px-3 py-2">
-                                                                <div className="flex items-center gap-2">
-                                                                    {q.icon_url ? (
-                                                                        <img src={q.icon_url.startsWith('http') ? q.icon_url : `${API_BASE}/${q.icon_url}`} alt="" className="w-5 h-5 object-contain" />
-                                                                    ) : (
-                                                                        <span className={`material-icons-round text-sm text-${q.color}-500`}>{q.icon}</span>
-                                                                    )}
-                                                                    <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{q.label.split(' (')[0]}</span>
-                                                                </div>
-                                                            </td>
-                                                            <td className="text-center px-2 py-2 text-xs text-gray-600 dark:text-gray-400">{q.used}</td>
-                                                            <td className="text-center px-2 py-2 text-xs text-gray-600 dark:text-gray-400">{q.total === 0 ? '∞' : q.total}</td>
-                                                            <td className="text-center px-3 py-2">
-                                                                <span className={`text-xs font-bold ${q.remaining < 0 ? 'text-green-600' : q.remaining === 0 ? 'text-red-500' : 'text-primary'}`}>
-                                                                    {q.remaining < 0 ? '∞' : q.remaining} {q.unit}
-                                                                </span>
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
                         </section>
 
                         {/* Quick Menu — Desktop only (beside quotas) */}
@@ -880,6 +839,57 @@ const HomeScreen: React.FC = () => {
           to { opacity: 1; transform: translateY(0) scale(1); }
         }
       `}</style>
+
+            {/* All Quotas Modal */}
+            {showAllQuotas && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowAllQuotas(false)}>
+                    <div className="bg-white dark:bg-gray-900 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-scale-in" onClick={e => e.stopPropagation()}>
+                        <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+                            <h2 className="text-lg font-bold text-gray-900 dark:text-white">📋 โควต้าวันลาทั้งหมด</h2>
+                            <button onClick={() => setShowAllQuotas(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-500">
+                                <span className="material-icons-round">close</span>
+                            </button>
+                        </div>
+                        <div className="overflow-y-auto max-h-[60vh]">
+                            <table className="w-full text-sm">
+                                <thead className="sticky top-0 bg-gray-50 dark:bg-gray-800">
+                                    <tr className="border-b border-gray-100 dark:border-gray-700">
+                                        <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">ประเภทลา</th>
+                                        <th className="text-center px-2 py-3 text-xs font-semibold text-gray-500">ใช้ไป</th>
+                                        <th className="text-center px-2 py-3 text-xs font-semibold text-gray-500">ทั้งหมด</th>
+                                        <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500">คงเหลือ</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                                    {quotas.map((q: any, idx: number) => (
+                                        <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
+                                            <td className="px-4 py-3">
+                                                <div className="flex items-center gap-2.5">
+                                                    <div className={`w-8 h-8 rounded-lg bg-${q.color}-100 dark:bg-${q.color}-900/30 flex items-center justify-center shrink-0 overflow-hidden`}>
+                                                        {q.icon_url ? (
+                                                            <img src={q.icon_url.startsWith('http') ? q.icon_url : `${API_BASE}/${q.icon_url}`} alt="" className="w-6 h-6 object-contain" />
+                                                        ) : (
+                                                            <span className={`material-icons-round text-base text-${q.color}-500`}>{q.icon}</span>
+                                                        )}
+                                                    </div>
+                                                    <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{q.label.split(' (')[0]}</span>
+                                                </div>
+                                            </td>
+                                            <td className="text-center px-2 py-3 text-sm text-gray-600 dark:text-gray-400">{q.used}</td>
+                                            <td className="text-center px-2 py-3 text-sm text-gray-600 dark:text-gray-400">{q.total === 0 ? '∞' : q.total}</td>
+                                            <td className="text-center px-4 py-3">
+                                                <span className={`text-sm font-bold ${q.remaining < 0 ? 'text-green-600' : q.remaining === 0 ? 'text-red-500' : 'text-primary'}`}>
+                                                    {q.remaining < 0 ? '∞' : q.remaining} {q.unit}
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Version badge for deployment verification */}
             <div className="fixed bottom-20 left-4 z-10 opacity-30 text-[10px] text-gray-400 font-mono">v2.1</div>
