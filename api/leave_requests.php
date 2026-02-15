@@ -45,6 +45,11 @@ if ($method === 'GET') {
     $params = [];
     $types = '';
 
+    if (isset($_GET['id'])) {
+        $where[] = 'lr.id = ?';
+        $params[] = $_GET['id'];
+        $types .= 's';
+    }
     if (isset($_GET['employee_id'])) {
         $where[] = 'lr.employee_id = ?';
         $params[] = $_GET['employee_id'];
