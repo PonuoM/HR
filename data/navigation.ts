@@ -26,7 +26,7 @@ export const SIDEBAR_ADMIN_ITEMS: NavItem[] = [
     { path: '/admin/payslips', icon: 'payments', label: 'จัดการเงินเดือน' },
     { path: '/admin/cms', icon: 'article', label: 'จัดการข่าวสาร' },
     { path: '/admin/locations', icon: 'location_on', label: 'พื้นที่ทำงาน' },
-    { path: '/admin/departments', icon: 'apartment', label: 'จัดการแผนก' },
+    { path: '/admin/departments', icon: 'apartment', label: 'แผนกและตำแหน่ง' },
 ];
 
 /** Profile page — general menu items */
@@ -44,5 +44,5 @@ export const PROFILE_ADMIN_ITEMS: ProfileMenuItem[] = [
     { icon: 'payments', label: 'จัดการเงินเดือน', path: '/admin/payslips', color: 'bg-green-100 text-green-600' },
     { icon: 'article', label: 'จัดการข่าวสาร', path: '/admin/cms', color: 'bg-orange-100 text-orange-600' },
     { icon: 'location_on', label: 'พื้นที่ทำงาน', path: '/admin/locations', color: 'bg-teal-100 text-teal-600' },
-    { icon: 'apartment', label: 'จัดการแผนก', path: '/admin/departments', color: 'bg-indigo-100 text-indigo-600' },
+    { icon: 'apartment', label: 'แผนกและตำแหน่ง', path: '/admin/departments', color: 'bg-indigo-100 text-indigo-600' },
 ];
