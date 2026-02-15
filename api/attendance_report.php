@@ -25,6 +25,130 @@ if (!$month && !$year) {
     json_response(['error' => 'month or year parameter is required (e.g. month=2026-02 or year=2026)'], 400);
 }
 
+// ─── Daily detail for a single employee ───
+$action = $_GET['action'] ?? null;
+if ($action === 'daily' && $employee_id && $month) {
+    $startDate = $month . '-01';
+    $endDate = date('Y-m-t', strtotime($startDate));
+
+    // Get employee info
+    $empStmt = $conn->prepare("SELECT e.id, e.name, d.name AS department, d.work_start_time, d.work_end_time 
+                                FROM employees e LEFT JOIN departments d ON e.department_id = d.id WHERE e.id = ?");
+    $empStmt->bind_param('s', $employee_id);
+    $empStmt->execute();
+    $emp = $empStmt->get_result()->fetch_assoc();
+    if (!$emp) json_response(['error' => 'Employee not found'], 404);
+
+    $workStart = $emp['work_start_time'] ?? '09:00:00';
+    $workEnd = $emp['work_end_time'] ?? '17:00:00';
+
+    // Get attendance records indexed by date
+    $attMap = [];
+    $attStmt = $conn->prepare("SELECT date, clock_in, clock_out FROM attendance WHERE employee_id = ? AND date BETWEEN ? AND ?");
+    $attStmt->bind_param('sss', $employee_id, $startDate, $endDate);
+    $attStmt->execute();
+    $attRes = $attStmt->get_result();
+    while ($a = $attRes->fetch_assoc()) {
+        $attMap[$a['date']] = $a;
+    }
+
+    // Get holidays indexed by date
+    $holidayMap = [];
+    $hRes = $conn->query("SELECT date, name FROM holidays WHERE date BETWEEN '$startDate' AND '$endDate'");
+    while ($h = $hRes->fetch_assoc()) {
+        $holidayMap[$h['date']] = $h['name'];
+    }
+
+    // Get approved leaves with dates
+    $leaveMap = []; // date => leave info
+    $lvStmt = $conn->prepare(
+        "SELECT lr.start_date, lr.end_date, lr.total_days, lt.name AS leave_type_name
+         FROM leave_requests lr
+         JOIN leave_types lt ON lr.leave_type_id = lt.id
+         WHERE lr.employee_id = ? AND lr.status = 'approved'
+           AND ((lr.start_date BETWEEN ? AND ?) OR (lr.end_date BETWEEN ? AND ?))"
+    );
+    $lvStmt->bind_param('sssss', $employee_id, $startDate, $endDate, $startDate, $endDate);
+    $lvStmt->execute();
+    $lvRes = $lvStmt->get_result();
+    while ($lv = $lvRes->fetch_assoc()) {
+        $cur = new DateTime(max($lv['start_date'], $startDate));
+        $lvEnd = new DateTime(min($lv['end_date'], $endDate));
+        while ($cur <= $lvEnd) {
+            $d = $cur->format('Y-m-d');
+            $leaveMap[$d] = $lv['leave_type_name'];
+            $cur->modify('+1 day');
+        }
+    }
+
+    // Build daily rows
+    $days = [];
+    $current = new DateTime($startDate);
+    $endDt = new DateTime($endDate);
+    $today = date('Y-m-d');
+
+    while ($current <= $endDt) {
+        $dateStr = $current->format('Y-m-d');
+        $dow = (int)$current->format('N');
+        $att = $attMap[$dateStr] ?? null;
+
+        $status = '';
+        $clockIn = $att['clock_in'] ?? null;
+        $clockOut = $att['clock_out'] ?? null;
+        $lateMinutes = 0;
+        $leaveType = $leaveMap[$dateStr] ?? null;
+        $holidayName = $holidayMap[$dateStr] ?? null;
+
+        if ($dow > 5) {
+            $status = 'weekend';
+        } elseif ($holidayName) {
+            $status = 'holiday';
+        } elseif ($leaveType) {
+            $status = 'leave';
+        } elseif ($att && $clockIn) {
+            if ($clockIn > $workStart) {
+                $status = 'late';
+                $lateMinutes = round((strtotime($clockIn) - strtotime($workStart)) / 60);
+            } else {
+                $status = 'present';
+            }
+        } elseif ($dateStr <= $today) {
+            $status = 'absent';
+        } else {
+            $status = 'future';
+        }
+
+        // Work hours for the day
+        $workHours = 0;
+        if ($clockIn && $clockOut) {
+            $workHours = round((strtotime($clockOut) - strtotime($clockIn)) / 3600, 2);
+        }
+
+        $days[] = [
+            'date' => $dateStr,
+            'day_of_week' => $dow,
+            'status' => $status,
+            'clock_in' => $clockIn,
+            'clock_out' => $clockOut,
+            'late_minutes' => $lateMinutes,
+            'work_hours' => $workHours,
+            'leave_type' => $leaveType,
+            'holiday_name' => $holidayName,
+        ];
+        $current->modify('+1 day');
+    }
+
+    json_response([
+        'employee_id' => $emp['id'],
+        'employee_name' => $emp['name'],
+        'department' => $emp['department'] ?? '-',
+        'work_start_time' => $workStart,
+        'work_end_time' => $workEnd,
+        'month' => $month,
+        'days' => $days,
+    ]);
+}
+
 // ─── Determine date range ───
 if ($month) {
     $startDate = $month . '-01';
