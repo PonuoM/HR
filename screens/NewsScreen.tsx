@@ -267,11 +267,11 @@ const NewsScreen: React.FC = () => {
               )}
               {comments.map((c: any) => (
                 <div key={c.id} className="flex gap-3 group">
-                  <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0">
+                  <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0 overflow-hidden">
                     {c.avatar ? (
-                      <img src={c.avatar} className="w-full h-full rounded-full object-cover" alt="" />
+                      <img src={c.avatar} className="w-full h-full object-cover" alt="" />
                     ) : (
-                      (c.employee_name || '').substring(0, 2)
+                      <span className="material-icons-round text-lg">person</span>
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -295,8 +295,12 @@ const NewsScreen: React.FC = () => {
 
             {/* Comment input */}
             <div className="p-4 border-t border-gray-100 dark:border-gray-800 flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0">
-                {(user?.name || '').substring(0, 2)}
+              <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0 overflow-hidden">
+                {user?.avatar ? (
+                  <img src={user.avatar} className="w-full h-full object-cover" alt="" />
+                ) : (
+                  <span className="material-icons-round text-lg">person</span>
+                )}
               </div>
               <input
                 type="text"
