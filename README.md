@@ -1,217 +1,199 @@
-# HR Mobile Connect - Project Documentation
+# HR Mobile Connect
 
-เอกสารฉบับนี้สรุปภาพรวมของระบบ HR Mobile Connect ที่ได้ทำการพัฒนาส่วน Frontend (User Interface) เสร็จสิ้นแล้ว รวมถึงโครงสร้างไฟล์ คำแนะนำด้าน Technical Stack และการออกแบบฐานข้อมูล
+ระบบ HR สำหรับพนักงาน **Primapassion49** — เว็บแอปพลิเคชันแบบ Mobile-First พร้อม PWA รองรับการติดตั้งลงมือถือ
 
-## 1. สิ่งที่สร้างไปแล้ว (Implemented Features)
-
-เราได้สร้างหน้าจอหลักและระบบการนำทาง (Navigation) โดยเน้น Mobile-First Experience ที่รองรับ Dark Mode ดังนี้:
-
-1.  **Home Screen (Dashboard)**:
-    *   แสดงข้อมูลผู้ใช้และรูปโปรไฟล์
-    *   **Attendance Card**: การ์ดขนาดใหญ่สำหรับลงเวลาเข้างาน (Check-in) พร้อมแสดงเวลาและสถานที่
-    *   **Leave Quota**: แสดงวันลาคงเหลือแบบเลื่อนแนวนอน (Horizontal Scroll)
-    *   **Quick Menu**: ปุ่มลัดเข้าเมนูต่างๆ
-    *   **News Preview**: แสดงข่าวประชาสัมพันธ์ล่าสุด
-
-2.  **Create Request Screen (ระบบยื่นคำขอ)**:
-    *   รองรับทั้งการลา (Leave) และการขอโอที (OT)
-    *   ฟอร์มเลือกประเภท วันที่ เวลา และเหตุผล
-    *   UI สำหรับแสดงขั้นตอนการอนุมัติ (Approval Timeline Steps)
-
-3.  **Status Screen (ติดตามสถานะ)**:
-    *   แสดงสถานะของคำขอ (Pending, Approved, Rejected)
-    *   **Timeline View**: แสดงไทม์ไลน์การอนุมัติอย่างละเอียด ว่าเรื่องอยู่ที่ใคร (Supervisor -> HR)
-
-4.  **News Screen (ข่าวประชาสัมพันธ์)**:
-    *   ส่วนแสดงข่าวปักหมุด (Pinned News)
-    *   News Feed รายการข่าวพร้อมจำนวน Like/Comment
-
-5.  **Profile & Settings (โปรไฟล์และการตั้งค่า)**:
-    *   **Menu Hub**: จุดรวมเมนูตั้งค่าและทางเข้า Admin (สำหรับผู้มีสิทธิ์)
-    *   **Settings**: ระบบเปลี่ยนธีม (Dark Mode) และภาษา
-    *   **Security**: จำลองระบบ **WebAuthn (Passkeys)** สำหรับการลงทะเบียนเข้าสู่ระบบด้วยลายนิ้วมือ/ใบหน้า
-    *   **Help Center**: ศูนย์ช่วยเหลือและ FAQ
-
-6.  **Admin Panel (Mobile Responsive)**:
-    *   ออกแบบให้ใช้งานได้ดีทั้งบน Desktop และ Mobile Web
-    *   **Dashboard**: ภาพรวมสถิติองค์กรและคำขอล่าสุด
-    *   **Employee Management**: ค้นหาและจัดการข้อมูลพนักงาน
-    *   **Content Management (CMS)**: จัดการข่าวสารและปักหมุดประกาศสำคัญ
-
-7.  **Navigation & Layout**:
-    *   **Bottom Navigation**: แถบเมนูด้านล่างที่ซ่อนอัตโนมัติเมื่ออยู่ในหน้าย่อย
-    *   **Status Bar**: จำลอง Status bar ของมือถือ
-    *   **Responsive Sidebar**: เมนูด้านข้างสำหรับหน้าจอ Desktop
+🌐 **Production:** [https://hr.prima49.com](https://hr.prima49.com)
 
 ---
 
-## 2. โครงสร้างไฟล์ (Project Structure)
+## ✨ ฟีเจอร์หลัก
 
-โครงสร้างถูกออกแบบให้เป็น Component-based เพื่อความง่ายในการดูแลรักษา โดยแยกส่วน Admin และ Settings ไว้อย่างชัดเจน
+### 👤 สำหรับพนักงาน
+- **ลงเวลาเข้า/ออก** — ด้วย GPS ตรวจสอบตำแหน่ง, ระบุสถานที่ (On-site / Off-site)
+- **ยื่นลา / ขอ OT** — สร้างคำขอลา-ลาป่วย-ลากิจ-OT พร้อมแนบหลักฐาน
+- **ติดตามสถานะคำขอ** — ดูสถานะอนุมัติแบบ 2 ขั้น (หัวหน้า → HR)
+- **วันลาคงเหลือ** — สรุปโควต้าลาทุกประเภท (รายปี)
+- **สลิปเงินเดือน** — ดูสลิปรายเดือนจาก Admin
+- **ปฏิทินทำงาน** — แสดงวันลา, วันหยุดราชการ, สถานะเข้างาน, วันขาด
+- **ข่าวประชาสัมพันธ์** — อ่านข่าวสาร/ประกาศจากบริษัท
+- **การแจ้งเตือน** — แยกแท็บ อ่านแล้ว/ยังไม่อ่าน, ลบ, อ่านทั้งหมด
+- **โปรไฟล์** — อัปโหลดรูปโปรไฟล์, เปลี่ยนรหัสผ่าน, Biometric login (Fingerprint/FaceID)
+- **ธีมมืด/สว่าง** — ปรับ Dark Mode ได้
+
+### 🛡️ สำหรับ Admin
+- **แดชบอร์ด** — ภาพรวมพนักงาน, คำขอรออนุมัติ
+- **จัดการพนักงาน** — เพิ่ม/แก้ไข/ระงับ/Reset Password, กำหนดหัวหน้าอนุมัติ 2 ขั้น
+- **จัดการโควต้าลา** — กำหนดวันลาของทุกประเภท, ตั้งค่าตามอายุงาน (Seniority Tiers)
+- **จัดการเนื้อหา (CMS)** — สร้าง/แก้ไขข่าว, จัดการประเภทลา (ไอคอน, สี, หน่วย)
+- **อัปโหลดสลิปเงินเดือน** — อัปโหลดเป็นรายคน/รายเดือน
+- **จัดการสถานที่ทำงาน** — เพิ่ม/แก้ไข Work Location (พิกัด GPS, รัศมี)
+- **จัดการแผนก/ตำแหน่ง** — ตั้งเวลาเข้า-ออกงานรายแผนก
+- **อนุมัติคำขอ** — อนุมัติ/ปฏิเสธ ลา/OT พร้อมดูหลักฐาน, Bypass ได้
+
+### 📱 PWA
+- ติดตั้งลงหน้าจอมือถือ (Add to Home Screen)
+- Push Notification
+- Offline caching (Service Worker)
+
+---
+
+## 🔧 Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| **Frontend** | React 19 + TypeScript + Vite |
+| **Styling** | Tailwind CSS (CDN) + Kanit Font |
+| **Routing** | React Router v7 (HashRouter) |
+| **Backend** | PHP (Native REST API) |
+| **Database** | MySQL (utf8mb4) |
+| **PWA** | Service Worker + Web Manifest |
+
+---
+
+## 📂 โครงสร้างโปรเจค
 
 ```
-/
-├── index.html              # Entry Point และการตั้งค่า Tailwind/Fonts
-├── index.tsx               # React Root Render
-├── App.tsx                 # Routing Logic และ Layout หลัก
-├── types.ts                # TypeScript Interface definitions
-├── metadata.json           # App Config & Permissions
-├── components/             # Reusable Components
-│   ├── BottomNav.tsx       # เมนูนำทางด้านล่าง
-│   ├── Sidebar.tsx         # เมนูนำทางด้านข้าง (Desktop)
-│   └── StatusBar.tsx       # ส่วนแสดงผลด้านบน (Signal/Time)
-└── screens/                # หน้าจอหลักของแอปพลิเคชัน
-    ├── HomeScreen.tsx      # หน้า Dashboard พนักงาน
-    ├── CreateRequestScreen.tsx # หน้าฟอร์มยื่นคำขอ
-    ├── StatusScreen.tsx    # หน้าติดตามสถานะ
-    ├── NewsScreen.tsx      # หน้าข่าวประชาสัมพันธ์
-    ├── ProfileScreen.tsx   # หน้าโปรไฟล์และเมนูหลัก
-    ├── admin/              # ส่วนผู้ดูแลระบบ (Admin Modules)
-    │   ├── AdminDashboardScreen.tsx
-    │   ├── AdminEmployeeScreen.tsx
-    │   └── AdminContentScreen.tsx
-    └── settings/           # ส่วนการตั้งค่า (Settings Modules)
-        ├── SettingsScreen.tsx
-        ├── SecurityScreen.tsx
-        └── HelpScreen.tsx
+hr-mobile-connect/
+├── api/                    # PHP REST API
+│   ├── config.php          # DB config (dev)
+│   ├── config.production.php # DB config (production)
+│   ├── auth.php            # Login / เปลี่ยนรหัสผ่าน
+│   ├── employees.php       # CRUD พนักงาน
+│   ├── attendance.php      # ลงเวลาเข้า-ออก
+│   ├── leave_requests.php  # คำขอลา/OT
+│   ├── leave_types.php     # ประเภทการลา
+│   ├── leave_quotas.php    # โควต้าลา
+│   ├── calendar.php        # ข้อมูลปฏิทิน
+│   ├── departments.php     # แผนก/ตำแหน่ง
+│   ├── notifications.php   # การแจ้งเตือน
+│   ├── news.php            # ข่าวสาร
+│   ├── payslips.php        # สลิปเงินเดือน
+│   ├── uploads.php         # อัปโหลดไฟล์
+│   ├── work_locations.php  # สถานที่ทำงาน
+│   └── schema.sql          # Database schema ทั้งหมด
+├── screens/                # หน้าจอทั้งหมด
+│   ├── HomeScreen.tsx      # หน้าแรก (Dashboard)
+│   ├── LoginScreen.tsx     # หน้า Login
+│   ├── CalendarScreen.tsx  # ปฏิทิน
+│   ├── CreateRequestScreen.tsx  # ยื่นลา/OT
+│   ├── StatusScreen.tsx    # สถานะคำขอ
+│   ├── NewsScreen.tsx      # ข่าวสาร
+│   ├── PayslipScreen.tsx   # สลิปเงินเดือน
+│   ├── ProfileScreen.tsx   # โปรไฟล์
+│   ├── admin/              # หน้า Admin ทั้งหมด
+│   └── settings/           # ตั้งค่า, ความปลอดภัย, ช่วยเหลือ
+├── components/             # Components ที่ใช้ซ้ำ
+├── services/api.ts         # API Service Layer
+├── contexts/AuthContext.tsx # Authentication Context
+├── database/               # SQL Migrations
+├── public/                 # PWA assets (manifest, sw.js, icons)
+├── build-host.js           # Build script สำหรับ production
+├── vite.config.ts          # Vite config (dev + host mode)
+└── package.json
 ```
 
 ---
 
-## 3. Recommended Tech Stack (เพื่อการพัฒนาต่อที่ง่ายที่สุด)
+## 🚀 การติดตั้ง (Development)
 
-เพื่อให้ทีมสามารถพัฒนาต่อได้รวดเร็ว ดูแลรักษาง่าย และรองรับการขยายตัว แนะนำให้ใช้ Stack ดังนี้:
+### 1. ติดตั้ง Dependencies
 
-### **Option A: Modern Full-Stack (แนะนำสูงสุด)**
-*   **Framework**: **Next.js** (React Framework)
-    *   *เหตุผล*: จัดการ Routing ง่าย, มี API Routes ในตัว (ไม่ต้องทำ Backend แยก), ประสิทธิภาพสูง (SSR/ISR)
-*   **Database & Auth**: **Supabase**
-    *   *เหตุผล*: เป็นทางเลือก Open Source ของ Firebase แต่ใช้ PostgreSQL ซึ่งเหมาะกับระบบ HR ที่มี Relation ซับซ้อน มีระบบ Auth และ Storage ในตัว
-*   **Styling**: **Tailwind CSS** (มีอยู่แล้ว)
-*   **State Management**: **Zustand** (ง่ายกว่า Redux มาก)
+```bash
+npm install
+```
 
-### **Option B: Separate Backend (สำหรับองค์กรขนาดใหญ่)**
-*   **Frontend**: React (Vite) + Tailwind
-*   **Backend**: **NestJS** (Node.js) หรือ **Go (Golang)**
-*   **Database**: PostgreSQL
-*   **Communication**: REST API หรือ GraphQL
+### 2. สร้าง Database
+
+สร้าง database `hr_mobile_connect` แล้วรัน:
+
+```bash
+# รัน schema หลัก
+mysql -u root -p hr_mobile_connect < api/schema.sql
+
+# รัน migrations ทั้งหมด
+php database/run_migration.php
+```
+
+### 3. ตั้งค่า Database (Dev)
+
+แก้ไขไฟล์ `api/config.php`:
+
+```php
+$DB_HOST = 'localhost';
+$DB_USER = 'root';
+$DB_PASS = 'your_password';
+$DB_NAME = 'hr_mobile_connect';
+```
+
+### 4. รัน Dev Server
+
+```bash
+npm run dev
+```
+
+เปิดเบราว์เซอร์ที่ `http://localhost:3000`
+
+> ⚠️ ต้องมี Apache/PHP รันอยู่ที่ port 80 สำหรับ API (Vite proxy `/hr-mobile-connect/api` → `localhost:80`)
+
+### 5. Login เริ่มต้น
+
+- **รหัสพนักงาน:** (ตามที่สร้างใน DB)
+- **รหัสผ่านเริ่มต้น:** `1234`
 
 ---
 
-## 4. Database Schema (.sql)
+## 🏗️ Build & Deploy (Production)
 
-นี่คือโครงสร้างฐานข้อมูล PostgreSQL ที่ออกแบบมารองรับ Logic ระบบ HR, Geofencing และ Approval Flow
+### 1. Build
 
-```sql
--- 1. Users & Organization Structure
-CREATE TABLE departments (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    employee_id VARCHAR(20) UNIQUE NOT NULL,
-    email VARCHAR(100) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    first_name VARCHAR(100) NOT NULL,
-    last_name VARCHAR(100) NOT NULL,
-    role VARCHAR(20) DEFAULT 'employee', -- 'employee', 'hr', 'manager', 'admin'
-    department_id INTEGER REFERENCES departments(id),
-    manager_id UUID REFERENCES users(id), -- Self-referencing for hierarchy
-    avatar_url TEXT,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- 2. Leave System Setup
-CREATE TABLE leave_types (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(50) NOT NULL, -- 'Sick', 'Vacation', 'Business'
-    default_quota_days INTEGER NOT NULL,
-    is_lifetime_limit BOOLEAN DEFAULT FALSE -- For specific leaves like 'Ordination'
-);
-
-CREATE TABLE user_leave_quotas (
-    id SERIAL PRIMARY KEY,
-    user_id UUID REFERENCES users(id),
-    leave_type_id INTEGER REFERENCES leave_types(id),
-    year INTEGER NOT NULL,
-    total_days DECIMAL(5,2) NOT NULL,
-    used_days DECIMAL(5,2) DEFAULT 0,
-    remaining_days DECIMAL(5,2) GENERATED ALWAYS AS (total_days - used_days) STORED,
-    UNIQUE(user_id, leave_type_id, year)
-);
-
--- 3. Requests & Approvals
-CREATE TYPE request_status AS ENUM ('draft', 'pending_manager', 'pending_hr', 'approved', 'rejected', 'cancelled');
-
-CREATE TABLE requests (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES users(id),
-    type VARCHAR(20) NOT NULL, -- 'leave' or 'ot'
-    leave_type_id INTEGER REFERENCES leave_types(id), -- Nullable if type is OT
-    start_date TIMESTAMP NOT NULL,
-    end_date TIMESTAMP NOT NULL,
-    total_days DECIMAL(5,2),
-    reason TEXT,
-    attachment_url TEXT,
-    current_status request_status DEFAULT 'pending_manager',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE request_approvals (
-    id SERIAL PRIMARY KEY,
-    request_id UUID REFERENCES requests(id),
-    approver_id UUID REFERENCES users(id),
-    step_order INTEGER NOT NULL, -- 1 = Manager, 2 = HR
-    status VARCHAR(20) DEFAULT 'pending', -- 'pending', 'approved', 'rejected'
-    comment TEXT,
-    updated_at TIMESTAMP
-);
-
--- 4. Attendance & Geofencing
-CREATE TABLE work_locations (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(100),
-    latitude DECIMAL(10,8) NOT NULL,
-    longitude DECIMAL(11,8) NOT NULL,
-    radius_meters INTEGER DEFAULT 500
-);
-
-CREATE TABLE attendance_logs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES users(id),
-    check_in_time TIMESTAMP,
-    check_out_time TIMESTAMP,
-    check_in_lat DECIMAL(10,8),
-    check_in_long DECIMAL(11,8),
-    check_out_lat DECIMAL(10,8),
-    check_out_long DECIMAL(11,8),
-    is_offsite BOOLEAN DEFAULT FALSE,
-    is_late BOOLEAN DEFAULT FALSE,
-    date DATE DEFAULT CURRENT_DATE
-);
-
--- 5. News & CMS
-CREATE TABLE news_posts (
-    id SERIAL PRIMARY KEY,
-    title VARCHAR(255) NOT NULL,
-    content TEXT NOT NULL,
-    image_url TEXT,
-    author_id UUID REFERENCES users(id),
-    is_pinned BOOLEAN DEFAULT FALSE,
-    is_urgent BOOLEAN DEFAULT FALSE,
-    target_department_id INTEGER REFERENCES departments(id), -- NULL for all
-    published_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    view_count INTEGER DEFAULT 0
-);
-
-CREATE TABLE news_interactions (
-    id SERIAL PRIMARY KEY,
-    news_id INTEGER REFERENCES news_posts(id),
-    user_id UUID REFERENCES users(id),
-    type VARCHAR(20) NOT NULL -- 'like', 'comment'
-);
+```bash
+npm run host:build
 ```
+
+จะสร้างโฟลเดอร์ `host-build/` ที่รวมทุกอย่าง:
+- Frontend (Vite build) — ทุก path ใช้ `/HR/` prefix
+- Backend (PHP API) — ใช้ credentials production อัตโนมัติ
+- PWA (manifest, service worker, icons)
+- `.htaccess` สำหรับ SPA routing
+
+### 2. Upload ขึ้น Server
+
+อัปโหลด **เนื้อหาทั้งหมด** ใน `host-build/` ไปที่:
+
+```
+/domains/prima49.com/public_html/HR/
+```
+
+### 3. ตั้งค่า Server
+
+- ✅ Apache + PHP + MySQL
+- ✅ `mod_rewrite` ต้องเปิด
+- ✅ สร้าง database `primacom_hr_mobile_connect`
+- ✅ รัน `schema.sql` และ migrations ทั้งหมด
+- ✅ โฟลเดอร์ `uploads/` ต้อง writable (`chmod 755`)
+
+### 4. Database Production
+
+```
+Host:     localhost
+Database: primacom_hr_mobile_connect
+Username: ***DB_USER***
+Password: ***REMOVED***
+```
+
+---
+
+## 📝 คำสั่งที่ใช้บ่อย
+
+| คำสั่ง | คำอธิบาย |
+|--------|----------|
+| `npm run dev` | รัน dev server (port 3000) |
+| `npm run build` | Build frontend ปกติ |
+| `npm run host:build` | Build ทั้งหมดสำหรับ production |
+| `npm run preview` | Preview build ที่ build แล้ว |
+
+---
+
+## 📄 License
+
+Private — Primapassion49 Internal Use Only
