@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { QUICK_MENU_ITEMS } from '../data';
 import { useApi } from '../hooks/useApi';
 import { API_BASE, getNotifications, getLeaveQuotas, getAttendance, getNews, getEmployee, markNotificationRead, markAllNotificationsRead, deleteNotification, clockIn, clockOut, checkLocation, getLeaveRequests, updateLeaveRequest, getUploads } from '../services/api';
+import { subscribeToPush } from '../services/pushNotifications';
 import LocationCheckModal from '../components/LocationCheckModal';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../contexts/AuthContext';
@@ -32,6 +33,13 @@ const HomeScreen: React.FC = () => {
     const greeting = hour >= 5 && hour < 12 ? 'สวัสดีตอนเช้า' : hour >= 12 && hour < 17 ? 'สวัสดีตอนบ่าย' : hour >= 17 && hour < 20 ? 'สวัสดีตอนเย็น' : 'สวัสดีตอนค่ำ';
     const clockStr = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
 
+    // Auto-subscribe to push notifications
+    useEffect(() => {
+        if (empId) {
+            subscribeToPush(empId).catch(() => { });
+        }
+    }, [empId]);
+
     // Fetch data from API
     const { data: rawNotifications, refetch: refetchNotifs } = useApi(() => getNotifications(empId), [empId]);
     const { data: rawQuotas } = useApi(() => getLeaveQuotas(empId), [empId]);
@@ -39,8 +47,8 @@ const HomeScreen: React.FC = () => {
     const { data: allNews } = useApi(() => getNews(), []);
     const { data: currentUser } = useApi(() => getEmployee(empId), [empId]);
     const { data: pendingRequests, refetch: refetchPending } = useApi(
-        () => (isAdmin || empId) ? getLeaveRequests({ status: 'pending' }) : Promise.resolve([]),
-        [isAdmin, empId]
+        () => empId ? getLeaveRequests({ status: 'pending' }) : Promise.resolve([]),
+        [empId]
     );
 
     // Filter: show only requests where I am the current pending approver
@@ -559,8 +567,8 @@ const HomeScreen: React.FC = () => {
                         </div>
                     </section>
 
-                    {/* Pending Approvals (Admin Only) */}
-                    {isAdmin && pendingCount > 0 && (
+                    {/* Pending Approvals (Approvers + Admin) */}
+                    {pendingCount > 0 && (
                         <section>
                             <div className="flex justify-between items-center mb-4">
                                 <div className="flex items-center gap-2">
