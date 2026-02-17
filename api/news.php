@@ -1,6 +1,6 @@
 <?php
 /**
- * News Articles API
+ * News Articles API (Multi-Company)
  * GET    /api/news.php                          - List all (pinned first), with like counts + user like state
  * POST   /api/news.php                          - Create article
  * PUT    /api/news.php?id=X                     - Update article
@@ -12,6 +12,8 @@
  * DELETE /api/news.php?action=comment&id=X      - Delete comment (id = comment id)
  */
 require_once __DIR__ . '/config.php';
+
+$company_id = get_company_id();
 
 // Auto-create supporting tables if they don't exist
 $conn->query("CREATE TABLE IF NOT EXISTS `news_likes` (
@@ -119,7 +121,7 @@ if ($method === 'GET' && !$action) {
         (SELECT COUNT(*) FROM news_likes WHERE article_id = a.id) as like_count,
         (SELECT COUNT(*) FROM news_comments WHERE article_id = a.id) as comment_count"
         . ($employeeId ? ", (SELECT COUNT(*) FROM news_likes WHERE article_id = a.id AND employee_id = '" . $conn->real_escape_string($employeeId) . "') as user_liked" : ", 0 as user_liked")
-        . " FROM news_articles a ORDER BY a.is_pinned DESC, a.published_at DESC";
+        . " FROM news_articles a WHERE a.company_id = $company_id ORDER BY a.is_pinned DESC, a.published_at DESC";
     $result = $conn->query($sql);
     $articles = [];
     while ($row = $result->fetch_assoc()) {
@@ -137,8 +139,9 @@ if ($method === 'GET' && !$action) {
 // ---- CREATE ----
 if ($method === 'POST' && !$action) {
     $body = get_json_body();
-    $stmt = $conn->prepare("INSERT INTO news_articles (title, content, image, department, department_code, is_pinned, is_urgent) VALUES (?, ?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param('sssssii',
+    $stmt = $conn->prepare("INSERT INTO news_articles (company_id, title, content, image, department, department_code, is_pinned, is_urgent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+    $stmt->bind_param('isssssis',
+        $company_id,
         $body['title'], $body['content'], $body['image'],
         $body['department'], $body['department_code'],
         $body['is_pinned'], $body['is_urgent']
@@ -151,11 +154,11 @@ if ($method === 'POST' && !$action) {
 if ($method === 'PUT' && isset($_GET['id']) && !$action) {
     $id = (int)$_GET['id'];
     $body = get_json_body();
-    $stmt = $conn->prepare("UPDATE news_articles SET title=?, content=?, image=?, department=?, department_code=?, is_pinned=?, is_urgent=? WHERE id=?");
-    $stmt->bind_param('sssssiii',
+    $stmt = $conn->prepare("UPDATE news_articles SET title=?, content=?, image=?, department=?, department_code=?, is_pinned=?, is_urgent=? WHERE id=? AND company_id=?");
+    $stmt->bind_param('sssssiiii',
         $body['title'], $body['content'], $body['image'],
         $body['department'], $body['department_code'],
-        $body['is_pinned'], $body['is_urgent'], $id
+        $body['is_pinned'], $body['is_urgent'], $id, $company_id
     );
     $stmt->execute();
     json_response(['message' => 'Updated']);
@@ -164,7 +167,9 @@ if ($method === 'PUT' && isset($_GET['id']) && !$action) {
 // ---- DELETE ----
 if ($method === 'DELETE' && isset($_GET['id']) && !$action) {
     $id = (int)$_GET['id'];
-    $conn->query("DELETE FROM news_articles WHERE id = $id");
+    $stmt = $conn->prepare("DELETE FROM news_articles WHERE id = ? AND company_id = ?");
+    $stmt->bind_param('ii', $id, $company_id);
+    $stmt->execute();
     json_response(['message' => 'Deleted']);
 }
 

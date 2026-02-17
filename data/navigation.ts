@@ -23,6 +23,7 @@ export const SIDEBAR_NAV_ITEMS: NavItem[] = [
 /** Desktop sidebar admin section items */
 export const SIDEBAR_ADMIN_ITEMS: NavItem[] = [
     { path: '/admin/dashboard', icon: 'admin_panel_settings', label: 'ภาพรวมระบบ' },
+    { path: '/admin/companies', icon: 'domain', label: 'จัดการบริษัท' },
     { path: '/admin/employees', icon: 'people', label: 'จัดการพนักงาน' },
     { path: '/admin/quotas', icon: 'timelapse', label: 'ตั้งค่าโควต้า' },
     { path: '/admin/payslips', icon: 'payments', label: 'จัดการเงินเดือน' },
@@ -31,6 +32,8 @@ export const SIDEBAR_ADMIN_ITEMS: NavItem[] = [
     { path: '/admin/departments', icon: 'apartment', label: 'แผนกและตำแหน่ง' },
     { path: '/admin/attendance-report', icon: 'summarize', label: 'รายงานเข้างาน' },
     { path: '/admin/holidays', icon: 'celebration', label: 'วันหยุดบริษัท' },
+    { path: '/admin/face-registration', icon: 'face', label: 'ลงทะเบียนใบหน้า' },
+    { path: '/admin/security', icon: 'shield', label: 'แจ้งเตือนความปลอดภัย' },
 ];
 
 /** Profile page — general menu items */
@@ -43,6 +46,7 @@ export const PROFILE_MENU_ITEMS: ProfileMenuItem[] = [
 /** Profile page — admin menu items (mobile access point) */
 export const PROFILE_ADMIN_ITEMS: ProfileMenuItem[] = [
     { icon: 'dashboard', label: 'Admin Dashboard', path: '/admin/dashboard', color: 'bg-blue-100 text-blue-600' },
+    { icon: 'domain', label: 'จัดการบริษัท', path: '/admin/companies', color: 'bg-amber-100 text-amber-600', superadminOnly: true },
     { icon: 'people', label: 'จัดการพนักงาน', path: '/admin/employees', color: 'bg-purple-100 text-purple-600' },
     { icon: 'timelapse', label: 'ตั้งค่าโควต้า', path: '/admin/quotas', color: 'bg-pink-100 text-pink-600' },
     { icon: 'payments', label: 'จัดการเงินเดือน', path: '/admin/payslips', color: 'bg-green-100 text-green-600' },
@@ -51,4 +55,6 @@ export const PROFILE_ADMIN_ITEMS: ProfileMenuItem[] = [
     { icon: 'apartment', label: 'แผนกและตำแหน่ง', path: '/admin/departments', color: 'bg-indigo-100 text-indigo-600' },
     { icon: 'summarize', label: 'รายงานเข้างาน', path: '/admin/attendance-report', color: 'bg-emerald-100 text-emerald-600' },
     { icon: 'celebration', label: 'วันหยุดบริษัท', path: '/admin/holidays', color: 'bg-rose-100 text-rose-600' },
+    { icon: 'face', label: 'ลงทะเบียนใบหน้า', path: '/admin/face-registration', color: 'bg-cyan-100 text-cyan-600' },
+    { icon: 'shield', label: 'แจ้งเตือนความปลอดภัย', path: '/admin/security', color: 'bg-red-100 text-red-600', superadminOnly: true },
 ];

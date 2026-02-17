@@ -90,22 +90,19 @@
             width: 100%;
         }
 
-        /* Page Transition — fade-in + subtle slide-up */
+        /* Page Transition — fade-in only (no transform — it breaks fixed modal positioning!) */
         @keyframes pageFadeIn {
             from {
                 opacity: 0;
-                transform: translateY(6px);
             }
 
             to {
                 opacity: 1;
-                transform: translateY(0);
             }
         }
 
         .page-transition {
             animation: pageFadeIn 280ms cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
-            will-change: opacity, transform;
             min-height: 100%;
         }
 
@@ -161,6 +158,34 @@
         .dark select:hover:not(:focus):not(:disabled) {
             border-color: #475569 !important;
         }
+
+        /* ──── Global Modal: always visible & scrollable ──── */
+        /* All fixed overlays with z-50+ become scrollable */
+        .fixed.inset-0[class*="z-5"],
+        .fixed.inset-0[class*="z-["] {
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        /* ──── Prevent Copy / Select / Long-press ──── */
+        body {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+        }
+
+        /* Allow selection inside form inputs & textareas */
+        input,
+        textarea,
+        [contenteditable="true"] {
+            -webkit-user-select: text;
+            -moz-user-select: text;
+            -ms-user-select: text;
+            user-select: text;
+            -webkit-touch-callout: default;
+        }
     </style>
     <script type="importmap">
 {
@@ -187,6 +212,21 @@
                     .catch(err => console.log('SW registration failed:', err));
             });
         }
+
+        // Disable right-click context menu
+        document.addEventListener('contextmenu', function (e) {
+            e.preventDefault();
+        });
+
+        // Disable copy/cut keyboard shortcuts
+        document.addEventListener('keydown', function (e) {
+            if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'x')) {
+                var tag = e.target.tagName;
+                if (tag !== 'INPUT' && tag !== 'TEXTAREA' && !e.target.isContentEditable) {
+                    e.preventDefault();
+                }
+            }
+        });
     </script>
 </body>
 

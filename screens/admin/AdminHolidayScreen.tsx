@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { API_BASE } from '../../services/api';
+import { API_BASE, getAuthHeaders } from '../../services/api';
 
 interface Holiday {
     id: number;
@@ -44,7 +44,7 @@ const AdminHolidayScreen: React.FC = () => {
 
     const fetchData = useCallback(() => {
         setLoading(true);
-        fetch(`${API_BASE}/holidays.php?year=${selectedYear}`)
+        fetch(`${API_BASE}/holidays.php?year=${selectedYear}`, { headers: getAuthHeaders() })
             .then(r => r.json())
             .then(d => { setData(d); setLoading(false); })
             .catch(() => setLoading(false));
@@ -89,7 +89,7 @@ const AdminHolidayScreen: React.FC = () => {
             const method = editId ? 'PUT' : 'POST';
             const res = await fetch(url, {
                 method,
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ date: formDate, name: formName.trim() }),
             });
             const json = await res.json();
@@ -111,7 +111,7 @@ const AdminHolidayScreen: React.FC = () => {
         if (!deleteId) return;
         setDeleting(true);
         try {
-            await fetch(`${API_BASE}/holidays.php?id=${deleteId}`, { method: 'DELETE' });
+            await fetch(`${API_BASE}/holidays.php?id=${deleteId}`, { method: 'DELETE', headers: getAuthHeaders() });
             setDeleteId(null);
             fetchData();
         } catch { alert('Network error'); }
@@ -125,7 +125,7 @@ const AdminHolidayScreen: React.FC = () => {
         try {
             const res = await fetch(`${API_BASE}/holidays.php?action=copy`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ from_year: copyFromYear, to_year: copyToYear }),
             });
             const json = await res.json();
@@ -153,7 +153,7 @@ const AdminHolidayScreen: React.FC = () => {
         <div className="pt-6 md:pt-8 pb-8 px-4 md:px-8 max-w-4xl mx-auto min-h-full">
             {/* Header */}
             <header className="mb-6 flex items-center gap-3">
-                <button onClick={() => navigate('/admin')} className="md:hidden p-2 -ml-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-500">
+                <button onClick={() => navigate('/profile')} className="md:hidden p-2 -ml-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-500">
                     <span className="material-icons-round">arrow_back</span>
                 </button>
                 <div className="flex-1">

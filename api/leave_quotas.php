@@ -14,20 +14,28 @@ if ($method === 'GET') {
     $employee_id = $conn->real_escape_string($_GET['employee_id'] ?? 'EMP001');
     $year = (int)($_GET['year'] ?? date('Y'));
 
-    // Auto-provision: if no quotas for this employee+year, create defaults
+    // Auto-provision: if no quotas for this employee+year, create defaults from their company's leave types
     $check = $conn->query("SELECT COUNT(*) as cnt FROM leave_quotas WHERE employee_id = '$employee_id' AND year = $year");
     $row = $check->fetch_assoc();
     if ((int)$row['cnt'] === 0) {
-        $defaults = [
-            1 => 6,   // ลาพักร้อน
-            2 => 30,  // ลาป่วย
-            3 => 3,   // ลากิจ
-            4 => 15,  // ลาทำหมัน
-            5 => 0,   // ลาไม่รับค่าจ้าง
-        ];
+        // Get employee's company_id
+        $empStmt = $conn->prepare("SELECT company_id FROM employees WHERE id = ?");
+        $empStmt->bind_param('s', $employee_id);
+        $empStmt->execute();
+        $empRow = $empStmt->get_result()->fetch_assoc();
+        $emp_company_id = $empRow ? (int)$empRow['company_id'] : 1;
+
+        // Fetch leave types for that company
+        $ltStmt = $conn->prepare("SELECT id, default_quota FROM leave_types WHERE company_id = ? AND is_active = 1 ORDER BY id");
+        $ltStmt->bind_param('i', $emp_company_id);
+        $ltStmt->execute();
+        $ltResult = $ltStmt->get_result();
+
         $stmt = $conn->prepare("INSERT IGNORE INTO leave_quotas (employee_id, leave_type_id, total, used, year) VALUES (?, ?, ?, 0, ?)");
-        foreach ($defaults as $lt_id => $total) {
-            $stmt->bind_param('siis', $employee_id, $lt_id, $total, $year);
+        while ($lt = $ltResult->fetch_assoc()) {
+            $lt_id = (int)$lt['id'];
+            $lt_total = (int)$lt['default_quota'];
+            $stmt->bind_param('siis', $employee_id, $lt_id, $lt_total, $year);
             $stmt->execute();
         }
     }

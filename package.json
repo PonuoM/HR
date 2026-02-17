@@ -10,6 +10,7 @@
     "host:build": "vite build --mode host && node build-host.js"
   },
   "dependencies": {
+    "@vladmandic/face-api": "^1.7.15",
     "leaflet": "^1.9.4",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

@@ -118,6 +118,15 @@ if (existsSync(rootIconsSrc)) {
     cpSync(rootIconsSrc, rootIconsDst, { recursive: true });
 }
 
+// ── Step 10.5: Copy face-api.js models ──
+const modelsSrc = join(ROOT, 'public', 'models');
+const modelsDst = join(OUT, 'models');
+if (existsSync(modelsSrc)) {
+    cpSync(modelsSrc, modelsDst, { recursive: true });
+    const modelFiles = readdirSync(modelsDst);
+    console.log(`🤖 Copied ${modelFiles.length} face-api model files → host-build/models/`);
+}
+
 // ── Step 11: Clean index.html (remove dev-only artifacts) ──
 const indexPath = join(OUT, 'index.html');
 if (existsSync(indexPath)) {

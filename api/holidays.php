@@ -1,6 +1,6 @@
 <?php
 /**
- * Holidays API (Company Days Off)
+ * Holidays API (Multi-Company)
  * GET    /api/holidays.php?year=2026       — List holidays for a year
  * GET    /api/holidays.php                 — List holidays for current year
  * POST   /api/holidays.php                 — Create holiday
@@ -11,13 +11,14 @@
 require_once __DIR__ . '/config.php';
 
 $method = get_method();
+$company_id = get_company_id();
 
 // ======================== GET ========================
 if ($method === 'GET') {
     $year = isset($_GET['year']) ? intval($_GET['year']) : (int)date('Y');
     
-    $stmt = $conn->prepare("SELECT id, date, name, year, created_at FROM holidays WHERE year = ? ORDER BY date ASC");
-    $stmt->bind_param('i', $year);
+    $stmt = $conn->prepare("SELECT id, date, name, year, created_at FROM holidays WHERE company_id = ? AND year = ? ORDER BY date ASC");
+    $stmt->bind_param('ii', $company_id, $year);
     $stmt->execute();
     $result = $stmt->get_result();
     
@@ -29,7 +30,10 @@ if ($method === 'GET') {
     }
     
     // Also return available years for the year selector
-    $yearsResult = $conn->query("SELECT DISTINCT year FROM holidays ORDER BY year DESC");
+    $yearsStmt = $conn->prepare("SELECT DISTINCT year FROM holidays WHERE company_id = ? ORDER BY year DESC");
+    $yearsStmt->bind_param('i', $company_id);
+    $yearsStmt->execute();
+    $yearsResult = $yearsStmt->get_result();
     $years = [];
     while ($y = $yearsResult->fetch_assoc()) {
         $years[] = (int)$y['year'];
@@ -63,8 +67,8 @@ if ($method === 'POST') {
         }
         
         // Get holidays from source year
-        $stmt = $conn->prepare("SELECT date, name FROM holidays WHERE year = ? ORDER BY date");
-        $stmt->bind_param('i', $fromYear);
+        $stmt = $conn->prepare("SELECT date, name FROM holidays WHERE company_id = ? AND year = ? ORDER BY date");
+        $stmt->bind_param('ii', $company_id, $fromYear);
         $stmt->execute();
         $result = $stmt->get_result();
         
@@ -77,12 +81,12 @@ if ($method === 'POST') {
             $name = $row['name'];
             
             // Check if already exists
-            $checkStmt = $conn->prepare("SELECT id FROM holidays WHERE date = ? AND year = ?");
-            $checkStmt->bind_param('si', $newDate, $toYear);
+            $checkStmt = $conn->prepare("SELECT id FROM holidays WHERE company_id = ? AND date = ? AND year = ?");
+            $checkStmt->bind_param('isi', $company_id, $newDate, $toYear);
             $checkStmt->execute();
             if ($checkStmt->get_result()->num_rows === 0) {
-                $insStmt = $conn->prepare("INSERT INTO holidays (date, name, year) VALUES (?, ?, ?)");
-                $insStmt->bind_param('ssi', $newDate, $name, $toYear);
+                $insStmt = $conn->prepare("INSERT INTO holidays (company_id, date, name, year) VALUES (?, ?, ?, ?)");
+                $insStmt->bind_param('issi', $company_id, $newDate, $name, $toYear);
                 $insStmt->execute();
                 $copied++;
             }
@@ -102,15 +106,15 @@ if ($method === 'POST') {
     $year = (int)date('Y', strtotime($date));
     
     // Check duplicate
-    $checkStmt = $conn->prepare("SELECT id FROM holidays WHERE date = ?");
-    $checkStmt->bind_param('s', $date);
+    $checkStmt = $conn->prepare("SELECT id FROM holidays WHERE company_id = ? AND date = ?");
+    $checkStmt->bind_param('is', $company_id, $date);
     $checkStmt->execute();
     if ($checkStmt->get_result()->num_rows > 0) {
         json_response(['error' => 'วันหยุดวันนี้มีอยู่แล้ว'], 400);
     }
     
-    $stmt = $conn->prepare("INSERT INTO holidays (date, name, year) VALUES (?, ?, ?)");
-    $stmt->bind_param('ssi', $date, $name, $year);
+    $stmt = $conn->prepare("INSERT INTO holidays (company_id, date, name, year) VALUES (?, ?, ?, ?)");
+    $stmt->bind_param('issi', $company_id, $date, $name, $year);
     $stmt->execute();
     
     json_response(['id' => $conn->insert_id, 'message' => 'Holiday created'], 201);
@@ -130,8 +134,8 @@ if ($method === 'PUT' && isset($_GET['id'])) {
     
     $year = (int)date('Y', strtotime($date));
     
-    $stmt = $conn->prepare("UPDATE holidays SET date = ?, name = ?, year = ? WHERE id = ?");
-    $stmt->bind_param('ssii', $date, $name, $year, $id);
+    $stmt = $conn->prepare("UPDATE holidays SET date = ?, name = ?, year = ? WHERE id = ? AND company_id = ?");
+    $stmt->bind_param('ssiii', $date, $name, $year, $id, $company_id);
     $stmt->execute();
     
     json_response(['message' => 'Holiday updated', 'id' => $id]);
@@ -140,7 +144,9 @@ if ($method === 'PUT' && isset($_GET['id'])) {
 // ======================== DELETE ========================
 if ($method === 'DELETE' && isset($_GET['id'])) {
     $id = intval($_GET['id']);
-    $conn->query("DELETE FROM holidays WHERE id = $id");
+    $stmt = $conn->prepare("DELETE FROM holidays WHERE id = ? AND company_id = ?");
+    $stmt->bind_param('ii', $id, $company_id);
+    $stmt->execute();
     json_response(['message' => 'Holiday deleted']);
 }
 

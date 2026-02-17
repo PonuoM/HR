@@ -23,12 +23,14 @@ function haversineDistance($lat1, $lng1, $lat2, $lng2) {
 }
 
 /**
- * Check if coordinates are within any active work location.
+ * Check if coordinates are within any active work location for this company.
  * Returns ['matched' => bool, 'location_name' => string, 'distance' => float]
  */
-function checkWorkLocation($conn, $lat, $lng) {
-    $sql = "SELECT * FROM work_locations WHERE is_active = 1";
-    $result = $conn->query($sql);
+function checkWorkLocation($conn, $lat, $lng, $company_id) {
+    $stmt = $conn->prepare("SELECT * FROM work_locations WHERE is_active = 1 AND company_id = ?");
+    $stmt->bind_param('i', $company_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
     $closest = null;
     $closestDist = PHP_FLOAT_MAX;
 
@@ -55,6 +57,7 @@ function checkWorkLocation($conn, $lat, $lng) {
 }
 
 $method = get_method();
+$company_id = get_company_id();
 
 // ─── GET ?action=check_location: Pre-check GPS before clock-in ───
 if ($method === 'GET' && isset($_GET['action']) && $_GET['action'] === 'check_location') {
@@ -65,7 +68,7 @@ if ($method === 'GET' && isset($_GET['action']) && $_GET['action'] === 'check_lo
         json_response(['error' => 'lat and lng are required'], 400);
     }
 
-    $locCheck = checkWorkLocation($conn, $lat, $lng);
+    $locCheck = checkWorkLocation($conn, $lat, $lng, $company_id);
     json_response([
         'matched' => $locCheck['matched'],
         'location_name' => $locCheck['location_name'],
@@ -135,7 +138,7 @@ if ($method === 'POST') {
     $location_text = 'ไม่ระบุ';
 
     if ($lat !== null && $lng !== null) {
-        $locCheck = checkWorkLocation($conn, $lat, $lng);
+        $locCheck = checkWorkLocation($conn, $lat, $lng, $company_id);
         $is_offsite = $locCheck['matched'] ? 0 : 1;
         $location_name = $locCheck['location_name'];
         $location_text = $locCheck['matched']

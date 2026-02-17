@@ -11,6 +11,7 @@
 require_once __DIR__ . '/config.php';
 
 $method = get_method();
+$company_id = get_company_id();
 if ($method !== 'GET') {
     json_response(['error' => 'Method not allowed'], 405);
 }
@@ -54,7 +55,7 @@ if ($action === 'daily' && $employee_id && $month) {
 
     // Get holidays indexed by date
     $holidayMap = [];
-    $hRes = $conn->query("SELECT date, name FROM holidays WHERE date BETWEEN '$startDate' AND '$endDate'");
+    $hRes = $conn->query("SELECT date, name FROM holidays WHERE company_id = $company_id AND date BETWEEN '$startDate' AND '$endDate'");
     while ($h = $hRes->fetch_assoc()) {
         $holidayMap[$h['date']] = $h['name'];
     }
@@ -164,9 +165,9 @@ if ($month) {
 $effectiveEndDate = ($endDate > $today) ? $today : $endDate;
 
 // ─── Helper: Count working days (Mon-Fri) minus holidays ───
-function getWorkingDays($conn, $start, $end) {
+function getWorkingDays($conn, $start, $end, $company_id = 1) {
     $holidays = [];
-    $hResult = $conn->query("SELECT date FROM holidays WHERE date BETWEEN '$start' AND '$end'");
+    $hResult = $conn->query("SELECT date FROM holidays WHERE company_id = $company_id AND date BETWEEN '$start' AND '$end'");
     while ($h = $hResult->fetch_assoc()) {
         $holidays[] = $h['date'];
     }
@@ -187,13 +188,13 @@ function getWorkingDays($conn, $start, $end) {
 
 // ─── Fetch all leave types (for dynamic columns) ───
 $leaveTypes = [];
-$ltResult = $conn->query("SELECT id, name, type FROM leave_types WHERE is_active = 1 ORDER BY id");
+$ltResult = $conn->query("SELECT id, name, type FROM leave_types WHERE is_active = 1 AND company_id = $company_id ORDER BY id");
 while ($lt = $ltResult->fetch_assoc()) {
     $leaveTypes[] = $lt;
 }
 
 // ─── Fetch employees ───
-$empWhere = "e.is_active = 1";
+$empWhere = "e.is_active = 1 AND e.company_id = $company_id";
 $empParams = [];
 $empTypes = '';
 if ($employee_id) {
@@ -218,9 +219,9 @@ if ($empTypes) {
 }
 
 // Expected work days up to today (for absence calculation)
-$expectedWorkDays = getWorkingDays($conn, $startDate, $effectiveEndDate);
+$expectedWorkDays = getWorkingDays($conn, $startDate, $effectiveEndDate, $company_id);
 // Full month/year expected work days (for display)
-$fullPeriodWorkDays = getWorkingDays($conn, $startDate, $endDate);
+$fullPeriodWorkDays = getWorkingDays($conn, $startDate, $endDate, $company_id);
 
 $report = [];
 
@@ -335,6 +336,185 @@ while ($emp = $empResult->fetch_assoc()) {
         'total_work_hours' => round($totalWorkHours, 2),
         'diligence_eligible' => $diligenceEligible,
     ];
+}
+
+// ─── CSV Daily Detail Export ───
+if ($export === 'csv_daily' && $month) {
+    $bom = "\xEF\xBB\xBF";
+    $filename = $employee_id 
+        ? "attendance_daily_{$employee_id}_{$periodLabel}.csv"
+        : "attendance_daily_{$periodLabel}.csv";
+    
+    header('Content-Type: text/csv; charset=utf-8');
+    header("Content-Disposition: attachment; filename=\"$filename\"");
+    
+    $out = fopen('php://output', 'w');
+    fwrite($out, $bom);
+
+    $startDateD = $month . '-01';
+    $endDateD = date('Y-m-t', strtotime($startDateD));
+    $todayD = date('Y-m-d');
+    $dowNames = ['', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์', 'อาทิตย์'];
+
+    $statusLabels = [
+        'present' => 'มาทำงาน',
+        'late'    => 'สาย',
+        'absent'  => 'ขาดงาน',
+        'leave'   => 'ลา',
+        'holiday' => 'หยุดนักขัตฤกษ์',
+        'weekend' => 'วันหยุด',
+        'future'  => '-',
+    ];
+
+    // Get holidays for the month
+    $hdMap = [];
+    $hdRes = $conn->query("SELECT date, name FROM holidays WHERE company_id = $company_id AND date BETWEEN '$startDateD' AND '$endDateD'");
+    while ($h = $hdRes->fetch_assoc()) {
+        $hdMap[$h['date']] = $h['name'];
+    }
+
+    // Build employee list (reuse from main query - already fetched above)
+    // We need to re-query since result was consumed
+    if ($employee_id) {
+        $edStmt = $conn->prepare("SELECT e.id, e.name, d.name AS department, d.work_start_time, d.work_end_time 
+                                   FROM employees e LEFT JOIN departments d ON e.department_id = d.id 
+                                   WHERE e.id = ? AND e.company_id = $company_id");
+        $edStmt->bind_param('s', $employee_id);
+        $edStmt->execute();
+        $edResult = $edStmt->get_result();
+    } else {
+        $edResult = $conn->query("SELECT e.id, e.name, d.name AS department, d.work_start_time, d.work_end_time 
+                                   FROM employees e LEFT JOIN departments d ON e.department_id = d.id 
+                                   WHERE e.is_active = 1 AND e.company_id = $company_id 
+                                   ORDER BY d.name, e.name");
+    }
+
+    $thMonths = ['', 'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 
+                 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+    $mNum = (int)date('m', strtotime($startDateD));
+    $yTh = (int)date('Y', strtotime($startDateD)) + 543;
+    $periodTh = $thMonths[$mNum] . ' ' . $yTh;
+
+    // Title row
+    fputcsv($out, ["รายงานเข้างานรายวัน - $periodTh"]);
+    fputcsv($out, []); // blank line
+
+    $empCount = 0;
+    while ($edEmp = $edResult->fetch_assoc()) {
+        $eid = $edEmp['id'];
+        $workStart = $edEmp['work_start_time'] ?? '09:00:00';
+        $workEnd = $edEmp['work_end_time'] ?? '17:00:00';
+
+        // Attendance records
+        $aMap = [];
+        $aStmt = $conn->prepare("SELECT date, clock_in, clock_out FROM attendance WHERE employee_id = ? AND date BETWEEN ? AND ?");
+        $aStmt->bind_param('sss', $eid, $startDateD, $endDateD);
+        $aStmt->execute();
+        $aRes = $aStmt->get_result();
+        while ($a = $aRes->fetch_assoc()) $aMap[$a['date']] = $a;
+
+        // Leave records
+        $lMap = [];
+        $lStmt = $conn->prepare(
+            "SELECT lr.start_date, lr.end_date, lt.name AS leave_type_name
+             FROM leave_requests lr JOIN leave_types lt ON lr.leave_type_id = lt.id
+             WHERE lr.employee_id = ? AND lr.status = 'approved'
+               AND ((lr.start_date BETWEEN ? AND ?) OR (lr.end_date BETWEEN ? AND ?))"
+        );
+        $lStmt->bind_param('sssss', $eid, $startDateD, $endDateD, $startDateD, $endDateD);
+        $lStmt->execute();
+        $lRes = $lStmt->get_result();
+        while ($lv = $lRes->fetch_assoc()) {
+            $cur = new DateTime(max($lv['start_date'], $startDateD));
+            $lvEnd = new DateTime(min($lv['end_date'], $endDateD));
+            while ($cur <= $lvEnd) {
+                $lMap[$cur->format('Y-m-d')] = $lv['leave_type_name'];
+                $cur->modify('+1 day');
+            }
+        }
+
+        // Employee header
+        if ($empCount > 0) fputcsv($out, []); // blank separator
+        fputcsv($out, ["พนักงาน: {$edEmp['name']} ({$eid})", "แผนก: " . ($edEmp['department'] ?? '-'), "เวลาเข้างาน: " . substr($workStart, 0, 5) . " น."]);
+        fputcsv($out, ['วันที่', 'วัน', 'เข้างาน', 'ออกงาน', 'สถานะ', 'สาย (นาที)', 'ชม.ทำงาน', 'หมายเหตุ']);
+
+        // Counters for summary
+        $totalPresent = 0; $totalLate = 0; $totalAbsent = 0; $totalLeave = 0; $totalLateMin = 0; $totalHours = 0;
+
+        // Daily loop
+        $cur = new DateTime($startDateD);
+        $endDtD = new DateTime($endDateD);
+        while ($cur <= $endDtD) {
+            $ds = $cur->format('Y-m-d');
+            $dow = (int)$cur->format('N');
+            $att = $aMap[$ds] ?? null;
+            $clockIn = $att['clock_in'] ?? null;
+            $clockOut = $att['clock_out'] ?? null;
+            $leaveType = $lMap[$ds] ?? null;
+            $holidayName = $hdMap[$ds] ?? null;
+            $lateMin = 0;
+            $wHours = 0;
+            $note = '';
+
+            if ($dow > 5) {
+                $status = 'weekend';
+            } elseif ($holidayName) {
+                $status = 'holiday';
+                $note = $holidayName;
+            } elseif ($leaveType) {
+                $status = 'leave';
+                $note = $leaveType;
+                $totalLeave++;
+            } elseif ($att && $clockIn) {
+                if ($clockIn > $workStart) {
+                    $status = 'late';
+                    $lateMin = round((strtotime($clockIn) - strtotime($workStart)) / 60);
+                    $totalLate++;
+                    $totalLateMin += $lateMin;
+                } else {
+                    $status = 'present';
+                }
+                $totalPresent++;
+            } elseif ($ds <= $todayD) {
+                $status = 'absent';
+                $totalAbsent++;
+            } else {
+                $status = 'future';
+            }
+
+            if ($clockIn && $clockOut) {
+                $wHours = round((strtotime($clockOut) - strtotime($clockIn)) / 3600, 2);
+                $totalHours += $wHours;
+            }
+
+            $dateFormatted = $cur->format('d') . '/' . $cur->format('m') . '/' . ((int)$cur->format('Y') + 543);
+
+            fputcsv($out, [
+                $dateFormatted,
+                $dowNames[$dow],
+                $clockIn ? substr($clockIn, 0, 5) : '-',
+                $clockOut ? substr($clockOut, 0, 5) : '-',
+                $statusLabels[$status] ?? $status,
+                $lateMin > 0 ? $lateMin : '',
+                $wHours > 0 ? $wHours : '',
+                $note,
+            ]);
+            $cur->modify('+1 day');
+        }
+
+        // Employee summary row
+        fputcsv($out, [
+            'สรุป', '', '', '',
+            "มา:{$totalPresent} สาย:{$totalLate} ขาด:{$totalAbsent} ลา:{$totalLeave}",
+            $totalLateMin > 0 ? "รวม {$totalLateMin} นาที" : '',
+            $totalHours > 0 ? round($totalHours, 1) . ' ชม.' : '',
+            '',
+        ]);
+        $empCount++;
+    }
+
+    fclose($out);
+    exit;
 }
 
 // ─── CSV Export ───

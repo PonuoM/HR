@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { API_BASE } from '../../services/api';
+import { API_BASE, getAuthHeaders } from '../../services/api';
 import { useApi } from '../../hooks/useApi';
 
 interface ReportRow {
@@ -100,20 +100,28 @@ const AdminAttendanceReportScreen: React.FC = () => {
         return `${API_BASE}/attendance_report.php?${params.toString()}`;
     }, [viewMode, selectedMonth, selectedYear, selectedEmployee]);
 
-    const { data, loading } = useApi<ReportData>(() => fetch(apiUrl).then(r => r.json()), [apiUrl]);
+    const { data, loading } = useApi<ReportData>(() => fetch(apiUrl, { headers: getAuthHeaders() }).then(r => r.json()), [apiUrl]);
 
     const report = data?.employees || [];
     const summary = data?.summary;
     const leaveTypes = data?.leave_types || [];
 
+    // Split leave types: main 3 (annual/sick/business) + others
+    const MAIN_LEAVE_TYPES = ['annual', 'sick', 'business'];
+    const { mainLeaves, otherLeaveIds } = useMemo(() => {
+        const main = leaveTypes.filter((lt: any) => MAIN_LEAVE_TYPES.includes(lt.type));
+        const otherIds = leaveTypes.filter((lt: any) => !MAIN_LEAVE_TYPES.includes(lt.type)).map((lt: any) => lt.id);
+        return { mainLeaves: main, otherLeaveIds: otherIds };
+    }, [leaveTypes]);
+
     // Employee list for filter dropdown
     const { data: empListData } = useApi(() =>
-        fetch(`${API_BASE}/attendance_report.php?month=${selectedMonth}`).then(r => r.json()),
+        fetch(`${API_BASE}/attendance_report.php?month=${selectedMonth}`, { headers: getAuthHeaders() }).then(r => r.json()),
         [selectedMonth]
     );
     const allEmployees = (empListData?.employees || []) as ReportRow[];
 
-    // CSV export URL
+    // CSV export URL (summary)
     const csvUrl = useMemo(() => {
         const params = new URLSearchParams();
         if (viewMode === 'monthly') {
@@ -126,11 +134,24 @@ const AdminAttendanceReportScreen: React.FC = () => {
         return `${API_BASE}/attendance_report.php?${params.toString()}`;
     }, [viewMode, selectedMonth, selectedYear, selectedEmployee]);
 
+    // CSV export URL (daily detail)
+    const csvDailyUrl = useMemo(() => {
+        if (viewMode !== 'monthly') return '';
+        const params = new URLSearchParams();
+        params.set('month', selectedMonth);
+        if (selectedEmployee) params.set('employee_id', selectedEmployee);
+        params.set('export', 'csv_daily');
+        return `${API_BASE}/attendance_report.php?${params.toString()}`;
+    }, [viewMode, selectedMonth, selectedEmployee]);
+
+    // Export dropdown state
+    const [showExportMenu, setShowExportMenu] = useState(false);
+
     // Fetch daily detail when an employee is selected
     useEffect(() => {
         if (!detailEmpId || viewMode !== 'monthly') return;
         setDetailLoading(true);
-        fetch(`${API_BASE}/attendance_report.php?action=daily&month=${selectedMonth}&employee_id=${detailEmpId}`)
+        fetch(`${API_BASE}/attendance_report.php?action=daily&month=${selectedMonth}&employee_id=${detailEmpId}`, { headers: getAuthHeaders() })
             .then(r => r.json())
             .then(d => { setDetailData(d); setDetailLoading(false); })
             .catch(() => setDetailLoading(false));
@@ -140,6 +161,13 @@ const AdminAttendanceReportScreen: React.FC = () => {
     const getLeave = (row: ReportRow, typeId: number) => {
         const found = row.leave_by_type.find(l => l.leave_type_id === typeId);
         return found ? found.days : 0;
+    };
+
+    // Get total "other" leave days
+    const getOtherLeave = (row: ReportRow) => {
+        return row.leave_by_type
+            .filter(l => otherLeaveIds.includes(l.leave_type_id))
+            .reduce((sum, l) => sum + l.days, 0);
     };
 
     // Years for dropdown
@@ -166,7 +194,7 @@ const AdminAttendanceReportScreen: React.FC = () => {
         <div className="pt-6 md:pt-8 pb-8 px-4 md:px-8 max-w-[1800px] mx-auto min-h-full">
             {/* Header */}
             <header className="mb-6 flex items-center gap-3">
-                <button onClick={() => navigate('/admin')} className="md:hidden p-2 -ml-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-500">
+                <button onClick={() => navigate('/profile')} className="md:hidden p-2 -ml-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-500">
                     <span className="material-icons-round">arrow_back</span>
                 </button>
                 <div className="flex-1">
@@ -233,15 +261,50 @@ const AdminAttendanceReportScreen: React.FC = () => {
                         </select>
                     </div>
 
-                    {/* Export CSV */}
-                    <a
-                        href={csvUrl}
-                        download
-                        className="ml-auto flex items-center gap-2 px-4 py-2.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold shadow-sm transition-colors"
-                    >
-                        <span className="material-icons-round text-base">download</span>
-                        Export CSV
-                    </a>
+                    {/* Export CSV Dropdown */}
+                    <div className="ml-auto relative">
+                        <button
+                            onClick={() => setShowExportMenu(!showExportMenu)}
+                            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold shadow-sm transition-colors"
+                        >
+                            <span className="material-icons-round text-base">download</span>
+                            Export CSV
+                            <span className="material-icons-round text-base">{showExportMenu ? 'expand_less' : 'expand_more'}</span>
+                        </button>
+                        {showExportMenu && (
+                            <>
+                                <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)} />
+                                <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 z-50 min-w-[220px] overflow-hidden">
+                                    <a
+                                        href={csvUrl}
+                                        download
+                                        onClick={() => setShowExportMenu(false)}
+                                        className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors text-sm text-gray-700 dark:text-gray-200"
+                                    >
+                                        <span className="material-icons-round text-green-500 text-lg">summarize</span>
+                                        <div>
+                                            <div className="font-semibold">สรุปรายบุคคล</div>
+                                            <div className="text-xs text-gray-400">สรุป มา/สาย/ขาด/ลา/OT</div>
+                                        </div>
+                                    </a>
+                                    {viewMode === 'monthly' && (
+                                        <a
+                                            href={csvDailyUrl}
+                                            download
+                                            onClick={() => setShowExportMenu(false)}
+                                            className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors text-sm text-gray-700 dark:text-gray-200 border-t border-gray-100 dark:border-gray-700"
+                                        >
+                                            <span className="material-icons-round text-blue-500 text-lg">calendar_month</span>
+                                            <div>
+                                                <div className="font-semibold">รายวันละเอียด</div>
+                                                <div className="text-xs text-gray-400">เข้า-ออก วันที่ 1-{new Date(selectedMonth + '-01').getDate() === 1 ? new Date(new Date(selectedMonth + '-01').getFullYear(), new Date(selectedMonth + '-01').getMonth() + 1, 0).getDate() : 31} ทุกคน</div>
+                                            </div>
+                                        </a>
+                                    )}
+                                </div>
+                            </>
+                        )}
+                    </div>
                 </div>
             </div>
 
@@ -294,20 +357,23 @@ const AdminAttendanceReportScreen: React.FC = () => {
                     <div className="overflow-x-auto">
                         <table className="w-full text-left border-collapse min-w-[900px]">
                             <thead>
-                                <tr className="bg-gray-50 dark:bg-gray-900/50 text-gray-500 dark:text-gray-400 text-[11px] uppercase tracking-wider">
-                                    <th className="p-3 font-semibold sticky left-0 bg-gray-50 dark:bg-gray-900/50 z-10">พนักงาน</th>
-                                    <th className="p-3 font-semibold text-center">แผนก</th>
-                                    <th className="p-3 font-semibold text-center">มาทำงาน</th>
-                                    <th className="p-3 font-semibold text-center">ขาด</th>
-                                    <th className="p-3 font-semibold text-center">สาย (ครั้ง)</th>
-                                    <th className="p-3 font-semibold text-center">สาย (นาที)</th>
-                                    {leaveTypes.map(lt => (
-                                        <th key={lt.id} className="p-3 font-semibold text-center">{lt.name}</th>
+                                <tr className="bg-gray-50 dark:bg-gray-900/50 text-gray-500 dark:text-gray-400 text-[11px] uppercase tracking-wider whitespace-nowrap">
+                                    <th className="px-2 py-2.5 font-semibold sticky left-0 bg-gray-50 dark:bg-gray-900/50 z-10">พนักงาน</th>
+                                    <th className="px-2 py-2.5 font-semibold text-center">แผนก</th>
+                                    <th className="px-2 py-2.5 font-semibold text-center">มา<br />ทำงาน</th>
+                                    <th className="px-2 py-2.5 font-semibold text-center">ขาด</th>
+                                    <th className="px-2 py-2.5 font-semibold text-center">สาย<br />(ครั้ง)</th>
+                                    <th className="px-2 py-2.5 font-semibold text-center">สาย<br />(นาที)</th>
+                                    {mainLeaves.map((lt: any) => (
+                                        <th key={lt.id} className="px-2 py-2.5 font-semibold text-center">{lt.name}</th>
                                     ))}
-                                    <th className="p-3 font-semibold text-center">ลารวม</th>
-                                    <th className="p-3 font-semibold text-center">OT (ชม.)</th>
-                                    <th className="p-3 font-semibold text-center">ชม.ทำงาน</th>
-                                    <th className="p-3 font-semibold text-center">เบี้ยขยัน</th>
+                                    {otherLeaveIds.length > 0 && (
+                                        <th className="px-2 py-2.5 font-semibold text-center">ลา<br />อื่นๆ</th>
+                                    )}
+                                    <th className="px-2 py-2.5 font-semibold text-center">ลา<br />รวม</th>
+                                    <th className="px-2 py-2.5 font-semibold text-center">OT<br />(ชม.)</th>
+                                    <th className="px-2 py-2.5 font-semibold text-center">ชม.<br />ทำงาน</th>
+                                    <th className="px-2 py-2.5 font-semibold text-center">เบี้ย<br />ขยัน</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -317,10 +383,10 @@ const AdminAttendanceReportScreen: React.FC = () => {
                                         onClick={() => openDetail(row.employee_id)}
                                         className={`hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors text-sm ${viewMode === 'monthly' ? 'cursor-pointer' : ''}`}
                                     >
-                                        <td className="p-3 sticky left-0 bg-white dark:bg-gray-800 z-10">
-                                            <div className="flex items-center gap-2">
+                                        <td className="px-2 py-2.5 sticky left-0 bg-white dark:bg-gray-800 z-10">
+                                            <div className="flex items-center gap-1">
                                                 <div>
-                                                    <p className="font-semibold text-primary text-xs underline decoration-dotted underline-offset-2">{row.employee_name}</p>
+                                                    <p className="font-semibold text-primary text-xs underline decoration-dotted underline-offset-2 whitespace-nowrap">{row.employee_name}</p>
                                                     <p className="text-[10px] text-gray-400">{row.employee_id}</p>
                                                 </div>
                                                 {viewMode === 'monthly' && (
@@ -328,46 +394,50 @@ const AdminAttendanceReportScreen: React.FC = () => {
                                                 )}
                                             </div>
                                         </td>
-                                        <td className="p-3 text-center text-xs text-gray-600 dark:text-gray-300">{row.department}</td>
-                                        <td className="p-3 text-center">
+                                        <td className="px-2 py-2.5 text-center text-xs text-gray-600 dark:text-gray-300 whitespace-nowrap">{row.department}</td>
+                                        <td className="px-2 py-2.5 text-center whitespace-nowrap">
                                             <span className="font-semibold text-gray-900 dark:text-white">{row.actual_work_days}</span>
                                             <span className="text-[10px] text-gray-400">/{row.expected_work_days}</span>
                                         </td>
-                                        <td className={`p-3 text-center font-semibold ${row.absent_days > 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                                        <td className={`px-2 py-2.5 text-center font-semibold ${row.absent_days > 0 ? 'text-red-600' : 'text-gray-400'}`}>
                                             {row.absent_days}
                                         </td>
-                                        <td className={`p-3 text-center font-semibold ${row.late_count > 0 ? 'text-orange-600' : 'text-gray-400'}`}>
+                                        <td className={`px-2 py-2.5 text-center font-semibold ${row.late_count > 0 ? 'text-orange-600' : 'text-gray-400'}`}>
                                             {row.late_count}
                                         </td>
-                                        <td className={`p-3 text-center text-xs ${row.late_minutes_total > 0 ? 'text-orange-500' : 'text-gray-400'}`}>
+                                        <td className={`px-2 py-2.5 text-center text-xs ${row.late_minutes_total > 0 ? 'text-orange-500' : 'text-gray-400'}`}>
                                             {row.late_minutes_total}
                                         </td>
-                                        {leaveTypes.map(lt => {
+                                        {mainLeaves.map((lt: any) => {
                                             const days = getLeave(row, lt.id);
                                             return (
-                                                <td key={lt.id} className={`p-3 text-center text-xs ${days > 0 ? 'text-purple-600 font-semibold' : 'text-gray-400'}`}>
+                                                <td key={lt.id} className={`px-2 py-2.5 text-center text-xs ${days > 0 ? 'text-purple-600 font-semibold' : 'text-gray-400'}`}>
                                                     {days || '-'}
                                                 </td>
                                             );
                                         })}
-                                        <td className={`p-3 text-center font-semibold ${row.total_leave_days > 0 ? 'text-purple-600' : 'text-gray-400'}`}>
+                                        {otherLeaveIds.length > 0 && (() => {
+                                            const otherDays = getOtherLeave(row);
+                                            return (
+                                                <td className={`px-2 py-2.5 text-center text-xs ${otherDays > 0 ? 'text-purple-600 font-semibold' : 'text-gray-400'}`}>
+                                                    {otherDays || '-'}
+                                                </td>
+                                            );
+                                        })()}
+                                        <td className={`px-2 py-2.5 text-center font-semibold ${row.total_leave_days > 0 ? 'text-purple-600' : 'text-gray-400'}`}>
                                             {row.total_leave_days}
                                         </td>
-                                        <td className={`p-3 text-center font-semibold ${row.ot_hours > 0 ? 'text-cyan-600' : 'text-gray-400'}`}>
+                                        <td className={`px-2 py-2.5 text-center font-semibold ${row.ot_hours > 0 ? 'text-cyan-600' : 'text-gray-400'}`}>
                                             {row.ot_hours || '-'}
                                         </td>
-                                        <td className="p-3 text-center text-xs text-gray-600 dark:text-gray-300">
+                                        <td className="px-2 py-2.5 text-center text-xs text-gray-600 dark:text-gray-300">
                                             {row.total_work_hours}
                                         </td>
-                                        <td className="p-3 text-center">
+                                        <td className="px-2 py-2.5 text-center">
                                             {row.diligence_eligible ? (
-                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 text-[10px] font-bold">
-                                                    <span className="material-icons-round text-xs">check_circle</span> ได้
-                                                </span>
+                                                <span className="material-icons-round text-base text-green-500" title="ได้เบี้ยขยัน">check_circle</span>
                                             ) : (
-                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 text-[10px] font-bold">
-                                                    <span className="material-icons-round text-xs">cancel</span> ไม่ได้
-                                                </span>
+                                                <span className="material-icons-round text-base text-red-400" title="ไม่ได้เบี้ยขยัน">cancel</span>
                                             )}
                                         </td>
                                     </tr>

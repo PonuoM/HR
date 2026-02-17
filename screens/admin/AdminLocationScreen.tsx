@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
-import { getWorkLocations, createWorkLocation, updateWorkLocation, deleteWorkLocation } from '../../services/api';
+import { getWorkLocations, createWorkLocation, updateWorkLocation, deleteWorkLocation, resolveGoogleMapsLink, API_BASE } from '../../services/api';
 import { useToast } from '../../components/Toast';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -24,6 +24,11 @@ const AdminLocationScreen: React.FC = () => {
     const [editingLoc, setEditingLoc] = useState<WorkLocation | null>(null);
     const [form, setForm] = useState({ name: '', latitude: '', longitude: '', radius_meters: '200', is_active: true });
     const [saving, setSaving] = useState(false);
+    const [gmapsLink, setGmapsLink] = useState('');
+    const [resolving, setResolving] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searching, setSearching] = useState(false);
+    const [searchResults, setSearchResults] = useState<any[]>([]);
 
     // Map refs
     const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -167,9 +172,127 @@ const AdminLocationScreen: React.FC = () => {
         );
     };
 
+    // Resolve Google Maps link to lat/lng
+    const handleResolveGmaps = async () => {
+        if (!gmapsLink.trim()) return;
+        setResolving(true);
+        try {
+            const result = await resolveGoogleMapsLink(gmapsLink.trim());
+            if (result.latitude && result.longitude) {
+                setForm(prev => ({
+                    ...prev,
+                    latitude: result.latitude.toFixed(7),
+                    longitude: result.longitude.toFixed(7),
+                }));
+                if (mapRef.current) {
+                    mapRef.current.setView([result.latitude, result.longitude], 17);
+                }
+                toast('ดึงพิกัดสำเร็จ!', 'success');
+                setGmapsLink('');
+            } else if ((result as any).needs_geocoding && (result as any).address) {
+                // Mobile link: server extracted address, geocode via Nominatim from browser
+                toast('กำลังค้นหาที่อยู่...', 'info');
+                try {
+                    const addr = (result as any).address as string;
+                    // Try progressively simpler address queries
+                    // Split address into parts and try from most specific to least
+                    const parts = addr.split(/\s+/).filter(p => p.length > 1);
+                    const queries = [
+                        addr, // Full address
+                        // Try last 3-4 parts (usually ตำบล อำเภอ จังหวัด รหัสไปรษณีย์)
+                        parts.slice(-4).join(' '),
+                        parts.slice(-3).join(' '),
+                        parts.slice(-2).join(' '),
+                        // Try first meaningful part (place name)
+                        parts[0],
+                    ].filter(Boolean);
+
+                    let found = false;
+                    for (const q of queries) {
+                        const res = await fetch(
+                            `${API_BASE}/geocode.php?q=${encodeURIComponent(q)}&limit=1&countrycodes=th`
+                        );
+                        const data = await res.json();
+                        if (data.length > 0) {
+                            const lat = parseFloat(data[0].lat);
+                            const lng = parseFloat(data[0].lon);
+                            setForm(prev => ({
+                                ...prev,
+                                latitude: lat.toFixed(7),
+                                longitude: lng.toFixed(7),
+                            }));
+                            if (mapRef.current) {
+                                mapRef.current.setView([lat, lng], 17);
+                            }
+                            toast('ดึงพิกัดสำเร็จ! (ตำแหน่งโดยประมาณ — ลากหมุดเพื่อปรับ)', 'success');
+                            setGmapsLink('');
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        toast('ไม่พบพิกัด ลองแชร์ลิงก์จากคอมพิวเตอร์แทน', 'error');
+                    }
+                } catch {
+                    toast('ค้นหาที่อยู่ไม่สำเร็จ', 'error');
+                }
+            }
+        } catch (err: any) {
+            toast(err.message || 'ไม่สามารถดึงพิกัดจากลิงก์ได้', 'error');
+        } finally {
+            setResolving(false);
+        }
+    };
+
+    // Search place by name — via PHP proxy to Nominatim (avoids CORS)
+    const handleSearchPlace = async () => {
+        if (!searchQuery.trim()) return;
+        setSearching(true);
+        setSearchResults([]);
+        try {
+            const res = await fetch(
+                `${API_BASE}/geocode.php?q=${encodeURIComponent(searchQuery.trim())}&limit=5&countrycodes=th`
+            );
+            const data = await res.json();
+            if (data.length === 0) {
+                toast('ไม่พบสถานที่ ลองกด "เปิด Google Maps" เพื่อค้นหาและวางลิงก์', 'error');
+            } else {
+                setSearchResults(data);
+            }
+        } catch {
+            toast('ค้นหาไม่สำเร็จ', 'error');
+        } finally {
+            setSearching(false);
+        }
+    };
+
+    const handleSelectPlace = (place: any) => {
+        const lat = parseFloat(place.lat);
+        const lng = parseFloat(place.lon);
+        setForm(prev => ({
+            ...prev,
+            latitude: lat.toFixed(7),
+            longitude: lng.toFixed(7),
+        }));
+        if (mapRef.current) {
+            mapRef.current.setView([lat, lng], 17);
+        }
+        toast('เลือกสถานที่เรียบร้อย!', 'success');
+        setSearchResults([]);
+        setSearchQuery('');
+    };
+
+    const openGoogleMapsSearch = () => {
+        const q = searchQuery.trim() || 'ประเทศไทย';
+        window.open(`https://www.google.com/maps/search/${encodeURIComponent(q)}`, '_blank');
+    };
+
     const openCreate = () => {
         setEditingLoc(null);
         setForm({ name: '', latitude: '', longitude: '', radius_meters: '200', is_active: true });
+        setGmapsLink('');
+        setSearchQuery('');
+        setSearchResults([]);
         setShowModal(true);
     };
 
@@ -224,9 +347,9 @@ const AdminLocationScreen: React.FC = () => {
         <div className="pt-6 md:pt-8 pb-24 md:pb-8 px-4 md:px-8 max-w-5xl mx-auto min-h-full font-display">
             {/* Header */}
             <header className="mb-8">
-                <button onClick={() => navigate('/admin/dashboard')} className="text-slate-500 hover:text-primary transition-colors mb-4 flex items-center gap-1 text-sm">
+                <button onClick={() => navigate('/profile')} className="md:hidden text-slate-500 hover:text-primary transition-colors mb-4 flex items-center gap-1 text-sm">
                     <span className="material-icons-round text-lg">arrow_back</span>
-                    <span>กลับหน้า Admin</span>
+                    <span>กลับหน้าโปรไฟล์</span>
                 </button>
                 <div className="flex items-center justify-between">
                     <div>
@@ -326,21 +449,109 @@ const AdminLocationScreen: React.FC = () => {
                             <div className="relative">
                                 <div ref={mapContainerRef} className="w-full h-56 sm:h-64 bg-gray-100 dark:bg-gray-900" />
 
-                                {/* Use Current Location button */}
-                                <button
-                                    onClick={useCurrentLocation}
-                                    className="absolute top-3 left-3 z-[1000] bg-white dark:bg-gray-800 shadow-lg rounded-xl px-3 py-2 flex items-center gap-2 text-sm font-medium text-primary hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors border border-gray-200 dark:border-gray-600"
-                                >
-                                    <span className="material-icons-round text-lg">my_location</span>
-                                    ตำแหน่งปัจจุบัน
-                                </button>
+                                {/* Search + Current Location toolbar on map */}
+                                <div className="absolute top-3 left-3 right-3 z-[1000] flex gap-2">
+                                    {/* Search input */}
+                                    <div className="flex-1 relative">
+                                        <div className="flex bg-white dark:bg-gray-800 shadow-lg rounded-xl border border-gray-200 dark:border-gray-600 overflow-hidden">
+                                            <input
+                                                type="text"
+                                                value={searchQuery}
+                                                onChange={(e) => setSearchQuery(e.target.value)}
+                                                onKeyDown={(e) => e.key === 'Enter' && handleSearchPlace()}
+                                                placeholder="ค้นหาสถานที่..."
+                                                className="flex-1 px-3 py-2 text-sm bg-transparent focus:outline-none min-w-0"
+                                            />
+                                            <button
+                                                onClick={handleSearchPlace}
+                                                disabled={searching || !searchQuery.trim()}
+                                                className="px-3 text-primary hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-40"
+                                            >
+                                                <span className="material-icons-round text-lg">{searching ? 'autorenew' : 'search'}</span>
+                                            </button>
+                                        </div>
 
-                                {/* Map helper text */}
-                                <div className="absolute bottom-3 left-3 right-3 z-[1000]">
-                                    <div className="bg-black/60 backdrop-blur text-white text-xs px-3 py-1.5 rounded-lg text-center">
-                                        📍 แตะบนแผนที่ หรือลากหมุดเพื่อเลือกตำแหน่ง
+                                        {/* Search Results Dropdown */}
+                                        {searchResults.length > 0 && (
+                                            <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-600 overflow-hidden max-h-48 overflow-y-auto">
+                                                {searchResults.map((place: any, idx: number) => (
+                                                    <button
+                                                        key={idx}
+                                                        onClick={() => handleSelectPlace(place)}
+                                                        className="w-full text-left px-3 py-2.5 hover:bg-blue-50 dark:hover:bg-gray-700 text-sm border-b border-gray-100 dark:border-gray-700 last:border-0 flex items-start gap-2 transition-colors"
+                                                    >
+                                                        <span className="material-icons-round text-red-400 text-base mt-0.5 shrink-0">place</span>
+                                                        <span className="text-gray-700 dark:text-gray-300 line-clamp-2">{place.display_name}</span>
+                                                    </button>
+                                                ))}
+                                                {/* Fallback: Open Google Maps button */}
+                                                <button
+                                                    onClick={openGoogleMapsSearch}
+                                                    className="w-full text-left px-3 py-2.5 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-sm flex items-center gap-2 transition-colors text-blue-600 dark:text-blue-400 font-medium"
+                                                >
+                                                    <span className="material-icons-round text-base">open_in_new</span>
+                                                    หาไม่เจอ? เปิด Google Maps แล้ววางลิงก์
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Current Location + Open Google Maps buttons */}
+                                    <div className="flex gap-1 shrink-0">
+                                        <button
+                                            onClick={openGoogleMapsSearch}
+                                            className="bg-white dark:bg-gray-800 shadow-lg rounded-xl px-2.5 py-2 flex items-center text-sm font-medium text-emerald-600 hover:bg-emerald-50 dark:hover:bg-gray-700 transition-colors border border-gray-200 dark:border-gray-600"
+                                            title="เปิด Google Maps"
+                                        >
+                                            <span className="material-icons-round text-lg">map</span>
+                                        </button>
+                                        <button
+                                            onClick={useCurrentLocation}
+                                            className="bg-white dark:bg-gray-800 shadow-lg rounded-xl px-2.5 py-2 flex items-center text-sm font-medium text-primary hover:bg-blue-50 dark:hover:bg-gray-700 transition-colors border border-gray-200 dark:border-gray-600"
+                                            title="ตำแหน่งปัจจุบัน"
+                                        >
+                                            <span className="material-icons-round text-lg">my_location</span>
+                                        </button>
                                     </div>
                                 </div>
+
+                                {/* Map helper text — small, non-overlapping */}
+                                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-[1000]">
+                                    <div className="bg-black/50 backdrop-blur text-white text-[10px] px-2.5 py-1 rounded-full">
+                                        📍 แตะหรือลากหมุด
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Google Maps Link Input — outside map */}
+                            <div className="px-5 pt-4">
+                                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">
+                                    <span className="material-icons-round text-sm align-middle mr-1">link</span>
+                                    วาง Google Maps Link
+                                </label>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={gmapsLink}
+                                        onChange={(e) => setGmapsLink(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && handleResolveGmaps()}
+                                        placeholder="https://maps.app.goo.gl/... หรือ Google Maps URL"
+                                        className="flex-1 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary"
+                                    />
+                                    <button
+                                        onClick={handleResolveGmaps}
+                                        disabled={resolving || !gmapsLink.trim()}
+                                        className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white px-4 py-2.5 rounded-xl font-semibold text-sm flex items-center gap-1.5 transition-all whitespace-nowrap shadow-sm"
+                                    >
+                                        {resolving ? (
+                                            <span className="material-icons-round animate-spin text-base">autorenew</span>
+                                        ) : (
+                                            <span className="material-icons-round text-base">travel_explore</span>
+                                        )}
+                                        ดึงพิกัด
+                                    </button>
+                                </div>
+                                <p className="text-[11px] text-gray-400 mt-1">หาไม่เจอ? กดปุ่ม 🗺️ บนแผนที่เพื่อเปิด Google Maps → แชร์ลิงก์ → วางลิงก์ที่นี่</p>
                             </div>
 
                             {/* Form */}
