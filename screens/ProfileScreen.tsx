@@ -172,19 +172,18 @@ const ProfileScreen: React.FC = () => {
                                     {faceLoading ? 'กำลังตรวจสอบ...' : hasFace ? 'ลงทะเบียนใบหน้าแล้ว ✓' : 'ยังไม่ได้ลงทะเบียนใบหน้า'}
                                 </p>
                                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                                    {hasFace ? 'ใช้สำหรับยืนยันตัวตนตอนลงเวลา' : 'ลงทะเบียนเพื่อใช้สแกนหน้าตอน Clock-in'}
+                                    {hasFace ? 'หากต้องการลงทะเบียนใหม่ กรุณาติดต่อแอดมิน' : 'ลงทะเบียนเพื่อใช้สแกนหน้าตอน Clock-in'}
                                 </p>
                             </div>
-                            <button
-                                onClick={() => setShowFaceCapture(true)}
-                                className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95 ${hasFace
-                                    ? 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
-                                    : 'bg-primary text-white shadow-md shadow-primary/20'
-                                    }`}
-                            >
-                                <span className="material-icons-round text-sm">camera_alt</span>
-                                {hasFace ? 'ลงทะเบียนใหม่' : 'ลงทะเบียน'}
-                            </button>
+                            {!hasFace && (
+                                <button
+                                    onClick={() => setShowFaceCapture(true)}
+                                    className="px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95 bg-primary text-white shadow-md shadow-primary/20"
+                                >
+                                    <span className="material-icons-round text-sm">camera_alt</span>
+                                    ลงทะเบียน
+                                </button>
+                            )}
                         </div>
                     </div>
                 </section>

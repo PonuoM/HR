@@ -14,10 +14,31 @@ $company_id = get_company_id();
 if ($method === 'POST') {
     $body = get_json_body();
     $employee_id = $body['employee_id'] ?? '';
-    $descriptor = $body['descriptor'] ?? null; // Array of 128 floats
+    $descriptor = $body['descriptor'] ?? null; // Single 128-float array OR array of multiple descriptors
+    $descriptors = $body['descriptors'] ?? null; // Multiple descriptors from multi-angle capture
 
-    if (!$employee_id || !$descriptor || !is_array($descriptor)) {
-        json_response(['error' => 'employee_id and descriptor (array) are required'], 400);
+    if (!$employee_id) {
+        json_response(['error' => 'employee_id is required'], 400);
+    }
+
+    // Support multi-descriptor: average them into one
+    if ($descriptors && is_array($descriptors) && count($descriptors) > 0) {
+        $len = count($descriptors[0]);
+        $avg = array_fill(0, $len, 0.0);
+        foreach ($descriptors as $d) {
+            for ($i = 0; $i < $len; $i++) {
+                $avg[$i] += floatval($d[$i]);
+            }
+        }
+        $count = count($descriptors);
+        for ($i = 0; $i < $len; $i++) {
+            $avg[$i] = $avg[$i] / $count;
+        }
+        $descriptor = $avg;
+    }
+
+    if (!$descriptor || !is_array($descriptor)) {
+        json_response(['error' => 'descriptor or descriptors (array) are required'], 400);
     }
 
     if (count($descriptor) !== 128) {
