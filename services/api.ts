@@ -56,7 +56,7 @@ export async function getEmployees() {
     return fetchApi<any[]>('employees.php');
 }
 
-export async function createEmployee(data: { id: string; name: string; email?: string; password?: string; department_id?: number; position_id?: number; base_salary?: number | null; hire_date?: string | null; approver_id?: string | null; company_id?: number; is_admin?: number }) {
+export async function createEmployee(data: { id: string; name: string; email?: string; password?: string; department_id?: number; position_id?: number; base_salary?: number | null; hire_date?: string | null; approver_id?: string | null; approver2_id?: string | null; company_id?: number; is_admin?: number }) {
     return fetchApi<any>('employees.php', { method: 'POST', body: JSON.stringify(data) });
 }
 
@@ -129,6 +129,20 @@ export async function createLeaveRequest(data: any) {
 
 export async function updateLeaveRequest(id: number, data: { status: string; approved_by?: string; is_bypass?: number }) {
     return fetchApi<any>(`leave_requests.php?id=${id}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+// --- Time Records ---
+export async function getTimeRecords(filters?: { employee_id?: string; status?: string; approver_id?: string }) {
+    const params = new URLSearchParams();
+    if (filters?.employee_id) params.set('employee_id', filters.employee_id);
+    if (filters?.status) params.set('status', filters.status);
+    if (filters?.approver_id) params.set('approver_id', filters.approver_id);
+    const qs = params.toString();
+    return fetchApi<any[]>(`time_records.php${qs ? '?' + qs : ''}`);
+}
+
+export async function updateTimeRecord(id: number, data: { status: string; approved_by?: string; is_bypass?: number }) {
+    return fetchApi<any>(`time_records.php?id=${id}`, { method: 'PUT', body: JSON.stringify(data) });
 }
 
 // --- Notifications ---

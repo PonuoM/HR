@@ -87,6 +87,7 @@ if ($method === 'POST') {
     $base_salary = isset($body['base_salary']) ? (float)$body['base_salary'] : null;
     $hire_date = !empty($body['hire_date']) ? $body['hire_date'] : null;
     $approver_id = !empty($body['approver_id']) ? $body['approver_id'] : null;
+    $approver2_id = !empty($body['approver2_id']) ? $body['approver2_id'] : null;
 
     // Check if caller is superadmin (needed for company_id override and is_admin)
     $is_caller_superadmin = false;
@@ -123,10 +124,10 @@ if ($method === 'POST') {
     $hashedPassword = password_hash($password, PASSWORD_BCRYPT);
     $is_admin = (!empty($body['is_admin']) && $is_caller_superadmin) ? 1 : 0;
 
-    $stmt = $conn->prepare("INSERT INTO employees (id, company_id, name, email, password, department_id, position_id, base_salary, hire_date, approver_id, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param('sisssiidssi',
+    $stmt = $conn->prepare("INSERT INTO employees (id, company_id, name, email, password, department_id, position_id, base_salary, hire_date, approver_id, approver2_id, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $stmt->bind_param('sisssiidssis',
         $id, $target_company_id, $name, $email, $hashedPassword,
-        $department_id, $position_id, $base_salary, $hire_date, $approver_id, $is_admin
+        $department_id, $position_id, $base_salary, $hire_date, $approver_id, $approver2_id, $is_admin
     );
     $stmt->execute();
     json_response(['message' => 'Employee created', 'id' => $id], 201);

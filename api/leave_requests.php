@@ -185,6 +185,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
     $actorStmt->execute();
     $actor = $actorStmt->get_result()->fetch_assoc();
     $isHR = $actor && $actor['is_admin'];
+    $isSelfRequest = ($actorId === $req['employee_id']); // Prevent self-approval
     $actorName = $actor['name'] ?? $actorId;
 
     // Determine which tier this actor operates on
@@ -193,6 +194,10 @@ if ($method === 'PUT' && isset($_GET['id'])) {
 
     // === REJECT: Any tier can reject and it finalizes the request ===
     if ($action === 'rejected') {
+        // Block self-rejection
+        if ($isSelfRequest) {
+            json_response(['error' => 'ไม่สามารถปฏิเสธคำขอของตัวเองได้'], 403);
+        }
         if ($actorId === $tier1Approver && $req['tier1_status'] === 'pending') {
             $conn->query("UPDATE leave_requests SET 
                 tier1_status='rejected', tier1_by='$actorId', tier1_at=NOW(),
@@ -228,6 +233,10 @@ if ($method === 'PUT' && isset($_GET['id'])) {
 
     // === APPROVE ===
     if ($action === 'approved') {
+        // Block self-approval
+        if ($isSelfRequest) {
+            json_response(['error' => 'ไม่สามารถอนุมัติคำขอของตัวเองได้'], 403);
+        }
 
         // --- HR BYPASS: HR approves while tier1 is still pending ---
         if ($isBypass && $isHR && $req['tier1_status'] === 'pending') {

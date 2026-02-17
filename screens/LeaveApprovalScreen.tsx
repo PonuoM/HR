@@ -2,7 +2,9 @@ import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useApi } from '../hooks/useApi';
-import { API_BASE, getAuthHeaders, getLeaveRequests, updateLeaveRequest } from '../services/api';
+import { API_BASE, getAuthHeaders, getLeaveRequests, updateLeaveRequest, getTimeRecords, updateTimeRecord } from '../services/api';
+
+type AdminTab = 'leave' | 'time';
 
 function formatThaiDate(dateStr: string): string {
     const d = new Date(dateStr);
@@ -22,41 +24,76 @@ const LeaveApprovalScreen: React.FC = () => {
     const { user: authUser, isAdmin } = useAuth();
     const empId = authUser?.id || '';
 
+    const [adminTab, setAdminTab] = useState<AdminTab>('leave');
     const [tab, setTab] = useState<'pending' | 'all'>('pending');
     const [actionLoading, setActionLoading] = useState<number | null>(null);
 
-    // Fetch all pending requests for this approver (or all if admin)
-    const { data: allRequests = [], loading, refetch } = useApi(
+    // ─── Leave Requests ───
+    const { data: allRequests = [], loading: loadingLeave, refetch: refetchLeave } = useApi(
         () => isAdmin
             ? getLeaveRequests({ status: 'pending' })
-            : getLeaveRequests({ employee_id: '' }).then(() => []),  // fallback
+            : getLeaveRequests({ employee_id: '' }).then(() => []),
         [empId, isAdmin]
     );
 
-    // For non-admin approvers, fetch requests where they are the approver
     const { data: approverRequests = [] } = useApi(
         () => empId ? fetch(`${API_BASE}/leave_requests.php?approver_id=${empId}`, { headers: getAuthHeaders() }).then(r => r.json()) : Promise.resolve([]),
         [empId]
     );
 
-    // Combine: use approverRequests for non-admin, allRequests for admin
-    const requests = isAdmin ? (allRequests || []) : (approverRequests || []);
-    const pendingRequests = requests.filter((r: any) => r.status === 'pending');
-    const historyRequests = requests.filter((r: any) => r.status !== 'pending');
+    const leaveRequests = isAdmin ? (allRequests || []) : (approverRequests || []);
+    const pendingLeave = leaveRequests.filter((r: any) => r.status === 'pending');
+    const historyLeave = leaveRequests.filter((r: any) => r.status !== 'pending');
+
+    // ─── Time Records ───
+    const { data: allTimeRecords = [], loading: loadingTime, refetch: refetchTime } = useApi(
+        () => isAdmin
+            ? getTimeRecords({ status: 'pending' })
+            : getTimeRecords({ approver_id: empId }),
+        [empId, isAdmin]
+    );
+
+    const pendingTime = (allTimeRecords || []).filter((r: any) => r.status === 'pending');
+    const historyTime = (allTimeRecords || []).filter((r: any) => r.status !== 'pending');
+
+    // ─── Current display data ───
+    const loading = adminTab === 'leave' ? loadingLeave : loadingTime;
+    const pendingRequests = adminTab === 'leave' ? pendingLeave : pendingTime;
+    const historyRequests = adminTab === 'leave' ? historyLeave : historyTime;
     const displayRequests = tab === 'pending' ? pendingRequests : historyRequests;
 
-    // Handle approve/reject
-    const handleAction = useCallback(async (requestId: number, action: 'approve' | 'reject') => {
+    const refetchAll = useCallback(() => {
+        refetchLeave();
+        refetchTime();
+    }, [refetchLeave, refetchTime]);
+
+    // Handle approve/reject for leave
+    const handleLeaveAction = useCallback(async (requestId: number, action: 'approve' | 'reject') => {
         setActionLoading(requestId);
         try {
             await updateLeaveRequest(requestId, { status: action === 'approve' ? 'approved' : 'rejected', approved_by: empId });
-            refetch();
+            refetchAll();
         } catch (e) {
             console.error('Action failed:', e);
         } finally {
             setActionLoading(null);
         }
-    }, [empId, refetch]);
+    }, [empId, refetchAll]);
+
+    // Handle approve/reject for time records
+    const handleTimeAction = useCallback(async (recordId: number, action: 'approve' | 'reject') => {
+        setActionLoading(recordId);
+        try {
+            await updateTimeRecord(recordId, { status: action === 'approve' ? 'approved' : 'rejected', approved_by: empId });
+            refetchAll();
+        } catch (e) {
+            console.error('Action failed:', e);
+        } finally {
+            setActionLoading(null);
+        }
+    }, [empId, refetchAll]);
+
+    const handleAction = adminTab === 'leave' ? handleLeaveAction : handleTimeAction;
 
     return (
         <div className="flex flex-col min-h-full bg-background-light dark:bg-background-dark font-display pb-20">
@@ -65,9 +102,38 @@ const LeaveApprovalScreen: React.FC = () => {
                 <button onClick={() => navigate(-1)} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-primary flex items-center gap-1 md:hidden">
                     <span className="material-icons-round">arrow_back_ios_new</span>
                 </button>
-                <h1 className="text-lg font-semibold text-gray-900 dark:text-white">อนุมัติลา</h1>
+                <h1 className="text-lg font-semibold text-gray-900 dark:text-white">อนุมัติคำขอ</h1>
                 <div className="w-10 md:hidden"></div>
             </header>
+
+            {/* Admin Category Tabs */}
+            <div className="sticky top-[60px] z-10 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-100 dark:border-gray-800">
+                <div className="flex">
+                    {[
+                        { key: 'leave' as AdminTab, label: 'ลา / OT', icon: 'event_busy', count: pendingLeave.length },
+                        { key: 'time' as AdminTab, label: 'บันทึกเวลา', icon: 'edit_calendar', count: pendingTime.length },
+                    ].map(t => (
+                        <button
+                            key={t.key}
+                            onClick={() => { setAdminTab(t.key); setTab('pending'); }}
+                            className={`flex-1 flex items-center justify-center gap-1.5 py-3 text-sm font-medium transition-all relative
+                                ${adminTab === t.key
+                                    ? 'text-primary'
+                                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                                }`}
+                        >
+                            <span className="material-icons-round text-base">{t.icon}</span>
+                            {t.label}
+                            {t.count > 0 && (
+                                <span className="bg-red-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{t.count}</span>
+                            )}
+                            {adminTab === t.key && (
+                                <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-primary rounded-full" />
+                            )}
+                        </button>
+                    ))}
+                </div>
+            </div>
 
             {/* Pending Count Banner */}
             {pendingRequests.length > 0 && (
@@ -84,7 +150,7 @@ const LeaveApprovalScreen: React.FC = () => {
                 </div>
             )}
 
-            {/* Tabs */}
+            {/* Status Tabs */}
             <div className="px-4 pt-4 md:px-0 md:max-w-3xl md:mx-auto md:w-full">
                 <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-xl p-1">
                     <button
@@ -121,6 +187,8 @@ const LeaveApprovalScreen: React.FC = () => {
                         displayRequests.map((r: any) => {
                             const badge = getStatusBadge(r.status);
                             const isOT = r.reason?.startsWith('[OT]');
+                            const isTimeRecord = adminTab === 'time';
+
                             return (
                                 <div
                                     key={r.id}
@@ -146,19 +214,69 @@ const LeaveApprovalScreen: React.FC = () => {
 
                                     {/* Request details */}
                                     <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-3 mb-3">
-                                        <div className="flex items-center justify-between mb-1">
-                                            <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                                                {isOT ? 'ขอทำ OT' : r.leave_type_name}
-                                            </span>
-                                            <span className="text-xs text-gray-500">{r.total_days} {isOT ? 'ชม.' : 'วัน'}</span>
-                                        </div>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400">
-                                            {formatThaiDate(r.start_date)} - {formatThaiDate(r.end_date)}
-                                        </p>
+                                        {isTimeRecord ? (
+                                            <>
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <span className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-1">
+                                                        <span className="material-icons-round text-sm text-primary">edit_calendar</span>
+                                                        บันทึกเวลา
+                                                    </span>
+                                                    <span className="text-xs text-gray-500">{formatThaiDate(r.record_date)}</span>
+                                                </div>
+                                                <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                                    <span className="flex items-center gap-1">
+                                                        <span className="material-icons-round text-xs">login</span>
+                                                        เข้า {r.clock_in_time?.substring(0, 5)}
+                                                    </span>
+                                                    {r.clock_out_time && (
+                                                        <span className="flex items-center gap-1">
+                                                            <span className="material-icons-round text-xs">logout</span>
+                                                            ออก {r.clock_out_time?.substring(0, 5)}
+                                                        </span>
+                                                    )}
+                                                    {r.work_location_name && (
+                                                        <span className="flex items-center gap-1">
+                                                            <span className="material-icons-round text-xs">place</span>
+                                                            {r.work_location_name}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <span className="text-sm font-semibold text-gray-900 dark:text-white">
+                                                        {isOT ? 'ขอทำ OT' : r.leave_type_name}
+                                                    </span>
+                                                    <span className="text-xs text-gray-500">{r.total_days} {isOT ? 'ชม.' : 'วัน'}</span>
+                                                </div>
+                                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                                    {formatThaiDate(r.start_date)} - {formatThaiDate(r.end_date)}
+                                                </p>
+                                            </>
+                                        )}
                                         {r.reason && !isOT && (
                                             <p className="text-xs text-gray-400 mt-1 italic">เหตุผล: {r.reason}</p>
                                         )}
                                     </div>
+
+                                    {/* Tier status */}
+                                    {(r.tier1_status || r.tier2_status) && (
+                                        <div className="flex items-center gap-4 mb-3 text-[11px] text-gray-500 dark:text-gray-400">
+                                            <span className="flex items-center gap-1">
+                                                <span className={`material-icons-round text-sm ${r.tier1_status === 'approved' ? 'text-green-500' : r.tier1_status === 'rejected' ? 'text-red-500' : r.tier1_status === 'skipped' ? 'text-gray-400' : 'text-yellow-500'}`}>
+                                                    {r.tier1_status === 'approved' ? 'check_circle' : r.tier1_status === 'rejected' ? 'cancel' : r.tier1_status === 'skipped' ? 'skip_next' : 'schedule'}
+                                                </span>
+                                                ขั้น 1{r.tier1_by_name ? `: ${r.tier1_by_name}` : r.approver1_name ? `: ${r.approver1_name}` : ''}
+                                            </span>
+                                            <span className="flex items-center gap-1">
+                                                <span className={`material-icons-round text-sm ${r.tier2_status === 'approved' ? 'text-green-500' : r.tier2_status === 'rejected' ? 'text-red-500' : r.tier2_status === 'skipped' ? 'text-gray-400' : 'text-yellow-500'}`}>
+                                                    {r.tier2_status === 'approved' ? 'check_circle' : r.tier2_status === 'rejected' ? 'cancel' : r.tier2_status === 'skipped' ? 'skip_next' : 'schedule'}
+                                                </span>
+                                                ขั้น 2{r.tier2_by_name ? `: ${r.tier2_by_name}` : r.approver2_name ? `: ${r.approver2_name}` : ''}
+                                            </span>
+                                        </div>
+                                    )}
 
                                     {/* Action buttons — only for pending */}
                                     {r.status === 'pending' && (
