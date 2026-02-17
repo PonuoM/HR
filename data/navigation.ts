@@ -12,7 +12,7 @@ export const BOTTOM_NAV_ITEMS: NavItem[] = [
 export const SIDEBAR_NAV_ITEMS: NavItem[] = [
     { path: '/', icon: 'dashboard', label: 'หน้าหลัก' },
     { path: '/request/create', icon: 'description', label: 'คำขอ & วันลา' },
-    { path: '/leave/history', icon: 'history', label: 'ประวัติการลา' },
+    { path: '/approval/history', icon: 'history', label: 'ประวัติขออนุมัติ' },
     { path: '/leave/approvals', icon: 'how_to_reg', label: 'อนุมัติลา' },
     { path: '/payslips', icon: 'receipt_long', label: 'สลิปเงินเดือน' },
     { path: '/calendar', icon: 'calendar_month', label: 'ปฏิทิน' },

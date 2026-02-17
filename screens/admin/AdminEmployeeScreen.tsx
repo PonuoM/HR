@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
-import { getDepartments, getPositions, getEmployees, createEmployee, resetEmployeePassword, deleteEmployee, suspendEmployee, unsuspendEmployee, getCompanies } from '../../services/api';
+import { getDepartments, getPositions, getEmployees, createEmployee, updateEmployee, resetEmployeePassword, deleteEmployee, suspendEmployee, unsuspendEmployee, getCompanies } from '../../services/api';
 import { useToast } from '../../components/Toast';
 import CustomSelect from '../../components/CustomSelect';
 import { useAuth } from '../../contexts/AuthContext';
@@ -40,6 +40,10 @@ const AdminEmployeeScreen: React.FC = () => {
     const [addCompanyId, setAddCompanyId] = useState('');
     const [addIsAdmin, setAddIsAdmin] = useState(false);
     const [addApprover, setAddApprover] = useState('');
+    const [addApprover2, setAddApprover2] = useState('');
+    const [addHireDate, setAddHireDate] = useState('');
+    const [addAvatarFile, setAddAvatarFile] = useState<File | null>(null);
+    const [addAvatarPreview, setAddAvatarPreview] = useState('');
 
     // Edit Modal states
     const [editDept, setEditDept] = useState('');
@@ -318,6 +322,26 @@ const AdminEmployeeScreen: React.FC = () => {
                             const posObj = (rawPositions || []).find((p: any) => (p.name || p) === addPosition);
 
                             try {
+                                // Upload avatar first if selected
+                                let avatarUrl: string | undefined;
+                                if (addAvatarFile) {
+                                    const uploadForm = new FormData();
+                                    uploadForm.append('file', addAvatarFile);
+                                    uploadForm.append('category', 'avatar');
+                                    uploadForm.append('related_id', empId);
+                                    const API_BASE = (import.meta as any).env?.VITE_API_BASE || '/api';
+                                    const uploadRes = await fetch(`${API_BASE}/uploads.php`, {
+                                        method: 'POST',
+                                        body: uploadForm,
+                                        headers: {
+                                            'X-Company-Id': localStorage.getItem('company_id') || '',
+                                            'X-Employee-Id': localStorage.getItem('employee_id') || '',
+                                        },
+                                    });
+                                    const uploadData = await uploadRes.json();
+                                    if (uploadData?.url) avatarUrl = uploadData.url;
+                                }
+
                                 const result = await createEmployee({
                                     id: empId,
                                     name: fullName,
@@ -326,7 +350,9 @@ const AdminEmployeeScreen: React.FC = () => {
                                     department_id: deptObj?.id ? Number(deptObj.id) : undefined,
                                     position_id: posObj?.id ? Number(posObj.id) : undefined,
                                     base_salary: salary ? Number(salary) : null,
+                                    hire_date: addHireDate || null,
                                     approver_id: addApprover || null,
+                                    approver2_id: addApprover2 || null,
                                     ...(addCompanyId ? { company_id: Number(addCompanyId) } : {}),
                                     ...(addIsAdmin ? { is_admin: 1 } : {}),
                                 });
@@ -334,13 +360,29 @@ const AdminEmployeeScreen: React.FC = () => {
                                     toast(result.error, 'error');
                                     return;
                                 }
+
+                                // Update avatar if uploaded
+                                if (avatarUrl) {
+                                    await updateEmployee(empId, {
+                                        name: fullName,
+                                        email: email || '',
+                                        department_id: deptObj?.id ? Number(deptObj.id) : 0,
+                                        position_id: posObj?.id ? Number(posObj.id) : 0,
+                                        avatar: avatarUrl,
+                                    } as any);
+                                }
+
                                 toast('เพิ่มพนักงานเรียบร้อย', 'success');
                                 setShowAddModal(false);
                                 setAddPosition('');
                                 setAddDepartment('');
                                 setAddApprover('');
+                                setAddApprover2('');
                                 setAddCompanyId('');
                                 setAddIsAdmin(false);
+                                setAddHireDate('');
+                                setAddAvatarFile(null);
+                                setAddAvatarPreview('');
                                 window.location.reload();
                             } catch (err: any) {
                                 toast(err?.message || 'เกิดข้อผิดพลาด', 'error');
@@ -348,13 +390,30 @@ const AdminEmployeeScreen: React.FC = () => {
                         }} className="flex flex-col flex-1 overflow-hidden">
                             <div className="p-4 md:p-6 overflow-y-auto space-y-4 md:space-y-6 flex-1">
                                 <div className="flex justify-center mb-2">
-                                    <div className="relative group cursor-pointer">
-                                        <div className="w-24 h-24 rounded-full bg-gray-100 dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-600 flex items-center justify-center">
-                                            <span className="material-icons-round text-gray-400 text-3xl">add_a_photo</span>
-                                        </div>
+                                    <div className="relative group cursor-pointer" onClick={() => document.getElementById('avatar-upload')?.click()}>
+                                        {addAvatarPreview ? (
+                                            <img src={addAvatarPreview} className="w-24 h-24 rounded-full object-cover border-2 border-primary/30" alt="avatar preview" />
+                                        ) : (
+                                            <div className="w-24 h-24 rounded-full bg-gray-100 dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-600 flex items-center justify-center">
+                                                <span className="material-icons-round text-gray-400 text-3xl">add_a_photo</span>
+                                            </div>
+                                        )}
                                         <div className="absolute bottom-0 right-0 bg-primary text-white p-1.5 rounded-full shadow-sm">
                                             <span className="material-icons-round text-sm block">edit</span>
                                         </div>
+                                        <input
+                                            id="avatar-upload"
+                                            type="file"
+                                            accept="image/*"
+                                            className="hidden"
+                                            onChange={(e) => {
+                                                const file = e.target.files?.[0];
+                                                if (file) {
+                                                    setAddAvatarFile(file);
+                                                    setAddAvatarPreview(URL.createObjectURL(file));
+                                                }
+                                            }}
+                                        />
                                     </div>
                                 </div>
 
@@ -441,6 +500,17 @@ const AdminEmployeeScreen: React.FC = () => {
                                     </div>
                                 </div>
 
+                                {/* HIRE DATE INPUT */}
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">วันที่เริ่มงาน</label>
+                                    <input
+                                        type="date"
+                                        value={addHireDate}
+                                        onChange={(e) => setAddHireDate(e.target.value)}
+                                        className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-gray-900 dark:text-white"
+                                    />
+                                </div>
+
                                 <div className="border-t border-gray-100 dark:border-gray-800 pt-4 mt-2">
                                     <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
                                         <span className="material-icons-round text-primary text-base">supervisor_account</span>
@@ -459,8 +529,28 @@ const AdminEmployeeScreen: React.FC = () => {
                                                 label: `${emp.name} (${emp.position || 'ไม่ระบุตำแหน่ง'})`,
                                             }))}
                                         />
-                                        <p className="text-[10px] text-gray-400 mt-1">เลือกหัวหน้าที่จะอนุมัติคำขอลา/OT ก่อนส่งต่อ HR</p>
+                                        <p className="text-[10px] text-gray-400 mt-1">เลือกหัวหน้าที่จะอนุมัติคำขอลา/OT ก่อนส่งต่อขั้นที่ 2</p>
                                     </div>
+                                </div>
+
+                                {/* APPROVER 2 */}
+                                <div>
+                                    <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
+                                        <span className="material-icons-round text-amber-500 text-base">verified_user</span>
+                                        ผู้อนุมัติ (ขั้น 2)
+                                    </h3>
+                                    <CustomSelect
+                                        value={addApprover2}
+                                        onChange={setAddApprover2}
+                                        placeholder="-- ไม่มี --"
+                                        options={(employees || []).filter((emp: any) =>
+                                            (String(emp.is_active) !== '0')
+                                        ).map((emp: any) => ({
+                                            value: emp.id,
+                                            label: `${emp.name} (${emp.position || 'ไม่ระบุตำแหน่ง'})`,
+                                        }))}
+                                    />
+                                    <p className="text-[10px] text-gray-400 mt-1">ผู้อนุมัติลำดับที่ 2 (เช่น HR หรือผู้บริหาร)</p>
                                 </div>
 
                                 <div>

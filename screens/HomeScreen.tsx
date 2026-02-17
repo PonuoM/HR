@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { QUICK_MENU_ITEMS } from '../data';
 import { useApi } from '../hooks/useApi';
-import { API_BASE, getNotifications, getLeaveQuotas, getAttendance, getNews, getEmployee, markNotificationRead, markAllNotificationsRead, deleteNotification, clockIn, clockOut, checkLocation, getLeaveRequests, updateLeaveRequest, getUploads, getFaceDescriptor } from '../services/api';
+import { API_BASE, getNotifications, getLeaveQuotas, getAttendance, getNews, getEmployee, markNotificationRead, markAllNotificationsRead, deleteNotification, clockIn, clockOut, checkLocation, getLeaveRequests, updateLeaveRequest, getTimeRecords, updateTimeRecord, getUploads, getFaceDescriptor } from '../services/api';
 import { subscribeToPush } from '../services/pushNotifications';
 import LocationCheckModal from '../components/LocationCheckModal';
 import FaceCapture from '../components/FaceCapture';
@@ -18,6 +18,7 @@ const HomeScreen: React.FC = () => {
     const [showNotifications, setShowNotifications] = useState(false);
     const [notifTab, setNotifTab] = useState<'unread' | 'read'>('unread');
     const notifRef = useRef<HTMLDivElement>(null);
+    const notifPanelRef = useRef<HTMLDivElement>(null);
 
     // === APPROVAL SYSTEM STATE ===
     const [approvalDetail, setApprovalDetail] = useState<any>(null);
@@ -49,6 +50,7 @@ const HomeScreen: React.FC = () => {
         const interval = setInterval(() => {
             refetchNotifs();
             refetchPending();
+            refetchPendingTime();
             refetchAttendance();
         }, 30000);
         return () => clearInterval(interval);
@@ -64,26 +66,32 @@ const HomeScreen: React.FC = () => {
         () => empId ? getLeaveRequests({ status: 'pending' }) : Promise.resolve([]),
         [empId]
     );
+    const { data: pendingTimeRecords, refetch: refetchPendingTime } = useApi(
+        () => empId ? getTimeRecords({ status: 'pending' }) : Promise.resolve([]),
+        [empId]
+    );
 
     // Filter: show only requests where I am the current pending approver
     const myPendingRequests = useMemo(() => {
-        if (!pendingRequests) return [];
-        return (pendingRequests as any[]).filter((r: any) => {
-            // HR/Admin sees all pending
+        const filterFn = (r: any) => {
+            // Never show your own requests for self-approval
+            if (r.employee_id === empId) return false;
             if (isAdmin) return true;
-            // Tier 1 approver: show if tier1 is pending and I'm the expected approver
             if (r.expected_approver1_id === empId && r.tier1_status === 'pending') return true;
-            // Tier 2 approver: show if tier1 is done and tier2 is pending and I'm the expected approver
             if (r.expected_approver2_id === empId && r.tier1_status === 'approved' && r.tier2_status === 'pending') return true;
             return false;
-        });
-    }, [pendingRequests, empId, isAdmin]);
+        };
+        const leaveItems = (pendingRequests || []).filter(filterFn).map((r: any) => ({ ...r, _type: 'leave' }));
+        const timeItems = (pendingTimeRecords || []).filter(filterFn).map((r: any) => ({ ...r, _type: 'time' }));
+        return [...leaveItems, ...timeItems];
+    }, [pendingRequests, pendingTimeRecords, empId, isAdmin]);
 
     const pendingCount = myPendingRequests.length;
 
     // Categorize pending
-    const pendingLeave = useMemo(() => myPendingRequests.filter((r: any) => !r.reason?.startsWith('[OT]')), [myPendingRequests]);
-    const pendingOT = useMemo(() => myPendingRequests.filter((r: any) => r.reason?.startsWith('[OT]')), [myPendingRequests]);
+    const pendingLeave = useMemo(() => myPendingRequests.filter((r: any) => r._type === 'leave' && !r.reason?.startsWith('[OT]')), [myPendingRequests]);
+    const pendingOT = useMemo(() => myPendingRequests.filter((r: any) => r._type === 'leave' && r.reason?.startsWith('[OT]')), [myPendingRequests]);
+    const pendingTime = useMemo(() => myPendingRequests.filter((r: any) => r._type === 'time'), [myPendingRequests]);
 
     // Open detail modal and fetch attachments
     const openApprovalDetail = async (req: any) => {
@@ -99,8 +107,8 @@ const HomeScreen: React.FC = () => {
 
     // Approve / Reject handler (multi-tier)
     const handleApproval = async (id: number, action: 'approved' | 'rejected') => {
-        // Find the request
-        const req = myPendingRequests.find((r: any) => r.id === id);
+        // Find the request (could be _type 'leave' or 'time')
+        const req = myPendingRequests.find((r: any) => r.id === id && (approvalDetail?._type === r._type));
         const tier1Pending = req?.tier1_status === 'pending';
         const hasExpectedApprover1 = !!req?.expected_approver1_id;
         const iAmTier1 = req?.expected_approver1_id === empId;
@@ -117,7 +125,12 @@ const HomeScreen: React.FC = () => {
 
         setApprovalLoading(`${id}-${action}`);
         try {
-            await updateLeaveRequest(id, { status: action, approved_by: empId, is_bypass: isBypass });
+            const isTimeRecord = req?._type === 'time';
+            if (isTimeRecord) {
+                await updateTimeRecord(id, { status: action, approved_by: empId, is_bypass: isBypass });
+            } else {
+                await updateLeaveRequest(id, { status: action, approved_by: empId, is_bypass: isBypass });
+            }
             toast(
                 action === 'approved'
                     ? (isBypass ? 'อนุมัติ (Bypass) เรียบร้อย' : 'อนุมัติเรียบร้อย')
@@ -126,6 +139,7 @@ const HomeScreen: React.FC = () => {
             );
             setApprovalDetail(null);
             refetchPending();
+            refetchPendingTime();
             refetchNotifs();
         } catch (err: any) {
             toast(err.message || 'เกิดข้อผิดพลาด', 'error');
@@ -319,7 +333,11 @@ const HomeScreen: React.FC = () => {
     // Close dropdown when clicking outside
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
-            if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+            const target = e.target as Node;
+            if (
+                notifRef.current && !notifRef.current.contains(target) &&
+                notifPanelRef.current && !notifPanelRef.current.contains(target)
+            ) {
                 setShowNotifications(false);
             }
         };
@@ -365,7 +383,7 @@ const HomeScreen: React.FC = () => {
         <div className="pt-14 md:pt-8 pb-24 md:pb-8 px-4 md:px-8 max-w-7xl mx-auto min-h-full">
 
             {/* ═══════════════════ HERO HEADER ═══════════════════ */}
-            <header className="mb-6 md:mb-8">
+            <header className="mb-6 md:mb-8 relative">
                 {/* Mobile: Banner with time-based background image */}
                 <div className="md:hidden relative overflow-hidden rounded-2xl shadow-md -mx-1">
                     <img src={bannerImage} alt="" className="absolute inset-0 w-full h-full object-cover" />
@@ -442,15 +460,17 @@ const HomeScreen: React.FC = () => {
                                         </span>
                                     )}
                                 </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+
+                            </div> {/* closes notifRef */}
+                        </div> {/* closes flex items-center gap-3 */}
+                    </div> {/* closes relative z-10 content */}
+                </div> {/* closes hidden md:block desktop banner */}
 
                 {/* Notification Dropdown Panel — shared between mobile and desktop */}
                 {showNotifications && (
                     <div
-                        className="fixed inset-x-0 top-14 mx-3 md:mx-0 md:absolute md:right-4 md:top-auto md:mt-2 md:w-[400px] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-700 z-50 overflow-hidden"
+                        ref={notifPanelRef}
+                        className="fixed inset-x-0 top-14 mx-3 md:absolute md:inset-x-auto md:right-2 md:top-0 md:mx-0 md:mt-2 md:w-[400px] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-700 z-50 overflow-hidden"
                         style={{ animation: 'notifSlideIn 0.2s ease-out' }}
                     >
                         {/* Header */}
@@ -528,7 +548,7 @@ const HomeScreen: React.FC = () => {
                                         </button>
 
                                         {/* Action Buttons */}
-                                        <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <div className="flex items-center gap-1 shrink-0">
                                             {!notif.isRead && (
                                                 <button
                                                     onClick={(e) => { e.stopPropagation(); markAsRead(notif.id); }}
@@ -809,14 +829,16 @@ const HomeScreen: React.FC = () => {
                                             <th className="text-left px-5 py-2.5 text-xs font-semibold text-gray-500">พนักงาน</th>
                                             <th className="text-center px-2 py-2.5 text-xs font-semibold text-gray-500">ประเภท</th>
                                             <th className="text-center px-2 py-2.5 text-xs font-semibold text-gray-500">จำนวน</th>
+                                            <th className="text-center px-2 py-2.5 text-xs font-semibold text-gray-500">สถานะขั้น</th>
                                             <th className="text-center px-5 py-2.5 text-xs font-semibold text-gray-500">ดำเนินการ</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {([...pendingOT, ...pendingLeave].slice(0, showAllApprovals ? undefined : 5)).map((req: any) => {
-                                            const isOT = req.reason?.startsWith('[OT]');
+                                        {([...pendingOT, ...pendingLeave, ...pendingTime].slice(0, showAllApprovals ? undefined : 5)).map((req: any) => {
+                                            const isOT = req._type === 'leave' && req.reason?.startsWith('[OT]');
+                                            const isTime = req._type === 'time';
                                             return (
-                                                <tr key={req.id} className="border-b last:border-0 border-gray-50 dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors cursor-pointer" onClick={() => openApprovalDetail(req)}>
+                                                <tr key={`${req._type}-${req.id}`} className="border-b last:border-0 border-gray-50 dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors cursor-pointer" onClick={() => openApprovalDetail(req)}>
                                                     <td className="px-5 py-3">
                                                         <div className="flex items-center gap-2.5">
                                                             <img src={req.employee_avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(req.employee_name || '')} alt="" className="w-7 h-7 rounded-full object-cover ring-2 ring-gray-100 dark:ring-gray-700" />
@@ -824,12 +846,24 @@ const HomeScreen: React.FC = () => {
                                                         </div>
                                                     </td>
                                                     <td className="text-center px-2 py-3">
-                                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${isOT ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : `bg-${req.leave_type_color || 'gray'}-100 dark:bg-${req.leave_type_color || 'gray'}-900/30 text-${req.leave_type_color || 'gray'}-600`}`}>
-                                                            {isOT ? 'OT' : req.leave_type_name}
+                                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${isTime ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600' : isOT ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : `bg-${req.leave_type_color || 'gray'}-100 dark:bg-${req.leave_type_color || 'gray'}-900/30 text-${req.leave_type_color || 'gray'}-600`}`}>
+                                                            {isTime ? 'บันทึกเวลา' : isOT ? 'OT' : req.leave_type_name}
                                                         </span>
                                                     </td>
                                                     <td className="text-center px-2 py-3 text-xs text-gray-600 dark:text-gray-400">
-                                                        {isOT ? `${req.total_days} ชม.` : `${req.total_days} วัน`}
+                                                        {isTime ? (req.record_date ? new Date(req.record_date).toLocaleDateString('th-TH', { day: '2-digit', month: 'short' }) : '-') : isOT ? `${req.total_days} ชม.` : `${req.total_days} วัน`}
+                                                    </td>
+                                                    <td className="text-center px-2 py-3">
+                                                        <div className="flex flex-col items-center gap-0.5">
+                                                            <span className={`flex items-center gap-0.5 text-[10px] font-medium ${req.tier1_status === 'approved' ? 'text-green-600' : req.tier1_status === 'rejected' ? 'text-red-500' : 'text-yellow-500'}`}>
+                                                                <span className="material-icons-round" style={{ fontSize: '12px' }}>{req.tier1_status === 'approved' ? 'check_circle' : req.tier1_status === 'rejected' ? 'cancel' : 'schedule'}</span>
+                                                                {req.approver1_name || 'ขั้น 1'}
+                                                            </span>
+                                                            <span className={`flex items-center gap-0.5 text-[10px] font-medium ${req.tier2_status === 'approved' ? 'text-green-600' : req.tier2_status === 'rejected' ? 'text-red-500' : 'text-gray-400'}`}>
+                                                                <span className="material-icons-round" style={{ fontSize: '12px' }}>{req.tier2_status === 'approved' ? 'check_circle' : req.tier2_status === 'rejected' ? 'cancel' : 'schedule'}</span>
+                                                                {req.approver2_name || 'ขั้น 2'}
+                                                            </span>
+                                                        </div>
                                                     </td>
                                                     <td className="text-center px-5 py-3">
                                                         <span className="material-icons-round text-primary text-base hover:scale-110 transition-transform">open_in_new</span>
@@ -852,10 +886,11 @@ const HomeScreen: React.FC = () => {
                         {/* Mobile: Card list */}
                         <div className="md:hidden px-4 pb-4 space-y-2.5">
                             {pendingCount > 0 ? (
-                                ([...pendingOT, ...pendingLeave].slice(0, showAllApprovals ? undefined : 3)).map((req: any) => {
-                                    const isOT = req.reason?.startsWith('[OT]');
+                                ([...pendingOT, ...pendingLeave, ...pendingTime].slice(0, showAllApprovals ? undefined : 3)).map((req: any) => {
+                                    const isOT = req._type === 'leave' && req.reason?.startsWith('[OT]');
+                                    const isTime = req._type === 'time';
                                     return (
-                                        <button key={req.id} onClick={() => openApprovalDetail(req)}
+                                        <button key={`${req._type}-${req.id}`} onClick={() => openApprovalDetail(req)}
                                             className="w-full bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3.5 hover:shadow-md transition-all active:scale-[0.99] text-left">
                                             <div className="flex items-center gap-3">
                                                 <img src={req.employee_avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(req.employee_name || '')}
@@ -863,13 +898,23 @@ const HomeScreen: React.FC = () => {
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-center gap-2">
                                                         <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{req.employee_name}</p>
-                                                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${isOT ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : `bg-${req.leave_type_color || 'gray'}-100 dark:bg-${req.leave_type_color || 'gray'}-900/30 text-${req.leave_type_color || 'gray'}-600`}`}>
-                                                            {isOT ? 'OT' : req.leave_type_name}
+                                                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${isTime ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600' : isOT ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : `bg-${req.leave_type_color || 'gray'}-100 dark:bg-${req.leave_type_color || 'gray'}-900/30 text-${req.leave_type_color || 'gray'}-600`}`}>
+                                                            {isTime ? 'บันทึกเวลา' : isOT ? 'OT' : req.leave_type_name}
                                                         </span>
                                                     </div>
                                                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                                                        {req.department || 'ไม่ระบุแผนก'} · {isOT ? `${req.total_days} ชม.` : `${req.total_days} วัน`}
+                                                        {req.department || 'ไม่ระบุแผนก'} · {isTime ? (req.record_date ? new Date(req.record_date).toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' }) : '-') : isOT ? `${req.total_days} ชม.` : `${req.total_days} วัน`}
                                                     </p>
+                                                    <div className="flex items-center gap-2 mt-1">
+                                                        <span className={`flex items-center gap-0.5 text-[10px] ${req.tier1_status === 'approved' ? 'text-green-600' : req.tier1_status === 'rejected' ? 'text-red-500' : 'text-yellow-500'}`}>
+                                                            <span className="material-icons-round" style={{ fontSize: '11px' }}>{req.tier1_status === 'approved' ? 'check_circle' : req.tier1_status === 'rejected' ? 'cancel' : 'schedule'}</span>
+                                                            ขั้น 1: {req.approver1_name || '-'}
+                                                        </span>
+                                                        <span className={`flex items-center gap-0.5 text-[10px] ${req.tier2_status === 'approved' ? 'text-green-600' : req.tier2_status === 'rejected' ? 'text-red-500' : 'text-gray-400'}`}>
+                                                            <span className="material-icons-round" style={{ fontSize: '11px' }}>{req.tier2_status === 'approved' ? 'check_circle' : req.tier2_status === 'rejected' ? 'cancel' : 'schedule'}</span>
+                                                            ขั้น 2: {req.approver2_name || '-'}
+                                                        </span>
+                                                    </div>
                                                 </div>
                                                 <span className="material-icons-round text-gray-300 dark:text-gray-600 text-lg">chevron_right</span>
                                             </div>
@@ -1044,8 +1089,9 @@ function ApprovalDetailModal({ req, attachments, onClose, onApprove, onReject, l
     isAdmin: boolean; empId: string;
 }) {
     const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
-    const isOT = req.reason?.startsWith('[OT]');
-    const reasonText = isOT ? req.reason.replace('[OT] ', '').replace(/^\[OT\]\s*/, '') : req.reason;
+    const isTimeRecord = req._type === 'time';
+    const isOT = !isTimeRecord && req.reason?.startsWith('[OT]');
+    const reasonText = isTimeRecord ? req.reason : (isOT ? req.reason.replace('[OT] ', '').replace(/^\[OT\]\s*/, '') : req.reason);
     const startDate = req.start_date ? new Date(req.start_date) : null;
     const endDate = req.end_date ? new Date(req.end_date) : null;
     const fmtDate = (d: Date | null) => d ? d.toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
@@ -1080,29 +1126,48 @@ function ApprovalDetailModal({ req, attachments, onClose, onApprove, onReject, l
                     </div>
 
                     {/* Type Badge */}
-                    <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold ${isOT ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : `bg-${req.leave_type_color || 'gray'}-100 dark:bg-${req.leave_type_color || 'gray'}-900/30 text-${req.leave_type_color || 'gray'}-700`}`}>
-                        <span className="material-icons-round text-sm">{isOT ? 'schedule' : 'event'}</span>
-                        {isOT ? 'ขอ OT' : req.leave_type_name}
+                    <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold ${isTimeRecord ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300' : isOT ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : `bg-${req.leave_type_color || 'gray'}-100 dark:bg-${req.leave_type_color || 'gray'}-900/30 text-${req.leave_type_color || 'gray'}-700`}`}>
+                        <span className="material-icons-round text-sm">{isTimeRecord ? 'edit_calendar' : isOT ? 'schedule' : 'event'}</span>
+                        {isTimeRecord ? 'บันทึกเวลา' : isOT ? 'ขอ OT' : req.leave_type_name}
                     </div>
 
                     {/* Date / Time Info */}
                     <div className="bg-gray-50 dark:bg-gray-900/50 rounded-xl p-4 space-y-3">
-                        <div className="flex items-center justify-between text-sm">
-                            <span className="text-gray-500">{isOT ? 'วันที่' : 'วันเริ่ม'}</span>
-                            <span className="font-semibold text-gray-900 dark:text-white">{fmtDate(startDate)} {isOT && fmtTime(startDate)}</span>
-                        </div>
-                        {!isOT && (<div className="flex items-center justify-between text-sm">
-                            <span className="text-gray-500">วันสิ้นสุด</span>
-                            <span className="font-semibold text-gray-900 dark:text-white">{fmtDate(endDate)}</span>
-                        </div>)}
-                        {isOT && (<div className="flex items-center justify-between text-sm">
-                            <span className="text-gray-500">เวลา</span>
-                            <span className="font-semibold text-gray-900 dark:text-white">{fmtTime(startDate)} – {fmtTime(endDate)}</span>
-                        </div>)}
-                        <div className="flex items-center justify-between text-sm">
-                            <span className="text-gray-500">{isOT ? 'ชั่วโมง OT' : 'จำนวนวัน'}</span>
-                            <span className="font-bold text-lg text-primary">{req.total_days} {isOT ? 'ชม.' : 'วัน'}</span>
-                        </div>
+                        {isTimeRecord ? (<>
+                            <div className="flex items-center justify-between text-sm">
+                                <span className="text-gray-500">วันที่</span>
+                                <span className="font-semibold text-gray-900 dark:text-white">{req.record_date ? new Date(req.record_date).toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}</span>
+                            </div>
+                            <div className="flex items-center justify-between text-sm">
+                                <span className="text-gray-500">เวลาเข้า</span>
+                                <span className="font-semibold text-gray-900 dark:text-white">{req.clock_in_time ? req.clock_in_time.substring(0, 5) : '-'}</span>
+                            </div>
+                            {req.clock_out_time && (<div className="flex items-center justify-between text-sm">
+                                <span className="text-gray-500">เวลาออก</span>
+                                <span className="font-semibold text-gray-900 dark:text-white">{req.clock_out_time.substring(0, 5)}</span>
+                            </div>)}
+                            {(req.location_name || req.work_location_name) && (<div className="flex items-center justify-between text-sm">
+                                <span className="text-gray-500">สถานที่</span>
+                                <span className="font-semibold text-gray-900 dark:text-white">{req.work_location_name || req.location_name}</span>
+                            </div>)}
+                        </>) : (<>
+                            <div className="flex items-center justify-between text-sm">
+                                <span className="text-gray-500">{isOT ? 'วันที่' : 'วันเริ่ม'}</span>
+                                <span className="font-semibold text-gray-900 dark:text-white">{fmtDate(startDate)} {isOT && fmtTime(startDate)}</span>
+                            </div>
+                            {!isOT && (<div className="flex items-center justify-between text-sm">
+                                <span className="text-gray-500">วันสิ้นสุด</span>
+                                <span className="font-semibold text-gray-900 dark:text-white">{fmtDate(endDate)}</span>
+                            </div>)}
+                            {isOT && (<div className="flex items-center justify-between text-sm">
+                                <span className="text-gray-500">เวลา</span>
+                                <span className="font-semibold text-gray-900 dark:text-white">{fmtTime(startDate)} – {fmtTime(endDate)}</span>
+                            </div>)}
+                            <div className="flex items-center justify-between text-sm">
+                                <span className="text-gray-500">{isOT ? 'ชั่วโมง OT' : 'จำนวนวัน'}</span>
+                                <span className="font-bold text-lg text-primary">{req.total_days} {isOT ? 'ชม.' : 'วัน'}</span>
+                            </div>
+                        </>)}
                     </div>
 
                     {/* Reason */}
