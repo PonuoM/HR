@@ -11,7 +11,7 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
     const navigate = useNavigate();
     const location = useLocation();
-    const { user: authUser, isAdmin, logout } = useAuth();
+    const { user: authUser, isAdmin, isSuperAdmin, company, logout } = useAuth();
 
     const toggle = () => {
         onToggle();
@@ -93,6 +93,26 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
                                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Admin Panel</span>
                             )}
                         </div>
+                        {/* Company Context Badge */}
+                        {isSuperAdmin && !isCollapsed && company && (
+                            <button
+                                onClick={() => navigate('/admin/companies')}
+                                className="mx-2 mb-2 flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors text-left"
+                            >
+                                <span className="material-icons-round text-amber-600 text-sm">domain</span>
+                                <span className="text-xs font-semibold text-amber-700 dark:text-amber-400 truncate flex-1">{company.name}</span>
+                                <span className="material-icons-round text-amber-400 text-sm">swap_horiz</span>
+                            </button>
+                        )}
+                        {isSuperAdmin && isCollapsed && (
+                            <button
+                                onClick={() => navigate('/admin/companies')}
+                                className="mx-auto mb-1 w-9 h-9 flex items-center justify-center rounded-xl bg-amber-50 dark:bg-amber-900/20 text-amber-600 hover:bg-amber-100 transition-colors"
+                                title={`บริษัท: ${company?.name || '-'}`}
+                            >
+                                <span className="material-icons-round text-lg">domain</span>
+                            </button>
+                        )}
                         <ul className="space-y-1">
                             {SIDEBAR_ADMIN_ITEMS.map((item) => {
                                 const isActive = location.pathname === item.path;

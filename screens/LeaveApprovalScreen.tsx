@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useApi } from '../hooks/useApi';
-import { API_BASE, getLeaveRequests, updateLeaveRequest } from '../services/api';
+import { API_BASE, getAuthHeaders, getLeaveRequests, updateLeaveRequest } from '../services/api';
 
 function formatThaiDate(dateStr: string): string {
     const d = new Date(dateStr);
@@ -35,7 +35,7 @@ const LeaveApprovalScreen: React.FC = () => {
 
     // For non-admin approvers, fetch requests where they are the approver
     const { data: approverRequests = [] } = useApi(
-        () => empId ? fetch(`${API_BASE}/leave_requests.php?approver_id=${empId}`).then(r => r.json()) : Promise.resolve([]),
+        () => empId ? fetch(`${API_BASE}/leave_requests.php?approver_id=${empId}`, { headers: getAuthHeaders() }).then(r => r.json()) : Promise.resolve([]),
         [empId]
     );
 

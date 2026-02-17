@@ -1,6 +1,6 @@
 <?php
 /**
- * Work Locations API (CRUD)
+ * Work Locations API (Multi-Company)
  * GET    /api/work_locations.php       - List active work locations
  * POST   /api/work_locations.php       - Create new location
  * PUT    /api/work_locations.php?id=X  - Update location
@@ -9,10 +9,13 @@
 require_once __DIR__ . '/config.php';
 
 $method = get_method();
+$company_id = get_company_id();
 
 if ($method === 'GET') {
-    $sql = "SELECT * FROM work_locations ORDER BY name";
-    $result = $conn->query($sql);
+    $stmt = $conn->prepare("SELECT * FROM work_locations WHERE company_id = ? ORDER BY name");
+    $stmt->bind_param('i', $company_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
     $locations = [];
     while ($row = $result->fetch_assoc()) {
         $row['latitude'] = (float)$row['latitude'];
@@ -36,8 +39,8 @@ if ($method === 'POST') {
         json_response(['error' => 'name, latitude, longitude are required'], 400);
     }
 
-    $stmt = $conn->prepare("INSERT INTO work_locations (name, latitude, longitude, radius_meters, is_active) VALUES (?, ?, ?, ?, ?)");
-    $stmt->bind_param('sddii', $name, $lat, $lng, $radius, $is_active);
+    $stmt = $conn->prepare("INSERT INTO work_locations (company_id, name, latitude, longitude, radius_meters, is_active) VALUES (?, ?, ?, ?, ?, ?)");
+    $stmt->bind_param('isddii', $company_id, $name, $lat, $lng, $radius, $is_active);
     $stmt->execute();
     json_response(['message' => 'Created', 'id' => $conn->insert_id]);
 }
@@ -51,15 +54,17 @@ if ($method === 'PUT' && isset($_GET['id'])) {
     $radius = (int)($body['radius_meters'] ?? 200);
     $is_active = isset($body['is_active']) ? (int)$body['is_active'] : 1;
 
-    $stmt = $conn->prepare("UPDATE work_locations SET name = ?, latitude = ?, longitude = ?, radius_meters = ?, is_active = ? WHERE id = ?");
-    $stmt->bind_param('sddiii', $name, $lat, $lng, $radius, $is_active, $id);
+    $stmt = $conn->prepare("UPDATE work_locations SET name = ?, latitude = ?, longitude = ?, radius_meters = ?, is_active = ? WHERE id = ? AND company_id = ?");
+    $stmt->bind_param('sddiii', $name, $lat, $lng, $radius, $is_active, $id, $company_id);
     $stmt->execute();
     json_response(['message' => 'Updated']);
 }
 
 if ($method === 'DELETE' && isset($_GET['id'])) {
     $id = (int)$_GET['id'];
-    $conn->query("DELETE FROM work_locations WHERE id = $id");
+    $stmt = $conn->prepare("DELETE FROM work_locations WHERE id = ? AND company_id = ?");
+    $stmt->bind_param('ii', $id, $company_id);
+    $stmt->execute();
     json_response(['message' => 'Deleted']);
 }
 

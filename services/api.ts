@@ -8,12 +8,41 @@ export const API_BASE = import.meta.env.MODE === 'host'
     ? '/api'
     : '/hr-mobile-connect/api';
 
+// --- Auth headers helper (exported for raw fetch calls) ---
+export function getAuthHeaders(extra?: Record<string, string>): Record<string, string> {
+    let companyId = '1';
+    let employeeId = '';
+    let sessionToken = '';
+    try {
+        const stored = localStorage.getItem('hr_auth');
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed?.company?.id) companyId = String(parsed.company.id);
+            if (parsed?.user?.id) employeeId = parsed.user.id;
+            if (parsed?.token) sessionToken = parsed.token;
+        }
+    } catch { /* fallback */ }
+    return {
+        'X-Company-Id': companyId,
+        ...(employeeId ? { 'X-Employee-Id': employeeId } : {}),
+        ...(sessionToken ? { 'X-Session-Token': sessionToken } : {}),
+        ...extra,
+    };
+}
+
 // --- Generic fetch wrapper ---
 async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const url = `${API_BASE}/${endpoint}`;
+
+    const headers: Record<string, string> = {
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json',
+        ...(options?.headers as Record<string, string> || {}),
+    };
+
     const res = await fetch(url, {
-        headers: { 'Content-Type': 'application/json' },
         ...options,
+        headers,
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Request failed' }));
@@ -27,7 +56,7 @@ export async function getEmployees() {
     return fetchApi<any[]>('employees.php');
 }
 
-export async function createEmployee(data: { id: string; name: string; email?: string; password?: string; department_id?: number; position_id?: number; base_salary?: number | null; hire_date?: string | null; approver_id?: string | null }) {
+export async function createEmployee(data: { id: string; name: string; email?: string; password?: string; department_id?: number; position_id?: number; base_salary?: number | null; hire_date?: string | null; approver_id?: string | null; company_id?: number; is_admin?: number }) {
     return fetchApi<any>('employees.php', { method: 'POST', body: JSON.stringify(data) });
 }
 
@@ -39,7 +68,7 @@ export async function resetEmployeePassword(id: string) {
     return fetchApi<any>(`employees.php?id=${id}&action=reset_password`, { method: 'PUT' });
 }
 
-export async function updateEmployee(id: string, data: { name: string; email: string; department_id: number; position_id: number; base_salary?: number | null; hire_date?: string | null; approver_id?: string | null; approver2_id?: string | null }) {
+export async function updateEmployee(id: string, data: { name: string; email: string; department_id: number; position_id: number; base_salary?: number | null; hire_date?: string | null; approver_id?: string | null; approver2_id?: string | null; is_admin?: number }) {
     return fetchApi<any>(`employees.php?id=${id}`, { method: 'PUT', body: JSON.stringify(data) });
 }
 
@@ -213,6 +242,14 @@ export async function deleteWorkLocation(id: number) {
     return fetchApi<any>(`work_locations.php?id=${id}`, { method: 'DELETE' });
 }
 
+export async function resolveGoogleMapsLink(url: string): Promise<{ latitude: number; longitude: number; resolved_url?: string; error?: string }> {
+    return fetchApi<any>(`resolve_gmaps.php?url=${encodeURIComponent(url)}`);
+}
+
+export async function searchPlaces(query: string): Promise<{ name: string; latitude: number; longitude: number; error?: string }> {
+    return fetchApi<any>(`search_places.php?q=${encodeURIComponent(query)}`);
+}
+
 // --- Time Records ---
 export async function createTimeRecord(data: any) {
     return fetchApi<any>('time_records.php', { method: 'POST', body: JSON.stringify(data) });
@@ -275,8 +312,22 @@ export async function uploadFile(file: File, category: string, relatedId?: strin
     formData.append('category', category);
     if (relatedId) formData.append('related_id', relatedId);
 
+    // Get company_id for multi-company header
+    let companyId = '1';
+    try {
+        const stored = localStorage.getItem('hr_auth');
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed?.company?.id) companyId = String(parsed.company.id);
+        }
+    } catch { /* fallback */ }
+
     const url = `${API_BASE}/uploads.php`;
-    const res = await fetch(url, { method: 'POST', body: formData });
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'X-Company-Id': companyId },
+        body: formData,
+    });
     if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Upload failed' }));
         throw new Error(err.error || `HTTP ${res.status}`);
@@ -294,4 +345,74 @@ export async function getUploads(category?: string, relatedId?: string) {
 
 export async function deleteUpload(id: number) {
     return fetchApi<any>(`uploads.php?id=${id}`, { method: 'DELETE' });
+}
+
+// --- Companies (Superadmin) ---
+export async function getCompanies() {
+    return fetchApi<any[]>('companies.php');
+}
+
+export async function createCompany(data: { code: string; name: string; logo_url?: string }) {
+    return fetchApi<any>('companies.php', {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function updateCompany(id: number, data: { code: string; name: string; logo_url?: string; is_active?: boolean }) {
+    return fetchApi<any>(`companies.php?id=${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function toggleCompanyActive(id: number) {
+    return fetchApi<any>(`companies.php?id=${id}`, { method: 'DELETE' });
+}
+
+// --- Security: Session Validation ---
+export async function validateSession(): Promise<{ valid: boolean; error?: string }> {
+    // Let errors propagate — AuthContext handles them gracefully
+    return await fetchApi<{ valid: boolean; error?: string }>('auth.php?action=validate_session');
+}
+
+export async function logoutSession(): Promise<void> {
+    const token = getAuthHeaders()['X-Session-Token'];
+    if (token) {
+        await fetch(`${API_BASE}/auth.php`, {
+            method: 'DELETE',
+            headers: { 'X-Session-Token': token },
+        }).catch(() => { });
+    }
+}
+
+// --- Security Alerts (Superadmin) ---
+export async function getSecurityAlerts(status: 'unresolved' | 'resolved' | 'all' = 'unresolved') {
+    return fetchApi<any[]>(`security_alerts.php?status=${status}`);
+}
+
+export async function resolveSecurityAlert(id: number) {
+    return fetchApi<any>(`security_alerts.php?id=${id}`, { method: 'PUT' });
+}
+
+export async function resetDeviceBinding(employeeId: string) {
+    return fetchApi<any>(`security_alerts.php?employee_id=${employeeId}`, { method: 'DELETE' });
+}
+
+// --- Face Recognition ---
+export async function registerFace(employeeId: string, descriptor: number[]) {
+    return fetchApi<any>('face.php', {
+        method: 'POST',
+        body: JSON.stringify({ employee_id: employeeId, descriptor }),
+    });
+}
+
+export async function getFaceDescriptor(employeeId: string) {
+    return fetchApi<{ has_face: boolean; descriptor: number[] | null; registered_at: string | null }>(
+        `face.php?employee_id=${employeeId}`
+    );
+}
+
+export async function deleteFaceDescriptor(employeeId: string) {
+    return fetchApi<any>(`face.php?employee_id=${employeeId}`, { method: 'DELETE' });
 }

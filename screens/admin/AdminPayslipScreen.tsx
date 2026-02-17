@@ -162,7 +162,7 @@ const AdminPayslipScreen: React.FC = () => {
     const monthOptions = MONTH_OPTIONS;
 
     return (
-        <div className="pt-6 md:pt-8 pb-8 px-4 md:px-8 max-w-[1600px] mx-auto min-h-full flex flex-col h-full">
+        <div className="pt-14 md:pt-8 pb-8 px-4 md:px-8 max-w-[1600px] mx-auto min-h-full flex flex-col h-full">
             <header className="mb-6 flex flex-col md:flex-row md:justify-between md:items-center gap-4">
                 <div className="flex items-center gap-3">
                     <button onClick={() => navigate('/profile')} className="md:hidden p-2 -ml-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-500">
@@ -202,9 +202,9 @@ const AdminPayslipScreen: React.FC = () => {
                                 ตั้งค่าทั้งหมด (Global)
                             </div>
                             <div className="h-6 w-px bg-gray-200 dark:bg-gray-700 hidden md:block"></div>
-                            <div className="flex-1 w-full grid grid-cols-2 md:flex gap-4">
+                            <div className="flex-1 w-full grid grid-cols-2 md:flex gap-4 pt-3">
                                 <div className="relative flex-1 md:max-w-xs">
-                                    <label className="absolute -top-2 left-2 bg-white dark:bg-gray-800 px-1 text-[10px] text-primary font-bold">งวดเดือน</label>
+                                    <label className="absolute -top-3 left-3 bg-white dark:bg-gray-800 px-1 text-[10px] text-primary font-bold z-10">งวดเดือน</label>
                                     <CustomSelect
                                         value={globalMonth}
                                         onChange={(val) => handleGlobalChange('month', val)}
@@ -212,7 +212,7 @@ const AdminPayslipScreen: React.FC = () => {
                                     />
                                 </div>
                                 <div className="relative flex-1 md:max-w-[120px]">
-                                    <label className="absolute -top-2 left-2 bg-white dark:bg-gray-800 px-1 text-[10px] text-primary font-bold">ปี</label>
+                                    <label className="absolute -top-3 left-3 bg-white dark:bg-gray-800 px-1 text-[10px] text-primary font-bold z-10">ปี</label>
                                     <CustomSelect
                                         value={globalYear}
                                         onChange={(val) => handleGlobalChange('year', val)}

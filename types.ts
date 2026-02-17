@@ -137,6 +137,7 @@ export interface ProfileMenuItem {
   subtitle?: string;
   color: string;
   path: string;
+  superadminOnly?: boolean;
 }
 
 export interface FAQItem {

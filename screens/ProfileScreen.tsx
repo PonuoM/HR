@@ -1,5 +1,5 @@
-import React, { useRef } from 'react';
-import { API_BASE } from '../services/api';
+import React, { useRef, useState, useEffect } from 'react';
+import { API_BASE, getAuthHeaders, getFaceDescriptor, registerFace } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 import BottomNav from '../components/BottomNav';
 import { PROFILE_MENU_ITEMS, PROFILE_ADMIN_ITEMS } from '../data';
@@ -7,6 +7,7 @@ import { useApi } from '../hooks/useApi';
 import { getEmployee } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../components/Toast';
+import FaceCapture from '../components/FaceCapture';
 
 const ProfileScreen: React.FC = () => {
     const navigate = useNavigate();
@@ -14,6 +15,32 @@ const ProfileScreen: React.FC = () => {
     const { toast, confirm: showConfirm } = useToast();
     const { data: user, loading, refetch } = useApi(() => getEmployee(authUser?.id || ''), [authUser?.id]);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Face registration state
+    const [showFaceCapture, setShowFaceCapture] = useState(false);
+    const [hasFace, setHasFace] = useState(false);
+    const [faceLoading, setFaceLoading] = useState(true);
+
+    // Check face registration status
+    useEffect(() => {
+        if (!authUser?.id) return;
+        getFaceDescriptor(authUser.id)
+            .then(data => setHasFace(data.has_face))
+            .catch(() => setHasFace(false))
+            .finally(() => setFaceLoading(false));
+    }, [authUser?.id]);
+
+    const handleFaceCapture = async (descriptor: number[]) => {
+        if (!authUser?.id) return;
+        try {
+            await registerFace(authUser.id, descriptor);
+            toast('ลงทะเบียนใบหน้าเรียบร้อย ✓', 'success');
+            setHasFace(true);
+        } catch (err: any) {
+            toast(err.message || 'ลงทะเบียนไม่สำเร็จ', 'error');
+        }
+        setShowFaceCapture(false);
+    };
 
     const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -37,7 +64,7 @@ const ProfileScreen: React.FC = () => {
             formData.append('related_id', authUser?.id || '');
             formData.append('uploaded_by', authUser?.id || '');
 
-            const uploadRes = await fetch(`${API_BASE}/uploads.php`, { method: 'POST', body: formData });
+            const uploadRes = await fetch(`${API_BASE}/uploads.php`, { method: 'POST', headers: getAuthHeaders(), body: formData });
             const uploadData = await uploadRes.json();
 
             if (!uploadRes.ok) throw new Error(uploadData.error || 'อัปโหลดไม่สำเร็จ');
@@ -45,7 +72,7 @@ const ProfileScreen: React.FC = () => {
             // Update employee avatar
             const updateRes = await fetch(`${API_BASE}/employees.php?id=${authUser?.id || ''}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
                 body: JSON.stringify({ avatar: uploadData.url }),
             });
 
@@ -108,7 +135,7 @@ const ProfileScreen: React.FC = () => {
                             ผู้ดูแลระบบ (Admin)
                         </h3>
                         <div className="bg-white dark:bg-gray-800 rounded-2xl p-2 shadow-sm border border-gray-100 dark:border-gray-700">
-                            {PROFILE_ADMIN_ITEMS.map((item, index) => (
+                            {PROFILE_ADMIN_ITEMS.filter(item => !item.superadminOnly || authUser?.is_superadmin).map((item, index) => (
                                 <button
                                     key={index}
                                     onClick={() => navigate(item.path)}
@@ -126,6 +153,41 @@ const ProfileScreen: React.FC = () => {
                         </div>
                     </section>
                 )}
+
+                {/* Face Registration — Self Service */}
+                <section>
+                    <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider mb-3 ml-1">
+                        ยืนยันตัวตน
+                    </h3>
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-gray-700">
+                        <div className="flex items-center gap-4">
+                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${hasFace
+                                ? 'bg-green-100 dark:bg-green-900/30 text-green-600'
+                                : 'bg-orange-100 dark:bg-orange-900/30 text-orange-600'
+                                }`}>
+                                <span className="material-icons-round text-2xl">{hasFace ? 'face' : 'face_retouching_off'}</span>
+                            </div>
+                            <div className="flex-1">
+                                <p className="font-semibold text-sm text-gray-900 dark:text-white">
+                                    {faceLoading ? 'กำลังตรวจสอบ...' : hasFace ? 'ลงทะเบียนใบหน้าแล้ว ✓' : 'ยังไม่ได้ลงทะเบียนใบหน้า'}
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                    {hasFace ? 'ใช้สำหรับยืนยันตัวตนตอนลงเวลา' : 'ลงทะเบียนเพื่อใช้สแกนหน้าตอน Clock-in'}
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => setShowFaceCapture(true)}
+                                className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95 ${hasFace
+                                    ? 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                                    : 'bg-primary text-white shadow-md shadow-primary/20'
+                                    }`}
+                            >
+                                <span className="material-icons-round text-sm">camera_alt</span>
+                                {hasFace ? 'ลงทะเบียนใหม่' : 'ลงทะเบียน'}
+                            </button>
+                        </div>
+                    </div>
+                </section>
 
                 {/* General Settings */}
                 <section>
@@ -165,6 +227,16 @@ const ProfileScreen: React.FC = () => {
                     ออกจากระบบ
                 </button>
             </div>
+
+            {/* Face Capture Modal */}
+            {showFaceCapture && (
+                <FaceCapture
+                    mode="register"
+                    onCapture={handleFaceCapture}
+                    onClose={() => setShowFaceCapture(false)}
+                    employeeName={authUser?.name}
+                />
+            )}
 
             <BottomNav />
         </div>

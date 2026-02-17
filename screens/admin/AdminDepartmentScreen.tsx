@@ -245,7 +245,7 @@ const AdminDepartmentScreen: React.FC = () => {
         <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
             {/* Header */}
             <header className="bg-white dark:bg-[#15202b] pt-4 pb-4 px-4 md:px-6 shadow-sm z-20 flex justify-between items-center sticky top-0 md:bg-white/90 md:backdrop-blur-md">
-                <button onClick={() => navigate(-1)} className="text-slate-500 dark:text-slate-400 md:hidden active:opacity-70 flex items-center gap-1">
+                <button onClick={() => navigate('/profile')} className="text-slate-500 dark:text-slate-400 md:hidden active:opacity-70 flex items-center gap-1">
                     <span className="material-icons-round text-lg">arrow_back</span>
                     <span className="text-sm font-medium">กลับ</span>
                 </button>

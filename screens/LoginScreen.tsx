@@ -34,12 +34,16 @@ const LoginScreen: React.FC = () => {
         }
         setLoading(true);
         try {
-            await login(employeeId.trim(), password);
+            const result = await login(employeeId.trim(), password);
             // Save or clear remembered credentials
             if (rememberMe) {
                 localStorage.setItem('hr_remember', JSON.stringify({ employeeId: employeeId.trim(), password }));
             } else {
                 localStorage.removeItem('hr_remember');
+            }
+            // Show device warning if applicable
+            if (result?.device_warning) {
+                toast(`⚠️ ${result.device_warning}`, 'warning');
             }
             toast('เข้าสู่ระบบสำเร็จ', 'success');
             navigate('/', { replace: true });
@@ -114,7 +118,7 @@ const LoginScreen: React.FC = () => {
                                 <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-1 hidden md:block">เข้าสู่ระบบ</h3>
                                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 hidden md:block">กรอกข้อมูลเพื่อเข้าใช้งาน</p>
 
-                                <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
+                                <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off" data-lpignore="true" data-form-type="other">
                                     {/* Employee ID */}
                                     <div>
                                         <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">
@@ -129,6 +133,7 @@ const LoginScreen: React.FC = () => {
                                                 placeholder="เช่น EMP001"
                                                 className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all dark:text-white"
                                                 autoComplete="off"
+                                                data-lpignore="true"
                                                 autoFocus
                                             />
                                         </div>
@@ -142,12 +147,17 @@ const LoginScreen: React.FC = () => {
                                         <div className="relative">
                                             <span className="material-icons-round absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-lg">lock</span>
                                             <input
-                                                type={showPassword ? 'text' : 'password'}
+                                                type="text"
                                                 value={password}
                                                 onChange={e => setPassword(e.target.value)}
                                                 placeholder="กรอกรหัสผ่าน"
                                                 className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl pl-10 pr-11 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all dark:text-white"
-                                                autoComplete="new-password"
+                                                style={showPassword ? {} : { WebkitTextSecurity: 'disc', textSecurity: 'disc' } as React.CSSProperties}
+                                                autoComplete="off"
+                                                data-lpignore="true"
+                                                data-form-type="other"
+                                                name="pin"
+                                                id="pin-input"
                                             />
                                             <button
                                                 type="button"

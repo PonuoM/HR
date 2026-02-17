@@ -7,6 +7,7 @@
 require_once __DIR__ . '/config.php';
 
 $method = get_method();
+$company_id = get_company_id();
 
 if ($method === 'GET') {
     $employee_id = $conn->real_escape_string($_GET['employee_id'] ?? 'EMP001');
@@ -27,11 +28,13 @@ if ($method === 'GET') {
         $hireDate = $hRow['hire_date'];
     }
 
-    // 1. Holidays (indexed by date for quick lookup)
+    // 1. Holidays (filtered by company)
     $holidays = [];
     $holidayDates = [];
-    $sql = "SELECT date, name FROM holidays WHERE date BETWEEN '$startDate' AND '$endDate' ORDER BY date";
-    $result = $conn->query($sql);
+    $hStmt2 = $conn->prepare("SELECT date, name FROM holidays WHERE company_id = ? AND date BETWEEN ? AND ? ORDER BY date");
+    $hStmt2->bind_param('iss', $company_id, $startDate, $endDate);
+    $hStmt2->execute();
+    $result = $hStmt2->get_result();
     while ($row = $result->fetch_assoc()) {
         $holidays[] = $row;
         $holidayDates[$row['date']] = true;

@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
-import { getDepartments, getPositions, getEmployees, createEmployee, resetEmployeePassword, deleteEmployee, suspendEmployee, unsuspendEmployee } from '../../services/api';
+import { getDepartments, getPositions, getEmployees, createEmployee, resetEmployeePassword, deleteEmployee, suspendEmployee, unsuspendEmployee, getCompanies } from '../../services/api';
 import { useToast } from '../../components/Toast';
 import CustomSelect from '../../components/CustomSelect';
+import { useAuth } from '../../contexts/AuthContext';
 
 const AdminEmployeeScreen: React.FC = () => {
     const navigate = useNavigate();
     const location = useLocation();
     const { toast, confirm } = useToast();
+    const { isSuperAdmin } = useAuth();
     const [showAddModal, setShowAddModal] = useState(false);
 
     const [editingEmployee, setEditingEmployee] = useState<any>(null);
@@ -29,9 +31,14 @@ const AdminEmployeeScreen: React.FC = () => {
     const [filterDept, setFilterDept] = useState('');
     const [filterStatus, setFilterStatus] = useState('');
 
+    // Company list for superadmin
+    const { data: companiesList } = useApi(() => isSuperAdmin ? getCompanies() : Promise.resolve([]), [isSuperAdmin]);
+
     // Add Modal states
     const [addPosition, setAddPosition] = useState('');
     const [addDepartment, setAddDepartment] = useState('');
+    const [addCompanyId, setAddCompanyId] = useState('');
+    const [addIsAdmin, setAddIsAdmin] = useState(false);
     const [addApprover, setAddApprover] = useState('');
 
     // Edit Modal states
@@ -39,6 +46,7 @@ const AdminEmployeeScreen: React.FC = () => {
     const [editPos, setEditPos] = useState('');
     const [editApprover, setEditApprover] = useState('');
     const [editApprover2, setEditApprover2] = useState('');
+    const [editIsAdmin, setEditIsAdmin] = useState(false);
 
     // Initialize edit modal state when employee selected
     useEffect(() => {
@@ -47,6 +55,7 @@ const AdminEmployeeScreen: React.FC = () => {
             setEditPos(editingEmployee.position_id ? String(editingEmployee.position_id) : '');
             setEditApprover(editingEmployee.approver_id || '');
             setEditApprover2(editingEmployee.approver2_id || '');
+            setEditIsAdmin(editingEmployee.is_admin === 1 || editingEmployee.is_admin === '1');
         }
     }, [editingEmployee]);
 
@@ -238,35 +247,35 @@ const AdminEmployeeScreen: React.FC = () => {
                             </div>
                         </div>
 
-                        <div className="flex gap-2">
+                        <div className="flex gap-1.5 pt-3 border-t border-gray-100 dark:border-gray-700/50">
                             <button
                                 onClick={async () => { if (await confirm({ message: `รีเซ็ตรหัสผ่านของ ${emp.name} เป็น 1234?`, type: 'warning', confirmText: 'รีเซ็ต' })) { await resetEmployeePassword(emp.id); toast('รีเซ็ตรหัสผ่านเรียบร้อย (รหัสใหม่: 1234)', 'success'); } }}
-                                className="flex-1 py-2 rounded-lg bg-orange-50 dark:bg-orange-900/10 text-orange-600 dark:text-orange-400 text-sm font-medium hover:bg-orange-100 dark:hover:bg-orange-900/20 flex items-center justify-center gap-2"
+                                className="flex-1 py-1.5 rounded-lg bg-orange-50 dark:bg-orange-900/10 text-orange-600 dark:text-orange-400 text-[11px] font-medium hover:bg-orange-100 dark:hover:bg-orange-900/20 flex items-center justify-center gap-1 active:scale-95 transition-all"
                             >
-                                <span className="material-icons-round text-sm">lock_reset</span>
-                                รีเซ็ตรหัสผ่าน
+                                <span className="material-icons-round text-[14px]">lock_reset</span>
+                                รีเซ็ต
                             </button>
                             <button
                                 onClick={() => setEditingEmployee(emp)}
-                                className="flex-1 py-2 rounded-lg bg-blue-50 dark:bg-blue-900/10 text-blue-600 dark:text-blue-400 text-sm font-medium hover:bg-blue-100 dark:hover:bg-blue-900/20 flex items-center justify-center gap-2"
+                                className="flex-1 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/10 text-blue-600 dark:text-blue-400 text-[11px] font-medium hover:bg-blue-100 dark:hover:bg-blue-900/20 flex items-center justify-center gap-1 active:scale-95 transition-all"
                             >
-                                <span className="material-icons-round text-sm">edit</span>
+                                <span className="material-icons-round text-[14px]">edit</span>
                                 แก้ไข
                             </button>
                             {emp.is_active === '0' || emp.is_active === 0 ? (
                                 <button
                                     onClick={async () => { if (await confirm({ message: `ยกเลิกระงับ ${emp.name}?`, type: 'info', confirmText: 'ยืนยัน' })) { await unsuspendEmployee(emp.id); toast('คืนสถานะเรียบร้อย', 'success'); window.location.reload(); } }}
-                                    className="flex-1 py-2 rounded-lg bg-green-50 dark:bg-green-900/10 text-green-600 dark:text-green-400 text-sm font-medium hover:bg-green-100 dark:hover:bg-green-900/20 flex items-center justify-center gap-2"
+                                    className="flex-1 py-1.5 rounded-lg bg-green-50 dark:bg-green-900/10 text-green-600 dark:text-green-400 text-[11px] font-medium hover:bg-green-100 dark:hover:bg-green-900/20 flex items-center justify-center gap-1 active:scale-95 transition-all"
                                 >
-                                    <span className="material-icons-round text-sm">check_circle</span>
+                                    <span className="material-icons-round text-[14px]">check_circle</span>
                                     คืนสถานะ
                                 </button>
                             ) : (
                                 <button
                                     onClick={() => { setSuspendingEmployee(emp); setSuspendDate(new Date().toISOString().split('T')[0]); }}
-                                    className="flex-1 py-2 rounded-lg bg-red-50 dark:bg-red-900/10 text-red-600 dark:text-red-400 text-sm font-medium hover:bg-red-100 dark:hover:bg-red-900/20 flex items-center justify-center gap-2"
+                                    className="flex-1 py-1.5 rounded-lg bg-red-50 dark:bg-red-900/10 text-red-600 dark:text-red-400 text-[11px] font-medium hover:bg-red-100 dark:hover:bg-red-900/20 flex items-center justify-center gap-1 active:scale-95 transition-all"
                                 >
-                                    <span className="material-icons-round text-sm">block</span>
+                                    <span className="material-icons-round text-[14px]">block</span>
                                     ระงับ
                                 </button>
                             )}
@@ -318,6 +327,8 @@ const AdminEmployeeScreen: React.FC = () => {
                                     position_id: posObj?.id ? Number(posObj.id) : undefined,
                                     base_salary: salary ? Number(salary) : null,
                                     approver_id: addApprover || null,
+                                    ...(addCompanyId ? { company_id: Number(addCompanyId) } : {}),
+                                    ...(addIsAdmin ? { is_admin: 1 } : {}),
                                 });
                                 if (result?.error) {
                                     toast(result.error, 'error');
@@ -328,6 +339,8 @@ const AdminEmployeeScreen: React.FC = () => {
                                 setAddPosition('');
                                 setAddDepartment('');
                                 setAddApprover('');
+                                setAddCompanyId('');
+                                setAddIsAdmin(false);
                                 window.location.reload();
                             } catch (err: any) {
                                 toast(err?.message || 'เกิดข้อผิดพลาด', 'error');
@@ -344,6 +357,34 @@ const AdminEmployeeScreen: React.FC = () => {
                                         </div>
                                     </div>
                                 </div>
+
+                                {/* Company Selector (Superadmin only) */}
+                                {isSuperAdmin && companiesList && companiesList.length > 0 && (
+                                    <div className="bg-amber-50 dark:bg-amber-900/20 p-3 rounded-xl border border-amber-200 dark:border-amber-800">
+                                        <label className="block text-sm font-medium text-amber-700 dark:text-amber-400 mb-1.5 flex items-center gap-1.5">
+                                            <span className="material-icons-round text-base">domain</span>
+                                            บริษัท
+                                        </label>
+                                        <CustomSelect
+                                            value={addCompanyId}
+                                            onChange={setAddCompanyId}
+                                            placeholder="-- ใช้บริษัทปัจจุบัน --"
+                                            options={companiesList.filter((c: any) => c.is_active).map((c: any) => ({ value: String(c.id), label: `${c.name} (${c.code})` }))}
+                                        />
+                                        <p className="text-[10px] text-amber-600 dark:text-amber-500 mt-1">ตัวเลือก Superadmin: เลือกบริษัทที่ต้องการสร้างพนักงาน (ว่าง = บริษัทปัจจุบัน)</p>
+
+                                        {/* is_admin toggle */}
+                                        <label className="flex items-center gap-2.5 mt-3 pt-3 border-t border-amber-200 dark:border-amber-800 cursor-pointer">
+                                            <div className={`relative w-10 h-5 rounded-full transition-colors ${addIsAdmin ? 'bg-primary' : 'bg-gray-300 dark:bg-gray-600'}`} onClick={() => setAddIsAdmin(!addIsAdmin)}>
+                                                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${addIsAdmin ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                                            </div>
+                                            <div>
+                                                <span className="text-sm font-medium text-amber-700 dark:text-amber-400">สิทธิ์ Admin</span>
+                                                <p className="text-[10px] text-amber-600 dark:text-amber-500">เปิดให้พนักงานมีสิทธิ์เข้า Admin Panel</p>
+                                            </div>
+                                        </label>
+                                    </div>
+                                )}
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
@@ -470,6 +511,7 @@ const AdminEmployeeScreen: React.FC = () => {
                                         hire_date: (formData.get('hire_date') as string) || null,
                                         approver_id: approverVal || null,
                                         approver2_id: approver2Val || null,
+                                        is_admin: editIsAdmin ? 1 : 0,
                                     });
                                     toast('แก้ไขข้อมูลเรียบร้อย', 'success');
                                     setEditingEmployee(null);
@@ -569,6 +611,29 @@ const AdminEmployeeScreen: React.FC = () => {
                                     />
                                     <p className="text-[10px] text-gray-400 mt-1">ผู้อนุมัติลำดับที่ 2 (เช่น HR หรือผู้บริหาร)</p>
                                 </div>
+
+                                {/* Admin Toggle */}
+                                <div className="border-t border-gray-100 dark:border-gray-800 pt-4 mt-2">
+                                    <label className="flex items-center gap-3 cursor-pointer group">
+                                        <div
+                                            className={`relative w-11 h-6 rounded-full transition-colors ${editIsAdmin ? 'bg-primary' : 'bg-gray-300 dark:bg-gray-600'}`}
+                                            onClick={() => setEditIsAdmin(!editIsAdmin)}
+                                        >
+                                            <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${editIsAdmin ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
+                                        </div>
+                                        <div className="flex-1">
+                                            <div className="flex items-center gap-2">
+                                                <span className="material-icons-round text-base text-amber-500">admin_panel_settings</span>
+                                                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">สิทธิ์ Admin</span>
+                                                {editIsAdmin && (
+                                                    <span className="px-1.5 py-0.5 rounded-md bg-primary/10 text-primary text-[10px] font-bold">เปิด</span>
+                                                )}
+                                            </div>
+                                            <p className="text-[10px] text-gray-400 mt-0.5">เปิดให้พนักงานสามารถเข้า Admin Panel ได้</p>
+                                        </div>
+                                    </label>
+                                </div>
+
                                 <div className="flex gap-3 pt-2">
                                     <button type="button" onClick={() => setEditingEmployee(null)} className="flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                                         ยกเลิก

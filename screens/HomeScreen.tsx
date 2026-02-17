@@ -3,9 +3,10 @@ import ReactDOM from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { QUICK_MENU_ITEMS } from '../data';
 import { useApi } from '../hooks/useApi';
-import { API_BASE, getNotifications, getLeaveQuotas, getAttendance, getNews, getEmployee, markNotificationRead, markAllNotificationsRead, deleteNotification, clockIn, clockOut, checkLocation, getLeaveRequests, updateLeaveRequest, getUploads } from '../services/api';
+import { API_BASE, getNotifications, getLeaveQuotas, getAttendance, getNews, getEmployee, markNotificationRead, markAllNotificationsRead, deleteNotification, clockIn, clockOut, checkLocation, getLeaveRequests, updateLeaveRequest, getUploads, getFaceDescriptor } from '../services/api';
 import { subscribeToPush } from '../services/pushNotifications';
 import LocationCheckModal from '../components/LocationCheckModal';
+import FaceCapture from '../components/FaceCapture';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -32,6 +33,7 @@ const HomeScreen: React.FC = () => {
     }, []);
     const hour = now.getHours();
     const greeting = hour >= 5 && hour < 12 ? 'สวัสดีตอนเช้า' : hour >= 12 && hour < 17 ? 'สวัสดีตอนบ่าย' : hour >= 17 && hour < 20 ? 'สวัสดีตอนเย็น' : 'สวัสดีตอนค่ำ';
+    const bannerImage = hour >= 5 && hour < 12 ? '/images/banners/banner-morning.jpg' : hour >= 12 && hour < 17 ? '/images/banners/banner-afternoon.jpg' : hour >= 17 && hour < 20 ? '/images/banners/banner-evening.jpg' : '/images/banners/banner-night.jpg';
     const clockStr = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
 
     // Auto-subscribe to push notifications
@@ -187,6 +189,10 @@ const HomeScreen: React.FC = () => {
 
     const [gpsLoading, setGpsLoading] = useState(false);
 
+    // Face verification state
+    const [showFaceVerify, setShowFaceVerify] = useState(false);
+    const [faceDescriptor, setFaceDescriptor] = useState<number[] | null>(null);
+
     const getCurrentPosition = (): Promise<{ latitude: number; longitude: number }> => {
         return new Promise((resolve, reject) => {
             if (!navigator.geolocation) {
@@ -214,9 +220,8 @@ const HomeScreen: React.FC = () => {
         });
     };
 
-    // Clock action: just call getCurrentPosition directly — browser auto-prompts for permission
-    const handleClockAction = async () => {
-        if (clockStatus === 'completed' || clockLoading) return;
+    // ─── GPS + Location Check (standalone function) ───
+    const proceedToLocationCheck = async (action: 'clock_in' | 'clock_out') => {
         setClockLoading(true);
         setGpsLoading(true);
         try {
@@ -224,13 +229,12 @@ const HomeScreen: React.FC = () => {
             setGpsLoading(false);
             const result = await checkLocation(coords.latitude, coords.longitude);
             setPendingCoords(coords);
-            setPendingAction(clockStatus === 'not_clocked_in' ? 'clock_in' : 'clock_out');
+            setPendingAction(action);
             setLocationResult(result);
             setShowLocationModal(true);
         } catch (err: any) {
             setGpsLoading(false);
             if (err.code === 1) {
-                // Permission denied OR Location Services off
                 toast('ไม่สามารถเข้าถึงตำแหน่งได้ กรุณาเปิด Location/GPS ในตั้งค่าเครื่อง แล้วลองใหม่', 'error');
             } else if (err.code === 2) {
                 toast('ไม่พบตำแหน่ง กรุณาเปิด GPS แล้วลองใหม่', 'error');
@@ -240,6 +244,40 @@ const HomeScreen: React.FC = () => {
         } finally {
             setClockLoading(false);
         }
+    };
+
+    // Clock action: face check → GPS → location modal
+    const handleClockAction = async () => {
+        if (clockStatus === 'completed' || clockLoading) return;
+
+        const action: 'clock_in' | 'clock_out' = clockStatus === 'not_clocked_in' ? 'clock_in' : 'clock_out';
+
+        // ─── Face Verification Layer (clock-in only) ───
+        if (action === 'clock_in') {
+            try {
+                const faceData = await getFaceDescriptor(empId);
+                if (faceData.has_face && faceData.descriptor) {
+                    // Employee has face registered → require verification
+                    setFaceDescriptor(faceData.descriptor);
+                    setShowFaceVerify(true);
+                    return; // Wait for face verification → handleFaceVerified → proceedToLocationCheck
+                }
+                // No face registered → skip face check
+            } catch {
+                // Face API error → skip face check gracefully
+            }
+        }
+
+        // ─── No face check needed → go straight to GPS ───
+        await proceedToLocationCheck(action);
+    };
+
+    // Face verification success → proceed directly to GPS (no re-triggering handleClockAction)
+    const handleFaceVerified = (_descriptor: number[]) => {
+        setShowFaceVerify(false);
+        toast('✅ ยืนยันตัวตนสำเร็จ', 'success');
+        // Go directly to GPS + location check — avoids stale closure bug
+        setTimeout(() => proceedToLocationCheck('clock_in'), 300);
     };
 
     // Step 2: User confirms in modal → actually record
@@ -310,298 +348,454 @@ const HomeScreen: React.FC = () => {
     const displayedNotifs = notifTab === 'unread' ? unreadNotifs : readNotifs;
 
     return (
-        <div className="pt-6 md:pt-8 pb-24 md:pb-8 px-4 md:px-8 max-w-7xl mx-auto min-h-full">
-            {/* Header */}
-            <header className="mb-6 md:mb-10 flex justify-between items-center">
-                <div>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">{greeting}, <span className="font-medium">{clockStr}</span></p>
-                    <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">{currentUser?.name || 'ผู้ใช้งาน'}</h1>
-                </div>
-                <div className="flex items-center gap-3">
-                    {/* Notification Bell */}
-                    <div className="relative" ref={notifRef}>
-                        <button
-                            onClick={() => setShowNotifications(prev => !prev)}
-                            className={`relative p-2 rounded-full shadow-sm border transition-all duration-200 ${showNotifications
-                                ? 'bg-primary/10 border-primary/30 ring-2 ring-primary/20'
-                                : 'bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'
-                                }`}
-                        >
-                            <span className={`material-icons-round transition-colors ${showNotifications ? 'text-primary' : 'text-gray-600 dark:text-gray-300'}`}>
-                                {showNotifications ? 'notifications_active' : 'notifications_none'}
-                            </span>
-                            {unreadCount > 0 && (
-                                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] bg-red-500 rounded-full border-2 border-white dark:border-gray-800 flex items-center justify-center">
-                                    <span className="text-[10px] font-bold text-white leading-none">{unreadCount}</span>
-                                </span>
-                            )}
-                        </button>
+        <div className="pt-14 md:pt-8 pb-24 md:pb-8 px-4 md:px-8 max-w-7xl mx-auto min-h-full">
 
-                        {/* Notification Dropdown Panel */}
-                        {showNotifications && (
-                            <div
-                                className="fixed inset-x-0 top-14 mx-3 md:mx-0 md:absolute md:inset-auto md:right-0 md:top-[calc(100%+8px)] md:w-[400px] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-700 z-50 overflow-hidden"
-                                style={{ animation: 'notifSlideIn 0.2s ease-out' }}
-                            >
-                                {/* Header */}
-                                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-800">
-                                    <div className="flex items-center gap-2">
-                                        <h3 className="font-bold text-gray-900 dark:text-white text-base">การแจ้งเตือน</h3>
-                                        {unreadCount > 0 && (
-                                            <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">{unreadCount} ใหม่</span>
-                                        )}
-                                    </div>
-                                    {unreadCount > 0 && notifTab === 'unread' && (
-                                        <button
-                                            onClick={handleMarkAllAsRead}
-                                            className="text-xs text-primary font-semibold hover:text-blue-700 transition-colors"
-                                        >
-                                            อ่านทั้งหมด
-                                        </button>
+            {/* ═══════════════════ HERO HEADER ═══════════════════ */}
+            <header className="mb-6 md:mb-8">
+                {/* Mobile: Banner with time-based background image */}
+                <div className="md:hidden relative overflow-hidden rounded-2xl shadow-md -mx-1">
+                    <img src={bannerImage} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                    <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/40 to-black/50"></div>
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent"></div>
+                    <div className="relative z-10 px-4 py-5 flex justify-between items-center">
+                        <div>
+                            <p className="text-xs text-white/75 font-medium">{greeting}, <span className="text-white">{clockStr}</span></p>
+                            <h1 className="text-xl font-bold text-white tracking-tight drop-shadow-md">{currentUser?.name || 'ผู้ใช้งาน'}</h1>
+                            <p className="text-[10px] text-white/60 mt-0.5 drop-shadow-sm">{currentUser?.position || ''} {currentUser?.department ? `· ${currentUser.department}` : ''}</p>
+                        </div>
+                        <div className="flex items-center gap-2.5">
+                            <div className="relative" ref={notifRef}>
+                                <button
+                                    onClick={() => setShowNotifications(prev => !prev)}
+                                    className={`relative p-2 rounded-xl transition-all duration-200 ${showNotifications
+                                        ? 'bg-white/30 ring-2 ring-white/30'
+                                        : 'bg-white/15 hover:bg-white/25 backdrop-blur-md'
+                                        }`}
+                                >
+                                    <span className="material-icons-round text-white text-xl drop-shadow-sm">
+                                        {showNotifications ? 'notifications_active' : 'notifications_none'}
+                                    </span>
+                                    {unreadCount > 0 && (
+                                        <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] bg-red-500 rounded-full border-2 border-white/50 flex items-center justify-center">
+                                            <span className="text-[10px] font-bold text-white leading-none">{unreadCount}</span>
+                                        </span>
                                     )}
-                                </div>
-
-                                {/* Tab Bar */}
-                                <div className="flex border-b border-gray-100 dark:border-gray-800">
-                                    <button
-                                        onClick={() => setNotifTab('unread')}
-                                        className={`flex-1 py-2.5 text-sm font-medium text-center transition-colors border-b-2 ${notifTab === 'unread' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
-                                    >
-                                        ยังไม่อ่าน{unreadCount > 0 ? ` (${unreadCount})` : ''}
-                                    </button>
-                                    <button
-                                        onClick={() => setNotifTab('read')}
-                                        className={`flex-1 py-2.5 text-sm font-medium text-center transition-colors border-b-2 ${notifTab === 'read' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
-                                    >
-                                        อ่านแล้ว
-                                    </button>
-                                </div>
-
-                                {/* Notification List */}
-                                <div className="max-h-[360px] overflow-y-auto scrollbar-hide divide-y divide-gray-50 dark:divide-gray-800">
-                                    {displayedNotifs.length === 0 ? (
-                                        <div className="py-12 text-center">
-                                            <span className="material-icons-round text-4xl text-gray-300 dark:text-gray-600 mb-2 block">
-                                                {notifTab === 'unread' ? 'notifications_none' : 'done_all'}
-                                            </span>
-                                            <p className="text-sm text-gray-400 dark:text-gray-500">
-                                                {notifTab === 'unread' ? 'ไม่มีการแจ้งเตือนใหม่' : 'ไม่มีรายการที่อ่านแล้ว'}
-                                            </p>
-                                        </div>
-                                    ) : (
-                                        displayedNotifs.map((notif: any) => (
-                                            <div
-                                                key={notif.id}
-                                                className={`flex items-start gap-3 px-4 py-3 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50 group ${!notif.isRead ? 'bg-primary/[0.03] dark:bg-primary/[0.05]' : ''
-                                                    }`}
-                                            >
-                                                {/* Icon */}
-                                                <div className={`w-10 h-10 rounded-xl ${notif.iconBg} flex items-center justify-center shrink-0 mt-0.5`}>
-                                                    <span className={`material-icons-round text-lg ${notif.iconColor}`}>{notif.icon}</span>
-                                                </div>
-
-                                                {/* Content — clickable for navigation */}
-                                                <button
-                                                    onClick={() => {
-                                                        if (!notif.isRead) markAsRead(notif.id);
-                                                        if (notif.type === 'payslip') navigate('/payslips');
-                                                        else if (notif.type === 'news') navigate('/news');
-                                                        setShowNotifications(false);
-                                                    }}
-                                                    className="flex-1 min-w-0 text-left"
-                                                >
-                                                    <p className={`text-sm leading-tight ${!notif.isRead ? 'font-bold text-gray-900 dark:text-white' : 'font-medium text-gray-700 dark:text-gray-300'}`}>
-                                                        {notif.title}
-                                                    </p>
-                                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2 leading-relaxed">{notif.message}</p>
-                                                    <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 font-medium">{notif.time}</p>
-                                                </button>
-
-                                                {/* Action Buttons */}
-                                                <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    {/* Mark as read button — only for unread tab */}
-                                                    {!notif.isRead && (
-                                                        <button
-                                                            onClick={(e) => { e.stopPropagation(); markAsRead(notif.id); }}
-                                                            title="อ่านแล้ว"
-                                                            className="p-1.5 rounded-lg hover:bg-green-50 dark:hover:bg-green-900/20 text-gray-400 hover:text-green-600 transition-colors"
-                                                        >
-                                                            <span className="material-icons-round text-base">check_circle_outline</span>
-                                                        </button>
-                                                    )}
-                                                    {/* Delete button */}
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); handleDeleteNotif(notif.id); }}
-                                                        title="ลบ"
-                                                        className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-400 hover:text-red-500 transition-colors"
-                                                    >
-                                                        <span className="material-icons-round text-base">close</span>
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        ))
-                                    )}
-                                </div>
-
-                                {/* Footer */}
-                                <div className="border-t border-gray-100 dark:border-gray-800 p-3">
-                                    <button className="w-full text-center text-sm text-primary font-semibold py-2 rounded-xl hover:bg-primary/5 transition-colors">
-                                        ดูการแจ้งเตือนทั้งหมด
-                                    </button>
-                                </div>
+                                </button>
                             </div>
-                        )}
+                            <img
+                                alt="Profile"
+                                className="w-10 h-10 rounded-full border-2 border-white/50 shadow-md object-cover"
+                                src={currentUser?.avatar || 'https://picsum.photos/id/64/200/200'}
+                            />
+                        </div>
                     </div>
-
-                    <img
-                        alt="Profile"
-                        className="md:hidden w-10 h-10 rounded-full border-2 border-white dark:border-gray-700 shadow-sm object-cover"
-                        src={currentUser?.avatar || 'https://picsum.photos/id/64/200/200'}
-                    />
                 </div>
-            </header>
 
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-8">
-
-                {/* Left Column (Mobile: Top, Desktop: Left) */}
-                <div className="md:col-span-5 lg:col-span-4 space-y-8">
-                    {/* Attendance Card */}
-                    <section>
-                        <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-gray-700 relative overflow-hidden">
-                            <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>
-                            <div className="flex flex-col items-center justify-center text-center">
-                                <p className="text-gray-500 dark:text-gray-400 text-sm font-medium mb-1">{attendance.date}</p>
-
-                                {/* Clock-in time / Clock-out time */}
-                                {clockStatus === 'completed' ? (
-                                    <div className="mb-2">
-                                        <div className="flex items-center justify-center gap-4">
-                                            <div>
-                                                <p className="text-[10px] text-gray-400 uppercase tracking-wide">เข้า</p>
-                                                <h2 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">{attendance.time}</h2>
-                                            </div>
-                                            <span className="material-icons-round text-gray-300 text-lg">arrow_forward</span>
-                                            <div>
-                                                <p className="text-[10px] text-gray-400 uppercase tracking-wide">ออก</p>
-                                                <h2 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">{attendance.clockOutTime || '--:--'}</h2>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <h2 className="text-4xl font-bold text-gray-900 dark:text-white mb-2 tracking-tight">
-                                        {clockStatus === 'clocked_in' ? attendance.time : '--:--'}
-                                        <span className="text-lg font-medium text-gray-400 ml-1">น.</span>
-                                    </h2>
-                                )}
-
-                                {/* Location badge */}
-                                <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full mb-6 ${attendance.isOffsite
-                                    ? 'text-orange-600 bg-orange-100 dark:bg-orange-900/30'
-                                    : 'text-primary bg-primary/10'
-                                    }`}>
-                                    <span className="material-icons-round text-sm">{attendance.isOffsite ? 'wrong_location' : 'location_on'}</span>
-                                    <span className="text-xs font-semibold">{attendance.location}</span>
-                                </div>
-
-                                {/* Clock-in/out Button */}
-                                <div className="relative w-full">
-                                    {clockStatus === 'not_clocked_in' && (
-                                        <button
-                                            onClick={handleClockAction}
-                                            disabled={clockLoading}
-                                            className="w-full bg-primary hover:bg-blue-600 active:scale-[0.98] transition-all duration-200 text-white font-semibold py-4 rounded-xl shadow-lg shadow-primary/30 flex items-center justify-center gap-2 group disabled:opacity-70"
-                                        >
-                                            {clockLoading ? (
-                                                <span className="material-icons-round animate-spin">autorenew</span>
-                                            ) : (
-                                                <>
-                                                    <div className="bg-white/20 p-1.5 rounded-lg group-hover:bg-white/30 transition-colors">
-                                                        <span className="material-icons-round">fingerprint</span>
-                                                    </div>
-                                                    <span className="text-lg">ลงเวลาเข้า</span>
-                                                </>
-                                            )}
-                                        </button>
-                                    )}
-                                    {clockStatus === 'clocked_in' && (
-                                        <button
-                                            onClick={handleClockAction}
-                                            disabled={clockLoading}
-                                            className="w-full bg-orange-500 hover:bg-orange-600 active:scale-[0.98] transition-all duration-200 text-white font-semibold py-4 rounded-xl shadow-lg shadow-orange-500/30 flex items-center justify-center gap-2 group disabled:opacity-70"
-                                        >
-                                            {clockLoading ? (
-                                                <span className="material-icons-round animate-spin">autorenew</span>
-                                            ) : (
-                                                <>
-                                                    <div className="bg-white/20 p-1.5 rounded-lg group-hover:bg-white/30 transition-colors">
-                                                        <span className="material-icons-round">logout</span>
-                                                    </div>
-                                                    <span className="text-lg">ลงเวลาออก</span>
-                                                </>
-                                            )}
-                                        </button>
-                                    )}
-                                    {clockStatus === 'completed' && (
-                                        <div className="w-full bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400 font-semibold py-4 rounded-xl flex items-center justify-center gap-2">
-                                            <span className="material-icons-round">check_circle</span>
-                                            <span className="text-lg">ลงเวลาครบแล้ว</span>
-                                        </div>
-                                    )}
-                                </div>
-                                <div className="mt-4 flex items-center gap-2 text-xs text-gray-400">
-                                    <span className="material-icons-round text-sm">history</span>
-                                    <span>{attendance.lastCheckout}</span>
-                                </div>
+                {/* Desktop: Premium hero banner with time-based background image */}
+                <div className="hidden md:block relative overflow-hidden rounded-2xl shadow-lg shadow-black/10 dark:shadow-black/30">
+                    {/* Background Image */}
+                    <img src={bannerImage} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                    {/* Dark overlay for text readability */}
+                    <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/40 to-black/50"></div>
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent"></div>
+                    {/* Content */}
+                    <div className="relative z-10 p-6 lg:p-8 flex justify-between items-center">
+                        <div className="flex items-center gap-5">
+                            <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center shadow-lg border border-white/20">
+                                <span className="material-icons-round text-white text-3xl">waving_hand</span>
+                            </div>
+                            <div>
+                                <p className="text-sm text-white/80 font-medium">{greeting}, <span className="text-white">{clockStr}</span></p>
+                                <h1 className="text-2xl lg:text-3xl font-bold text-white tracking-tight drop-shadow-md">{currentUser?.name || 'ผู้ใช้งาน'}</h1>
+                                <p className="text-xs text-white/70 mt-0.5 drop-shadow-sm">{currentUser?.position || ''} {currentUser?.department ? `· ${currentUser.department}` : ''}</p>
                             </div>
                         </div>
-                    </section>
+                        <div className="flex items-center gap-3">
+                            <div className="relative" ref={notifRef}>
+                                <button
+                                    onClick={() => setShowNotifications(prev => !prev)}
+                                    className={`relative p-2.5 rounded-xl transition-all duration-200 ${showNotifications
+                                        ? 'bg-white/30 ring-2 ring-white/30'
+                                        : 'bg-white/15 hover:bg-white/25 backdrop-blur-md'
+                                        }`}
+                                >
+                                    <span className="material-icons-round text-white drop-shadow-sm">
+                                        {showNotifications ? 'notifications_active' : 'notifications_none'}
+                                    </span>
+                                    {unreadCount > 0 && (
+                                        <span className="absolute -top-1 -right-1 min-w-[20px] h-[20px] bg-red-500 rounded-full border-2 border-white/50 flex items-center justify-center shadow-lg">
+                                            <span className="text-[10px] font-bold text-white leading-none">{unreadCount}</span>
+                                        </span>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
-                    {/* Quick Menu — Mobile only (desktop version is in right column) */}
-                    <section className="md:hidden">
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">เมนูด่วน</h3>
-                        <div className={`grid ${isAdmin ? 'grid-cols-4' : 'grid-cols-3'} gap-4`}>
+                {/* Notification Dropdown Panel — shared between mobile and desktop */}
+                {showNotifications && (
+                    <div
+                        className="fixed inset-x-0 top-14 mx-3 md:mx-0 md:absolute md:right-4 md:top-auto md:mt-2 md:w-[400px] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-700 z-50 overflow-hidden"
+                        style={{ animation: 'notifSlideIn 0.2s ease-out' }}
+                    >
+                        {/* Header */}
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-800">
+                            <div className="flex items-center gap-2">
+                                <h3 className="font-bold text-gray-900 dark:text-white text-base">การแจ้งเตือน</h3>
+                                {unreadCount > 0 && (
+                                    <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">{unreadCount} ใหม่</span>
+                                )}
+                            </div>
+                            {unreadCount > 0 && notifTab === 'unread' && (
+                                <button
+                                    onClick={handleMarkAllAsRead}
+                                    className="text-xs text-primary font-semibold hover:text-blue-700 transition-colors"
+                                >
+                                    อ่านทั้งหมด
+                                </button>
+                            )}
+                        </div>
+
+                        {/* Tab Bar */}
+                        <div className="flex border-b border-gray-100 dark:border-gray-800">
+                            <button
+                                onClick={() => setNotifTab('unread')}
+                                className={`flex-1 py-2.5 text-sm font-medium text-center transition-colors border-b-2 ${notifTab === 'unread' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
+                            >
+                                ยังไม่อ่าน{unreadCount > 0 ? ` (${unreadCount})` : ''}
+                            </button>
+                            <button
+                                onClick={() => setNotifTab('read')}
+                                className={`flex-1 py-2.5 text-sm font-medium text-center transition-colors border-b-2 ${notifTab === 'read' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
+                            >
+                                อ่านแล้ว
+                            </button>
+                        </div>
+
+                        {/* Notification List */}
+                        <div className="max-h-[360px] overflow-y-auto scrollbar-hide divide-y divide-gray-50 dark:divide-gray-800">
+                            {displayedNotifs.length === 0 ? (
+                                <div className="py-12 text-center">
+                                    <span className="material-icons-round text-4xl text-gray-300 dark:text-gray-600 mb-2 block">
+                                        {notifTab === 'unread' ? 'notifications_none' : 'done_all'}
+                                    </span>
+                                    <p className="text-sm text-gray-400 dark:text-gray-500">
+                                        {notifTab === 'unread' ? 'ไม่มีการแจ้งเตือนใหม่' : 'ไม่มีรายการที่อ่านแล้ว'}
+                                    </p>
+                                </div>
+                            ) : (
+                                displayedNotifs.map((notif: any) => (
+                                    <div
+                                        key={notif.id}
+                                        className={`flex items-start gap-3 px-4 py-3 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50 group ${!notif.isRead ? 'bg-primary/[0.03] dark:bg-primary/[0.05]' : ''
+                                            }`}
+                                    >
+                                        {/* Icon */}
+                                        <div className={`w-10 h-10 rounded-xl ${notif.iconBg} flex items-center justify-center shrink-0 mt-0.5`}>
+                                            <span className={`material-icons-round text-lg ${notif.iconColor}`}>{notif.icon}</span>
+                                        </div>
+
+                                        {/* Content */}
+                                        <button
+                                            onClick={() => {
+                                                if (!notif.isRead) markAsRead(notif.id);
+                                                if (notif.type === 'payslip') navigate('/payslips');
+                                                else if (notif.type === 'news') navigate('/news');
+                                                setShowNotifications(false);
+                                            }}
+                                            className="flex-1 min-w-0 text-left"
+                                        >
+                                            <p className={`text-sm leading-tight ${!notif.isRead ? 'font-bold text-gray-900 dark:text-white' : 'font-medium text-gray-700 dark:text-gray-300'}`}>
+                                                {notif.title}
+                                            </p>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2 leading-relaxed">{notif.message}</p>
+                                            <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 font-medium">{notif.time}</p>
+                                        </button>
+
+                                        {/* Action Buttons */}
+                                        <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            {!notif.isRead && (
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); markAsRead(notif.id); }}
+                                                    title="อ่านแล้ว"
+                                                    className="p-1.5 rounded-lg hover:bg-green-50 dark:hover:bg-green-900/20 text-gray-400 hover:text-green-600 transition-colors"
+                                                >
+                                                    <span className="material-icons-round text-base">check_circle_outline</span>
+                                                </button>
+                                            )}
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); handleDeleteNotif(notif.id); }}
+                                                title="ลบ"
+                                                className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-400 hover:text-red-500 transition-colors"
+                                            >
+                                                <span className="material-icons-round text-base">close</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+
+                        {/* Footer */}
+                        <div className="border-t border-gray-100 dark:border-gray-800 p-3">
+                            <button className="w-full text-center text-sm text-primary font-semibold py-2 rounded-xl hover:bg-primary/5 transition-colors">
+                                ดูการแจ้งเตือนทั้งหมด
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </header>
+
+            {/* ═══════════════════ ROW 1: Attendance + Quotas + Quick Menu ═══════════════════ */}
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-6 mb-6">
+
+                {/* ── Attendance Card ── */}
+                <section className="md:col-span-4 lg:col-span-3">
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700 relative overflow-hidden h-full">
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>
+                        <div className="flex flex-col items-center justify-center text-center h-full">
+                            <p className="text-gray-500 dark:text-gray-400 text-sm font-medium mb-1">{attendance.date}</p>
+
+                            {/* Clock-in time / Clock-out time */}
+                            {clockStatus === 'completed' ? (
+                                <div className="mb-2">
+                                    <div className="flex items-center justify-center gap-4">
+                                        <div>
+                                            <p className="text-[10px] text-gray-400 uppercase tracking-wide">เข้า</p>
+                                            <h2 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">{attendance.time}</h2>
+                                        </div>
+                                        <span className="material-icons-round text-gray-300 text-lg">arrow_forward</span>
+                                        <div>
+                                            <p className="text-[10px] text-gray-400 uppercase tracking-wide">ออก</p>
+                                            <h2 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">{attendance.clockOutTime || '--:--'}</h2>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <h2 className="text-4xl font-bold text-gray-900 dark:text-white mb-2 tracking-tight">
+                                    {clockStatus === 'clocked_in' ? attendance.time : '--:--'}
+                                    <span className="text-lg font-medium text-gray-400 ml-1">น.</span>
+                                </h2>
+                            )}
+
+                            {/* Location badge */}
+                            <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full mb-6 ${attendance.isOffsite
+                                ? 'text-orange-600 bg-orange-100 dark:bg-orange-900/30'
+                                : 'text-primary bg-primary/10'
+                                }`}>
+                                <span className="material-icons-round text-sm">{attendance.isOffsite ? 'wrong_location' : 'location_on'}</span>
+                                <span className="text-xs font-semibold">{attendance.location}</span>
+                            </div>
+
+                            {/* Clock-in/out Button */}
+                            <div className="relative w-full">
+                                {clockStatus === 'not_clocked_in' && (
+                                    <button
+                                        onClick={handleClockAction}
+                                        disabled={clockLoading}
+                                        className="w-full bg-primary hover:bg-blue-600 active:scale-[0.98] transition-all duration-200 text-white font-semibold py-4 rounded-xl shadow-lg shadow-primary/30 flex items-center justify-center gap-2 group disabled:opacity-70"
+                                    >
+                                        {clockLoading ? (
+                                            <span className="material-icons-round animate-spin">autorenew</span>
+                                        ) : (
+                                            <>
+                                                <div className="bg-white/20 p-1.5 rounded-lg group-hover:bg-white/30 transition-colors">
+                                                    <span className="material-icons-round">fingerprint</span>
+                                                </div>
+                                                <span className="text-lg">ลงเวลาเข้า</span>
+                                            </>
+                                        )}
+                                    </button>
+                                )}
+                                {clockStatus === 'clocked_in' && (
+                                    <button
+                                        onClick={handleClockAction}
+                                        disabled={clockLoading}
+                                        className="w-full bg-orange-500 hover:bg-orange-600 active:scale-[0.98] transition-all duration-200 text-white font-semibold py-4 rounded-xl shadow-lg shadow-orange-500/30 flex items-center justify-center gap-2 group disabled:opacity-70"
+                                    >
+                                        {clockLoading ? (
+                                            <span className="material-icons-round animate-spin">autorenew</span>
+                                        ) : (
+                                            <>
+                                                <div className="bg-white/20 p-1.5 rounded-lg group-hover:bg-white/30 transition-colors">
+                                                    <span className="material-icons-round">logout</span>
+                                                </div>
+                                                <span className="text-lg">ลงเวลาออก</span>
+                                            </>
+                                        )}
+                                    </button>
+                                )}
+                                {clockStatus === 'completed' && (
+                                    <div className="w-full bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400 font-semibold py-4 rounded-xl flex items-center justify-center gap-2">
+                                        <span className="material-icons-round">check_circle</span>
+                                        <span className="text-lg">ลงเวลาครบแล้ว</span>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="mt-4 flex items-center gap-2 text-xs text-gray-400">
+                                <span className="material-icons-round text-sm">history</span>
+                                <span>{attendance.lastCheckout}</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                {/* ── Leave Quotas ── */}
+                <section className="md:col-span-5 lg:col-span-5">
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden h-full">
+                        <div className="flex justify-between items-center px-5 pt-4 pb-2">
+                            <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                                <span className="material-icons-round text-primary text-lg">event_available</span>
+                                วันลาคงเหลือ
+                            </h3>
+                            {otherQuotas.length > 0 && (
+                                <button onClick={() => setShowAllQuotas(true)}
+                                    className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors">
+                                    <span className="material-icons-round text-sm">visibility</span>
+                                    ดูทั้งหมด
+                                </button>
+                            )}
+                        </div>
+
+                        {/* Mobile: Horizontal scroll cards */}
+                        <div className="flex gap-3 overflow-x-auto pb-3 px-5 scrollbar-hide snap-x md:hidden">
+                            {mainQuotas.map((q: any, idx: number) => (
+                                <div key={idx} className="snap-start min-w-[130px] bg-gray-50 dark:bg-gray-700/50 p-3.5 rounded-xl flex flex-col justify-between">
+                                    <div className={`w-9 h-9 rounded-lg bg-${q.color}-100 dark:bg-${q.color}-900/30 flex items-center justify-center mb-2 overflow-hidden`}>
+                                        {q.icon_url ? (
+                                            <img src={q.icon_url.startsWith('http') ? q.icon_url : `${API_BASE}/${q.icon_url}`} alt="" className="w-7 h-7 object-contain" />
+                                        ) : (
+                                            <span className={`material-icons-round text-xl text-${q.color}-600 dark:text-${q.color}-400`}>{q.icon}</span>
+                                        )}
+                                    </div>
+                                    <div>
+                                        <p className="text-2xl font-bold text-gray-900 dark:text-white">{q.remaining < 0 ? '∞' : q.remaining}</p>
+                                        <p className="text-[11px] text-gray-500 dark:text-gray-400 font-medium leading-tight">{q.label.split(' (')[0]}</p>
+                                        <p className="text-[10px] text-gray-400 mt-0.5">ใช้ {q.used}/{q.total} {q.unit}</p>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Desktop: Compact table */}
+                        <div className="hidden md:block">
+                            <table className="w-full text-sm">
+                                <thead>
+                                    <tr className="border-b border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30">
+                                        <th className="text-left px-5 py-2.5 text-xs font-semibold text-gray-500">ประเภทลา</th>
+                                        <th className="text-center px-2 py-2.5 text-xs font-semibold text-gray-500">ใช้ไป</th>
+                                        <th className="text-center px-2 py-2.5 text-xs font-semibold text-gray-500">ทั้งหมด</th>
+                                        <th className="text-center px-5 py-2.5 text-xs font-semibold text-gray-500">คงเหลือ</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {mainQuotas.map((q: any, idx: number) => (
+                                        <tr key={idx} className="border-b last:border-0 border-gray-50 dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors">
+                                            <td className="px-5 py-3">
+                                                <div className="flex items-center gap-2.5">
+                                                    <div className={`w-7 h-7 rounded-lg bg-${q.color}-100 dark:bg-${q.color}-900/30 flex items-center justify-center shrink-0 overflow-hidden`}>
+                                                        {q.icon_url ? (
+                                                            <img src={q.icon_url.startsWith('http') ? q.icon_url : `${API_BASE}/${q.icon_url}`} alt="" className="w-5 h-5 object-contain" />
+                                                        ) : (
+                                                            <span className={`material-icons-round text-sm text-${q.color}-500`}>{q.icon}</span>
+                                                        )}
+                                                    </div>
+                                                    <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{q.label.split(' (')[0]}</span>
+                                                </div>
+                                            </td>
+                                            <td className="text-center px-2 py-3 text-xs text-gray-600 dark:text-gray-400">{q.used}</td>
+                                            <td className="text-center px-2 py-3 text-xs text-gray-600 dark:text-gray-400">{q.total === 0 ? '∞' : q.total}</td>
+                                            <td className="text-center px-5 py-3">
+                                                <span className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full ${q.remaining < 0 ? 'text-green-600 bg-green-50 dark:bg-green-900/20' : q.remaining === 0 ? 'text-red-500 bg-red-50 dark:bg-red-900/20' : 'text-primary bg-primary/10'}`}>
+                                                    {q.remaining < 0 ? '∞' : q.remaining} {q.unit}
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                {/* ── Quick Menu ── */}
+                <section className="md:col-span-3 lg:col-span-4">
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-5 h-full">
+                        <h3 className="text-base font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                            <span className="material-icons-round text-primary text-lg">dashboard</span>
+                            เมนูด่วน
+                        </h3>
+                        {/* Mobile: icon grid */}
+                        <div className={`md:hidden grid ${isAdmin ? 'grid-cols-4' : 'grid-cols-3'} gap-3`}>
                             {QUICK_MENU_ITEMS.filter(item => !item.adminOnly || isAdmin).map((item, i) => {
                                 const action = item.path ? () => navigate(item.path!) : undefined;
                                 return (
-                                    <button key={i} onClick={action} className="flex flex-col items-center gap-2 group">
-                                        <div className="w-14 h-14 rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center justify-center shadow-sm group-active:scale-95 transition-transform relative">
-                                            <span className="material-icons-round text-primary text-2xl">{item.icon}</span>
+                                    <button key={i} onClick={action} className="flex flex-col items-center gap-1.5 group">
+                                        <div className="w-12 h-12 rounded-xl bg-primary/5 border border-primary/10 flex items-center justify-center shadow-sm group-active:scale-95 transition-transform relative">
+                                            <span className="material-icons-round text-primary text-xl">{item.icon}</span>
                                             {item.hasNotif && (
-                                                <span className="absolute top-3 right-3 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white dark:border-gray-800"></span>
+                                                <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white dark:border-gray-800"></span>
                                             )}
                                         </div>
-                                        <span className="text-xs text-center font-medium text-gray-600 dark:text-gray-300">{item.label}</span>
+                                        <span className="text-[10px] text-center font-medium text-gray-600 dark:text-gray-300 leading-tight">{item.label}</span>
                                     </button>
                                 );
                             })}
                         </div>
-                    </section>
+                        {/* Desktop: list-style buttons */}
+                        <div className="hidden md:grid grid-cols-2 gap-2.5">
+                            {QUICK_MENU_ITEMS.filter(item => !item.adminOnly || isAdmin).map((item, i) => {
+                                const action = item.path ? () => navigate(item.path!) : undefined;
+                                return (
+                                    <button key={i} onClick={action} className="flex items-center px-3 py-2.5 gap-3 group bg-gray-50 dark:bg-gray-700/50 rounded-xl hover:bg-primary/5 dark:hover:bg-primary/10 transition-all text-left border border-transparent hover:border-primary/20">
+                                        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 relative group-hover:bg-primary/20 transition-colors">
+                                            <span className="material-icons-round text-primary text-base">{item.icon}</span>
+                                            {item.hasNotif && (
+                                                <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white dark:border-gray-800"></span>
+                                            )}
+                                        </div>
+                                        <span className="text-xs font-medium text-gray-600 dark:text-gray-300 group-hover:text-primary transition-colors leading-tight">{item.label}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </section>
+            </div>
 
-                    {/* Pending Approvals — Always visible (Desktop: table in left column) */}
-                    <section>
-                        <div className="flex justify-between items-center mb-4">
+            {/* ═══════════════════ ROW 2: Approvals + News ═══════════════════ */}
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-6">
+
+                {/* ── Pending Approvals ── */}
+                <section className="md:col-span-7">
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden h-full">
+                        <div className="flex justify-between items-center px-5 pt-4 pb-3">
                             <div className="flex items-center gap-2">
-                                <h3 className="text-lg font-bold text-gray-900 dark:text-white">รออนุมัติ</h3>
-                                {pendingCount > 0 && <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{pendingCount}</span>}
+                                <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                                    <span className="material-icons-round text-primary text-lg">how_to_reg</span>
+                                    รออนุมัติ
+                                </h3>
+                                {pendingCount > 0 && <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">{pendingCount}</span>}
                             </div>
                             {pendingCount > 3 && (
-                                <button onClick={() => setShowAllApprovals(!showAllApprovals)} className="text-sm text-primary font-semibold hover:underline flex items-center gap-1">
+                                <button onClick={() => setShowAllApprovals(!showAllApprovals)} className="text-xs text-primary font-semibold hover:underline flex items-center gap-1">
                                     {showAllApprovals ? 'ย่อ' : `ดูทั้งหมด (${pendingCount})`}
                                     <span className="material-icons-round text-base">{showAllApprovals ? 'expand_less' : 'expand_more'}</span>
                                 </button>
                             )}
                         </div>
 
-                        {/* Desktop: Symmetrical table */}
-                        <div className="hidden md:block bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
+                        {/* Desktop: Table */}
+                        <div className="hidden md:block">
                             {pendingCount > 0 ? (
                                 <table className="w-full text-sm">
                                     <thead>
-                                        <tr className="border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
-                                            <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500">พนักงาน</th>
+                                        <tr className="border-b border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30">
+                                            <th className="text-left px-5 py-2.5 text-xs font-semibold text-gray-500">พนักงาน</th>
                                             <th className="text-center px-2 py-2.5 text-xs font-semibold text-gray-500">ประเภท</th>
                                             <th className="text-center px-2 py-2.5 text-xs font-semibold text-gray-500">จำนวน</th>
-                                            <th className="text-center px-3 py-2.5 text-xs font-semibold text-gray-500">ดำเนินการ</th>
+                                            <th className="text-center px-5 py-2.5 text-xs font-semibold text-gray-500">ดำเนินการ</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -609,22 +803,22 @@ const HomeScreen: React.FC = () => {
                                             const isOT = req.reason?.startsWith('[OT]');
                                             return (
                                                 <tr key={req.id} className="border-b last:border-0 border-gray-50 dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors cursor-pointer" onClick={() => openApprovalDetail(req)}>
-                                                    <td className="px-3 py-2.5">
-                                                        <div className="flex items-center gap-2">
-                                                            <img src={req.employee_avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(req.employee_name || '')} alt="" className="w-6 h-6 rounded-full object-cover" />
+                                                    <td className="px-5 py-3">
+                                                        <div className="flex items-center gap-2.5">
+                                                            <img src={req.employee_avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(req.employee_name || '')} alt="" className="w-7 h-7 rounded-full object-cover ring-2 ring-gray-100 dark:ring-gray-700" />
                                                             <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{req.employee_name}</span>
                                                         </div>
                                                     </td>
-                                                    <td className="text-center px-2 py-2.5">
-                                                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${isOT ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : `bg-${req.leave_type_color || 'gray'}-100 dark:bg-${req.leave_type_color || 'gray'}-900/30 text-${req.leave_type_color || 'gray'}-600`}`}>
+                                                    <td className="text-center px-2 py-3">
+                                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${isOT ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : `bg-${req.leave_type_color || 'gray'}-100 dark:bg-${req.leave_type_color || 'gray'}-900/30 text-${req.leave_type_color || 'gray'}-600`}`}>
                                                             {isOT ? 'OT' : req.leave_type_name}
                                                         </span>
                                                     </td>
-                                                    <td className="text-center px-2 py-2.5 text-xs text-gray-600 dark:text-gray-400">
+                                                    <td className="text-center px-2 py-3 text-xs text-gray-600 dark:text-gray-400">
                                                         {isOT ? `${req.total_days} ชม.` : `${req.total_days} วัน`}
                                                     </td>
-                                                    <td className="text-center px-3 py-2.5">
-                                                        <span className="material-icons-round text-primary text-base">open_in_new</span>
+                                                    <td className="text-center px-5 py-3">
+                                                        <span className="material-icons-round text-primary text-base hover:scale-110 transition-transform">open_in_new</span>
                                                     </td>
                                                 </tr>
                                             );
@@ -632,24 +826,26 @@ const HomeScreen: React.FC = () => {
                                     </tbody>
                                 </table>
                             ) : (
-                                <div className="py-8 text-center">
-                                    <span className="material-icons-round text-3xl text-gray-300 dark:text-gray-600 mb-2 block">check_circle_outline</span>
-                                    <p className="text-sm text-gray-400 dark:text-gray-500">ไม่มีผู้ขออนุมัติลา</p>
+                                <div className="py-10 text-center">
+                                    <div className="w-14 h-14 rounded-2xl bg-green-50 dark:bg-green-900/20 flex items-center justify-center mx-auto mb-3">
+                                        <span className="material-icons-round text-2xl text-green-500">check_circle</span>
+                                    </div>
+                                    <p className="text-sm text-gray-400 dark:text-gray-500 font-medium">ไม่มีผู้ขออนุมัติลา</p>
                                 </div>
                             )}
                         </div>
 
                         {/* Mobile: Card list */}
-                        <div className="md:hidden space-y-3">
+                        <div className="md:hidden px-4 pb-4 space-y-2.5">
                             {pendingCount > 0 ? (
                                 ([...pendingOT, ...pendingLeave].slice(0, showAllApprovals ? undefined : 3)).map((req: any) => {
                                     const isOT = req.reason?.startsWith('[OT]');
                                     return (
                                         <button key={req.id} onClick={() => openApprovalDetail(req)}
-                                            className="w-full bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-3.5 shadow-sm hover:shadow-md transition-all active:scale-[0.99] text-left">
+                                            className="w-full bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3.5 hover:shadow-md transition-all active:scale-[0.99] text-left">
                                             <div className="flex items-center gap-3">
                                                 <img src={req.employee_avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(req.employee_name || '')}
-                                                    alt="" className="w-10 h-10 rounded-full object-cover border-2 border-gray-100 dark:border-gray-700 shrink-0" />
+                                                    alt="" className="w-10 h-10 rounded-full object-cover border-2 border-white dark:border-gray-600 shrink-0" />
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-center gap-2">
                                                         <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{req.employee_name}</p>
@@ -667,170 +863,96 @@ const HomeScreen: React.FC = () => {
                                     );
                                 })
                             ) : (
-                                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-6 text-center">
-                                    <span className="material-icons-round text-3xl text-gray-300 dark:text-gray-600 mb-2 block">check_circle_outline</span>
-                                    <p className="text-sm text-gray-400 dark:text-gray-500">ไม่มีผู้ขออนุมัติลา</p>
+                                <div className="py-8 text-center">
+                                    <div className="w-14 h-14 rounded-2xl bg-green-50 dark:bg-green-900/20 flex items-center justify-center mx-auto mb-3">
+                                        <span className="material-icons-round text-2xl text-green-500">check_circle</span>
+                                    </div>
+                                    <p className="text-sm text-gray-400 dark:text-gray-500 font-medium">ไม่มีผู้ขออนุมัติลา</p>
                                 </div>
                             )}
                         </div>
-                    </section>
-                </div>
-
-                {/* Right Column — Quotas + Quick Menu (side by side) + Approvals */}
-                <div className="md:col-span-7 lg:col-span-8 space-y-6">
-
-                    {/* Top Row: Quotas Table + Quick Menu side-by-side on Desktop — items-start aligns top edges */}
-                    <div className="md:grid md:grid-cols-5 md:gap-6 md:items-start">
-
-                        {/* Quotas — Table on Desktop, Horizontal cards on Mobile */}
-                        <section className="md:col-span-3">
-                            <div className="flex justify-between items-center mb-4">
-                                <h3 className="text-lg font-bold text-gray-900 dark:text-white">วันลาคงเหลือ</h3>
-                                {otherQuotas.length > 0 && (
-                                    <button onClick={() => setShowAllQuotas(true)}
-                                        className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors">
-                                        <span className="material-icons-round text-sm">visibility</span>
-                                        ดูทั้งหมด
-                                    </button>
-                                )}
-                            </div>
-
-                            {/* Mobile: Horizontal scroll cards */}
-                            <div className="flex gap-3 overflow-x-auto pb-3 scrollbar-hide snap-x md:hidden">
-                                {mainQuotas.map((q: any, idx: number) => (
-                                    <div key={idx} className="snap-start min-w-[130px] bg-white dark:bg-gray-800 p-3.5 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-between">
-                                        <div className={`w-9 h-9 rounded-lg bg-${q.color}-100 dark:bg-${q.color}-900/30 flex items-center justify-center mb-2 overflow-hidden`}>
-                                            {q.icon_url ? (
-                                                <img src={q.icon_url.startsWith('http') ? q.icon_url : `${API_BASE}/${q.icon_url}`} alt="" className="w-7 h-7 object-contain" />
-                                            ) : (
-                                                <span className={`material-icons-round text-xl text-${q.color}-600 dark:text-${q.color}-400`}>{q.icon}</span>
-                                            )}
-                                        </div>
-                                        <div>
-                                            <p className="text-2xl font-bold text-gray-900 dark:text-white">{q.remaining < 0 ? '∞' : q.remaining}</p>
-                                            <p className="text-[11px] text-gray-500 dark:text-gray-400 font-medium leading-tight">{q.label.split(' (')[0]}</p>
-                                            <p className="text-[10px] text-gray-400 mt-0.5">ใช้ {q.used}/{q.total} {q.unit}</p>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-
-                            {/* Desktop: Compact table for main quotas only */}
-                            <div className="hidden md:block bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
-                                <table className="w-full text-sm">
-                                    <thead>
-                                        <tr className="border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
-                                            <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500">ประเภทลา</th>
-                                            <th className="text-center px-2 py-2.5 text-xs font-semibold text-gray-500">ใช้</th>
-                                            <th className="text-center px-2 py-2.5 text-xs font-semibold text-gray-500">ทั้งหมด</th>
-                                            <th className="text-center px-3 py-2.5 text-xs font-semibold text-gray-500">คงเหลือ</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {mainQuotas.map((q: any, idx: number) => (
-                                            <tr key={idx} className="border-b last:border-0 border-gray-50 dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors">
-                                                <td className="px-3 py-2.5">
-                                                    <div className="flex items-center gap-2">
-                                                        {q.icon_url ? (
-                                                            <img src={q.icon_url.startsWith('http') ? q.icon_url : `${API_BASE}/${q.icon_url}`} alt="" className="w-5 h-5 object-contain" />
-                                                        ) : (
-                                                            <span className={`material-icons-round text-sm text-${q.color}-500`}>{q.icon}</span>
-                                                        )}
-                                                        <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{q.label.split(' (')[0]}</span>
-                                                    </div>
-                                                </td>
-                                                <td className="text-center px-2 py-2.5 text-xs text-gray-600 dark:text-gray-400">{q.used}</td>
-                                                <td className="text-center px-2 py-2.5 text-xs text-gray-600 dark:text-gray-400">{q.total === 0 ? '∞' : q.total}</td>
-                                                <td className="text-center px-3 py-2.5">
-                                                    <span className={`text-xs font-bold ${q.remaining < 0 ? 'text-green-600' : q.remaining === 0 ? 'text-red-500' : 'text-primary'}`}>
-                                                        {q.remaining < 0 ? '∞' : q.remaining} {q.unit}
-                                                    </span>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </section>
-
-                        {/* Quick Menu — Desktop only (beside quotas) */}
-                        <section className="hidden md:block md:col-span-2">
-                            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">เมนูด่วน</h3>
-                            <div className="grid grid-cols-2 gap-3">
-                                {QUICK_MENU_ITEMS.filter(item => !item.adminOnly || isAdmin).map((item, i) => {
-                                    const action = item.path ? () => navigate(item.path!) : undefined;
-                                    return (
-                                        <button key={i} onClick={action} className="flex flex-row items-center px-3 py-2.5 gap-3 group bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-md transition-all text-left">
-                                            <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 relative">
-                                                <span className="material-icons-round text-primary text-lg">{item.icon}</span>
-                                                {item.hasNotif && (
-                                                    <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white dark:border-gray-800"></span>
-                                                )}
-                                            </div>
-                                            <span className="text-xs font-medium text-gray-600 dark:text-gray-300 group-hover:text-primary transition-colors leading-tight">{item.label}</span>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        </section>
                     </div>
+                </section>
 
-                    {/* News Feed — in right column on desktop, bottom on mobile */}
-                    <section>
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold text-gray-900 dark:text-white">ข่าวประชาสัมพันธ์</h3>
-                            <button onClick={() => navigate('/news')} className="text-sm font-medium text-primary hover:text-blue-600">ดูทั้งหมด</button>
-                        </div>
-                        <div className="bg-white dark:bg-gray-800 rounded-2xl overflow-hidden shadow-sm border border-gray-100 dark:border-gray-700 relative group cursor-pointer">
-                            <div className="absolute top-3 right-3 z-10 bg-white/90 dark:bg-black/80 backdrop-blur-sm p-1.5 rounded-full shadow-sm">
-                                <span className="material-icons-round text-primary text-sm block">push_pin</span>
+                {/* ── News Feed ── */}
+                <section className="md:col-span-5">
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl overflow-hidden shadow-sm border border-gray-100 dark:border-gray-700 relative group cursor-pointer h-full" onClick={() => featuredNews && navigate('/news')}>
+                        {/* Image */}
+                        <div className="relative h-40 md:h-44 overflow-hidden">
+                            {featuredNews && <img alt="News" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" src={featuredNews.image} />}
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent"></div>
+                            <div className="absolute top-3 left-3 bg-white/90 dark:bg-black/80 backdrop-blur-sm px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider text-gray-800 dark:text-white flex items-center gap-1">
+                                <span className="material-icons-round text-primary text-xs">push_pin</span>
+                                {featuredNews?.is_pinned ? 'ประกาศสำคัญ' : 'ข่าวสาร'}
                             </div>
-                            <div className="relative h-40 md:h-48 overflow-hidden">
-                                {featuredNews && <img alt="News" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" src={featuredNews.image} />}
-                                <div className="absolute top-3 left-3 bg-white/90 dark:bg-black/80 backdrop-blur-sm px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide text-gray-800 dark:text-white">
-                                    {featuredNews?.is_pinned ? 'ประกาศสำคัญ' : 'ข่าวสาร'}
-                                </div>
-                            </div>
-                            <div className="p-4">
-                                <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
-                                    <span className="font-medium text-primary">{featuredNews?.department || ''}</span>
-                                    <span>•</span>
-                                    <span>{featuredNews?.published_at ? new Date(featuredNews.published_at).toLocaleDateString('th-TH') : ''}</span>
-                                </div>
-                                <h4 className="font-bold text-gray-900 dark:text-white mb-2 text-lg">{featuredNews?.title || ''}</h4>
-                                <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2">{featuredNews?.content || ''}</p>
+                            <div className="absolute top-3 right-3 flex items-center gap-2">
+                                <button onClick={(e) => { e.stopPropagation(); navigate('/news'); }} className="bg-white/90 dark:bg-black/80 backdrop-blur-sm px-2.5 py-1 rounded-lg text-[10px] font-bold text-primary hover:bg-white transition-colors">
+                                    ดูทั้งหมด →
+                                </button>
                             </div>
                         </div>
-                    </section>
-                </div>
+                        {/* Content */}
+                        <div className="p-5">
+                            <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
+                                <span className="font-semibold text-primary">{featuredNews?.department || ''}</span>
+                                <span className="w-1 h-1 rounded-full bg-gray-300"></span>
+                                <span>{featuredNews?.published_at ? new Date(featuredNews.published_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}</span>
+                            </div>
+                            <h4 className="font-bold text-gray-900 dark:text-white mb-2 text-base leading-snug">{featuredNews?.title || ''}</h4>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-2 leading-relaxed">{featuredNews?.content || ''}</p>
+                        </div>
+                    </div>
+                </section>
             </div>
 
             {/* Approval Detail Modal */}
-            {approvalDetail && (
-                <ApprovalDetailModal
-                    req={approvalDetail}
-                    attachments={approvalAttachments}
-                    onClose={() => setApprovalDetail(null)}
-                    onApprove={() => handleApproval(approvalDetail.id, 'approved')}
-                    onReject={() => handleApproval(approvalDetail.id, 'rejected')}
-                    loading={approvalLoading}
-                    isAdmin={isAdmin}
-                    empId={empId}
-                />
-            )}
+            {
+                approvalDetail && (
+                    <ApprovalDetailModal
+                        req={approvalDetail}
+                        attachments={approvalAttachments}
+                        onClose={() => setApprovalDetail(null)}
+                        onApprove={() => handleApproval(approvalDetail.id, 'approved')}
+                        onReject={() => handleApproval(approvalDetail.id, 'rejected')}
+                        loading={approvalLoading}
+                        isAdmin={isAdmin}
+                        empId={empId}
+                    />
+                )
+            }
 
 
+
+            {/* Face Verification Modal */}
+            {
+                showFaceVerify && faceDescriptor && (
+                    <FaceCapture
+                        mode="verify"
+                        referenceDescriptor={faceDescriptor}
+                        onCapture={handleFaceVerified}
+                        onMatch={(distance, matched) => {
+                            if (!matched) {
+                                toast(`ใบหน้าไม่ตรงกัน (ความคล้าย: ${Math.round((1 - distance) * 100)}%)`, 'error');
+                            }
+                        }}
+                        onClose={() => setShowFaceVerify(false)}
+                        employeeName={authUser?.name}
+                    />
+                )
+            }
 
             {/* Location Check Modal */}
-            {showLocationModal && locationResult && (
-                <LocationCheckModal
-                    result={locationResult}
-                    action={pendingAction}
-                    loading={confirmLoading}
-                    onConfirm={handleConfirmClock}
-                    onClose={() => setShowLocationModal(false)}
-                />
-            )}
+            {
+                showLocationModal && locationResult && (
+                    <LocationCheckModal
+                        result={locationResult}
+                        action={pendingAction}
+                        loading={confirmLoading}
+                        onConfirm={handleConfirmClock}
+                        onClose={() => setShowLocationModal(false)}
+                    />
+                )
+            }
 
             {/* Animation Keyframes */}
             <style>{`
@@ -841,59 +963,61 @@ const HomeScreen: React.FC = () => {
       `}</style>
 
             {/* All Quotas Modal */}
-            {showAllQuotas && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowAllQuotas(false)}>
-                    <div className="bg-white dark:bg-gray-900 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-scale-in" onClick={e => e.stopPropagation()}>
-                        <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
-                            <h2 className="text-lg font-bold text-gray-900 dark:text-white">📋 โควต้าวันลาทั้งหมด</h2>
-                            <button onClick={() => setShowAllQuotas(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-500">
-                                <span className="material-icons-round">close</span>
-                            </button>
-                        </div>
-                        <div className="overflow-y-auto max-h-[60vh]">
-                            <table className="w-full text-sm">
-                                <thead className="sticky top-0 bg-gray-50 dark:bg-gray-800">
-                                    <tr className="border-b border-gray-100 dark:border-gray-700">
-                                        <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">ประเภทลา</th>
-                                        <th className="text-center px-2 py-3 text-xs font-semibold text-gray-500">ใช้ไป</th>
-                                        <th className="text-center px-2 py-3 text-xs font-semibold text-gray-500">ทั้งหมด</th>
-                                        <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500">คงเหลือ</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                                    {quotas.map((q: any, idx: number) => (
-                                        <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
-                                            <td className="px-4 py-3">
-                                                <div className="flex items-center gap-2.5">
-                                                    <div className={`w-8 h-8 rounded-lg bg-${q.color}-100 dark:bg-${q.color}-900/30 flex items-center justify-center shrink-0 overflow-hidden`}>
-                                                        {q.icon_url ? (
-                                                            <img src={q.icon_url.startsWith('http') ? q.icon_url : `${API_BASE}/${q.icon_url}`} alt="" className="w-6 h-6 object-contain" />
-                                                        ) : (
-                                                            <span className={`material-icons-round text-base text-${q.color}-500`}>{q.icon}</span>
-                                                        )}
-                                                    </div>
-                                                    <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{q.label.split(' (')[0]}</span>
-                                                </div>
-                                            </td>
-                                            <td className="text-center px-2 py-3 text-sm text-gray-600 dark:text-gray-400">{q.used}</td>
-                                            <td className="text-center px-2 py-3 text-sm text-gray-600 dark:text-gray-400">{q.total === 0 ? '∞' : q.total}</td>
-                                            <td className="text-center px-4 py-3">
-                                                <span className={`text-sm font-bold ${q.remaining < 0 ? 'text-green-600' : q.remaining === 0 ? 'text-red-500' : 'text-primary'}`}>
-                                                    {q.remaining < 0 ? '∞' : q.remaining} {q.unit}
-                                                </span>
-                                            </td>
+            {
+                showAllQuotas && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowAllQuotas(false)}>
+                        <div className="bg-white dark:bg-gray-900 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-scale-in" onClick={e => e.stopPropagation()}>
+                            <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+                                <h2 className="text-lg font-bold text-gray-900 dark:text-white">📋 โควต้าวันลาทั้งหมด</h2>
+                                <button onClick={() => setShowAllQuotas(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-500">
+                                    <span className="material-icons-round">close</span>
+                                </button>
+                            </div>
+                            <div className="overflow-y-auto max-h-[60vh]">
+                                <table className="w-full text-sm">
+                                    <thead className="sticky top-0 bg-gray-50 dark:bg-gray-800">
+                                        <tr className="border-b border-gray-100 dark:border-gray-700">
+                                            <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500">ประเภทลา</th>
+                                            <th className="text-center px-2 py-3 text-xs font-semibold text-gray-500">ใช้ไป</th>
+                                            <th className="text-center px-2 py-3 text-xs font-semibold text-gray-500">ทั้งหมด</th>
+                                            <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500">คงเหลือ</th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                                        {quotas.map((q: any, idx: number) => (
+                                            <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
+                                                <td className="px-4 py-3">
+                                                    <div className="flex items-center gap-2.5">
+                                                        <div className={`w-8 h-8 rounded-lg bg-${q.color}-100 dark:bg-${q.color}-900/30 flex items-center justify-center shrink-0 overflow-hidden`}>
+                                                            {q.icon_url ? (
+                                                                <img src={q.icon_url.startsWith('http') ? q.icon_url : `${API_BASE}/${q.icon_url}`} alt="" className="w-6 h-6 object-contain" />
+                                                            ) : (
+                                                                <span className={`material-icons-round text-base text-${q.color}-500`}>{q.icon}</span>
+                                                            )}
+                                                        </div>
+                                                        <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{q.label.split(' (')[0]}</span>
+                                                    </div>
+                                                </td>
+                                                <td className="text-center px-2 py-3 text-sm text-gray-600 dark:text-gray-400">{q.used}</td>
+                                                <td className="text-center px-2 py-3 text-sm text-gray-600 dark:text-gray-400">{q.total === 0 ? '∞' : q.total}</td>
+                                                <td className="text-center px-4 py-3">
+                                                    <span className={`text-sm font-bold ${q.remaining < 0 ? 'text-green-600' : q.remaining === 0 ? 'text-red-500' : 'text-primary'}`}>
+                                                        {q.remaining < 0 ? '∞' : q.remaining} {q.unit}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
             {/* Version badge for deployment verification */}
             <div className="fixed bottom-20 left-4 z-10 opacity-30 text-[10px] text-gray-400 font-mono">v2.1</div>
-        </div>
+        </div >
     );
 };
 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { API_BASE } from '../../services/api';
+import { API_BASE, getAuthHeaders } from '../../services/api';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../../components/Toast';
 import { useAuth } from '../../contexts/AuthContext';
@@ -62,7 +62,7 @@ const SecurityScreen: React.FC = () => {
     try {
       const res = await fetch(`${API_BASE}/auth.php`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           employee_id: authUser?.id,
           current_password: currentPw,

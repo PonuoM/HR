@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { API_BASE } from '../services/api';
+import { API_BASE, getAuthHeaders } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
 interface LeaveRequest {
@@ -78,7 +78,7 @@ const StatusScreen: React.FC = () => {
     setLoading(true);
 
     // Try fetching by specific ID first
-    fetch(`${API_BASE}/leave_requests.php?id=${id}`)
+    fetch(`${API_BASE}/leave_requests.php?id=${id}`, { headers: getAuthHeaders() })
       .then(res => res.json())
       .then((data: LeaveRequest[]) => {
         if (data.length > 0) {
@@ -86,7 +86,7 @@ const StatusScreen: React.FC = () => {
           setLoading(false);
         } else if (empId) {
           // Fallback: fetch the user's most recent leave request
-          return fetch(`${API_BASE}/leave_requests.php?employee_id=${empId}`)
+          return fetch(`${API_BASE}/leave_requests.php?employee_id=${empId}`, { headers: getAuthHeaders() })
             .then(res => res.json())
             .then((empData: LeaveRequest[]) => {
               if (empData.length > 0) {

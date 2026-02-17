@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 
 export interface SelectOption {
     value: string;
@@ -18,37 +19,100 @@ interface CustomSelectProps {
 
 export default function CustomSelect({ options, value, onChange, placeholder = '-- เลือก --', name, className = '', disabled = false }: CustomSelectProps) {
     const [open, setOpen] = useState(false);
-    const [flipUp, setFlipUp] = useState(false);
+    const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
     const ref = useRef<HTMLDivElement>(null);
+    const dropdownRef = useRef<HTMLDivElement>(null);
+
+    // Compute dropdown position based on trigger button's bounding rect
+    const computePosition = useCallback(() => {
+        if (!ref.current) return;
+        const rect = ref.current.getBoundingClientRect();
+        const dropdownHeight = Math.min(options.length * 40 + 8, 240);
+        const spaceBelow = window.innerHeight - rect.bottom;
+        const flipUp = spaceBelow < dropdownHeight && rect.top > spaceBelow;
+
+        setDropdownStyle({
+            position: 'fixed',
+            left: rect.left,
+            width: rect.width,
+            zIndex: 9999,
+            ...(flipUp
+                ? { bottom: window.innerHeight - rect.top + 4 }
+                : { top: rect.bottom + 4 }
+            ),
+        });
+    }, [options.length]);
 
     // Close on outside click
     useEffect(() => {
         if (!open) return;
         const handler = (e: MouseEvent) => {
-            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+            if (
+                ref.current && !ref.current.contains(e.target as Node) &&
+                dropdownRef.current && !dropdownRef.current.contains(e.target as Node)
+            ) {
+                setOpen(false);
+            }
         };
         document.addEventListener('mousedown', handler);
         return () => document.removeEventListener('mousedown', handler);
     }, [open]);
 
-    // Auto-flip: open upward when near bottom of viewport
+    // Reposition on scroll/resize while open
+    useEffect(() => {
+        if (!open) return;
+        const reposition = () => computePosition();
+        window.addEventListener('scroll', reposition, true);
+        window.addEventListener('resize', reposition);
+        return () => {
+            window.removeEventListener('scroll', reposition, true);
+            window.removeEventListener('resize', reposition);
+        };
+    }, [open, computePosition]);
+
     const handleToggle = () => {
         if (disabled) return;
-        if (!open && ref.current) {
-            const rect = ref.current.getBoundingClientRect();
-            const spaceBelow = window.innerHeight - rect.bottom;
-            const spaceAbove = rect.top;
-            const dropdownHeight = Math.min(options.length * 40 + 8, 240); // estimate max-h-60 = 240px
-            setFlipUp(spaceBelow < dropdownHeight && spaceAbove > spaceBelow);
+        if (!open) {
+            computePosition();
         }
         setOpen(!open);
     };
 
     const selected = options.find(o => o.value === value);
 
+    const dropdownContent = open ? createPortal(
+        <>
+            <div className="fixed inset-0" style={{ zIndex: 9998 }} onClick={() => setOpen(false)} />
+            <div
+                ref={dropdownRef}
+                style={dropdownStyle}
+                className="bg-white dark:bg-gray-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden max-h-60 overflow-y-auto"
+            >
+                {options.map(opt => (
+                    <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => { onChange(opt.value); setOpen(false); }}
+                        className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center justify-between
+                            ${opt.value === value
+                                ? 'bg-primary/10 text-primary font-semibold'
+                                : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                            }`}
+                    >
+                        <span>{opt.label}{opt.badge ? ` ${opt.badge}` : ''}</span>
+                        {opt.value === value && <span className="material-icons-round text-primary text-base">check</span>}
+                    </button>
+                ))}
+                {options.length === 0 && (
+                    <div className="px-4 py-3 text-sm text-slate-400 text-center">ไม่มีตัวเลือก</div>
+                )}
+            </div>
+        </>,
+        document.body
+    ) : null;
+
     return (
         <div className={`relative ${className}`} ref={ref}>
-            {/* Hidden input for form submission */}
             {name && <input type="hidden" name={name} value={value} />}
 
             <button
@@ -64,33 +128,7 @@ export default function CustomSelect({ options, value, onChange, placeholder = '
                 <span className={`material-icons-round text-lg text-slate-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>keyboard_arrow_down</span>
             </button>
 
-            {open && (
-                <>
-                    <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-                    <div className={`absolute left-0 right-0 z-50 bg-white dark:bg-gray-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden max-h-60 overflow-y-auto
-                        ${flipUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}
-                    >
-                        {options.map(opt => (
-                            <button
-                                key={opt.value}
-                                type="button"
-                                onClick={() => { onChange(opt.value); setOpen(false); }}
-                                className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center justify-between
-                                    ${opt.value === value
-                                        ? 'bg-primary/10 text-primary font-semibold'
-                                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50'
-                                    }`}
-                            >
-                                <span>{opt.label}{opt.badge ? ` ${opt.badge}` : ''}</span>
-                                {opt.value === value && <span className="material-icons-round text-primary text-base">check</span>}
-                            </button>
-                        ))}
-                        {options.length === 0 && (
-                            <div className="px-4 py-3 text-sm text-slate-400 text-center">ไม่มีตัวเลือก</div>
-                        )}
-                    </div>
-                </>
-            )}
+            {dropdownContent}
         </div>
     );
 }
