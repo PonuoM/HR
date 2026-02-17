@@ -272,12 +272,26 @@ const HomeScreen: React.FC = () => {
         await proceedToLocationCheck(action);
     };
 
-    // Face verification success → proceed directly to GPS (no re-triggering handleClockAction)
+    // Face verification success with inline clock-in
     const handleFaceVerified = (_descriptor: number[]) => {
         setShowFaceVerify(false);
-        toast('✅ ยืนยันตัวตนสำเร็จ', 'success');
-        // Go directly to GPS + location check — avoids stale closure bug
-        setTimeout(() => proceedToLocationCheck('clock_in'), 300);
+        refetchAttendance();
+    };
+
+    // Face-inline clock-in: called from within FaceCapture when user presses the clock-in button
+    const handleFaceClockIn = async (coords: { latitude: number; longitude: number }, _locationName: string) => {
+        await clockIn({ employee_id: empId, latitude: coords.latitude, longitude: coords.longitude });
+        toast('✅ ลงเวลาเข้าเรียบร้อย!', 'success');
+        // Delay close + refresh to let the success animation show
+        setTimeout(() => {
+            setShowFaceVerify(false);
+            refetchAttendance();
+        }, 1500);
+    };
+
+    // Wrapper for checkLocation to match FaceCapture's expected signature
+    const checkLocationForFace = async (lat: number, lng: number) => {
+        return await checkLocation(lat, lng);
     };
 
     // Step 2: User confirms in modal → actually record
@@ -937,6 +951,8 @@ const HomeScreen: React.FC = () => {
                         }}
                         onClose={() => setShowFaceVerify(false)}
                         employeeName={authUser?.name}
+                        onClockIn={handleFaceClockIn}
+                        checkLocationFn={checkLocationForFace}
                     />
                 )
             }

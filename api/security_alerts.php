@@ -34,30 +34,35 @@ if ($method === 'GET') {
     $status = $_GET['status'] ?? 'unresolved'; // 'unresolved', 'resolved', 'all'
     $limit = min((int)($_GET['limit'] ?? 50), 100);
 
-    $sql = "SELECT sa.*, 
-            e1.name AS employee_name, 
-            e2.name AS original_employee_name,
-            e3.name AS resolved_by_name
-            FROM security_alerts sa
-            LEFT JOIN employees e1 ON sa.employee_id = e1.id
-            LEFT JOIN employees e2 ON sa.original_employee_id = e2.id
-            LEFT JOIN employees e3 ON sa.resolved_by = e3.id";
-    
-    if ($status === 'unresolved') {
-        $sql .= " WHERE sa.is_resolved = 0";
-    } elseif ($status === 'resolved') {
-        $sql .= " WHERE sa.is_resolved = 1";
-    }
-    
-    $sql .= " ORDER BY sa.created_at DESC LIMIT $limit";
-    
-    $result = $conn->query($sql);
-    $alerts = [];
-    while ($row = $result->fetch_assoc()) {
-        $alerts[] = $row;
-    }
+    try {
+        $sql = "SELECT sa.*, 
+                e1.name AS employee_name, 
+                e2.name AS original_employee_name,
+                e3.name AS resolved_by_name
+                FROM security_alerts sa
+                LEFT JOIN employees e1 ON sa.employee_id = e1.id
+                LEFT JOIN employees e2 ON sa.original_employee_id = e2.id
+                LEFT JOIN employees e3 ON sa.resolved_by = e3.id";
+        
+        if ($status === 'unresolved') {
+            $sql .= " WHERE sa.is_resolved = 0";
+        } elseif ($status === 'resolved') {
+            $sql .= " WHERE sa.is_resolved = 1";
+        }
+        
+        $sql .= " ORDER BY sa.created_at DESC LIMIT $limit";
+        
+        $result = $conn->query($sql);
+        $alerts = [];
+        while ($row = $result->fetch_assoc()) {
+            $alerts[] = $row;
+        }
 
-    json_response($alerts);
+        json_response($alerts);
+    } catch (Exception $e) {
+        // Table might not exist yet — return empty array
+        json_response([]);
+    }
 }
 
 // ─── PUT: Resolve an alert ───
