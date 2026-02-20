@@ -125,7 +125,7 @@ if ($method === 'POST') {
     $is_admin = (!empty($body['is_admin']) && $is_caller_superadmin) ? 1 : 0;
 
     $stmt = $conn->prepare("INSERT INTO employees (id, company_id, name, email, password, department_id, position_id, base_salary, hire_date, approver_id, approver2_id, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param('sisssiidssis',
+    $stmt->bind_param('sisssiidsssi',
         $id, $target_company_id, $name, $email, $hashedPassword,
         $department_id, $position_id, $base_salary, $hire_date, $approver_id, $approver2_id, $is_admin
     );
