@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ADMIN_QUICK_ACTIONS } from '../../data';
 import { useApi } from '../../hooks/useApi';
-import { getDashboardStats, getLeaveRequests, updateLeaveRequest } from '../../services/api';
+import { getDashboardStats, getLeaveRequests, updateLeaveRequest, getClockInStatus } from '../../services/api';
 import { useToast } from '../../components/Toast';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -16,6 +16,29 @@ const AdminDashboardScreen: React.FC = () => {
   const { data: rawPendingRequests } = useApi(() => getLeaveRequests({ status: 'pending' }), []);
 
   const stats = dashboardData?.stats || [];
+
+  // ─── Live Clock-in Status ───
+  const [clockData, setClockData] = useState<any>(null);
+  const [clockDeptFilter, setClockDeptFilter] = useState<number | undefined>(undefined);
+  const [clockTab, setClockTab] = useState<'not_clocked_in' | 'all'>('not_clocked_in');
+  const [clockLoading, setClockLoading] = useState(false);
+  const [lastRefresh, setLastRefresh] = useState<string>('');
+
+  const fetchClockStatus = useCallback(async () => {
+    setClockLoading(true);
+    try {
+      const data = await getClockInStatus(clockDeptFilter);
+      setClockData(data);
+      setLastRefresh(new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }));
+    } catch { }
+    setClockLoading(false);
+  }, [clockDeptFilter]);
+
+  useEffect(() => {
+    fetchClockStatus();
+    const interval = setInterval(fetchClockStatus, 60000);
+    return () => clearInterval(interval);
+  }, [fetchClockStatus]);
 
   // Map pending requests from DB
   const pendingRequests = (rawPendingRequests || []).map((req: any) => ({
@@ -98,6 +121,130 @@ const AdminDashboardScreen: React.FC = () => {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* ═══════════════════ LIVE CLOCK-IN STATUS ═══════════════════ */}
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden mb-6 md:mb-8">
+        {/* Header */}
+        <div className="p-4 md:p-6 border-b border-gray-100 dark:border-gray-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="material-icons-round text-green-500">schedule</span>
+            <h3 className="font-bold text-gray-900 dark:text-white text-base md:text-lg">สถานะลงเวลาวันนี้</h3>
+            {lastRefresh && <span className="text-[10px] text-gray-400 dark:text-gray-500 ml-2">อัปเดต {lastRefresh}</span>}
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={clockDeptFilter ?? ''}
+              onChange={e => setClockDeptFilter(e.target.value ? Number(e.target.value) : undefined)}
+              className="text-sm border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-1.5 bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-primary/30 focus:outline-none"
+            >
+              <option value="">ทุกแผนก</option>
+              {(clockData?.departments || []).map((d: any) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+            <button
+              onClick={fetchClockStatus}
+              disabled={clockLoading}
+              className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors disabled:opacity-50"
+              title="รีเฟรช"
+            >
+              <span className={`material-icons-round text-lg ${clockLoading ? 'animate-spin' : ''}`}>refresh</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Summary Bar */}
+        {clockData?.summary && (
+          <div className="p-3 md:px-6 md:py-4 grid grid-cols-3 md:grid-cols-6 gap-2 md:gap-3 border-b border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30">
+            {[
+              { label: 'ทั้งหมด', value: clockData.summary.total, color: 'blue', icon: 'groups' },
+              { label: 'ลงแล้ว', value: clockData.summary.clocked_in, color: 'green', icon: 'check_circle' },
+              { label: 'ยังไม่ลง', value: clockData.summary.not_clocked_in, color: 'red', icon: 'cancel' },
+              { label: 'เสร็จสิ้น', value: clockData.summary.completed, color: 'teal', icon: 'task_alt' },
+              { label: 'ลางาน', value: clockData.summary.on_leave, color: 'orange', icon: 'beach_access' },
+              { label: 'สาย', value: clockData.summary.late, color: 'purple', icon: 'timer_off' },
+            ].map((item, i) => (
+              <div key={i} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700">
+                <span className={`material-icons-round text-sm text-${item.color}-500`}>{item.icon}</span>
+                <div className="min-w-0">
+                  <p className="text-[10px] text-gray-400 dark:text-gray-500 truncate">{item.label}</p>
+                  <p className={`text-sm font-bold text-${item.color}-600 dark:text-${item.color}-400`}>{item.value}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Tab Bar */}
+        <div className="flex border-b border-gray-100 dark:border-gray-700">
+          <button
+            onClick={() => setClockTab('not_clocked_in')}
+            className={`flex-1 py-2.5 text-sm font-medium text-center transition-colors border-b-2 ${clockTab === 'not_clocked_in' ? 'border-red-500 text-red-600 dark:text-red-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
+          >
+            ยังไม่ลงเวลา {clockData?.summary?.not_clocked_in ? `(${clockData.summary.not_clocked_in})` : ''}
+          </button>
+          <button
+            onClick={() => setClockTab('all')}
+            className={`flex-1 py-2.5 text-sm font-medium text-center transition-colors border-b-2 ${clockTab === 'all' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
+          >
+            ทั้งหมด {clockData?.summary?.total ? `(${clockData.summary.total})` : ''}
+          </button>
+        </div>
+
+        {/* Employee List */}
+        <div className="max-h-[360px] overflow-y-auto">
+          {(() => {
+            const employees = clockData?.employees || [];
+            const filtered = clockTab === 'not_clocked_in'
+              ? employees.filter((e: any) => e.status === 'not_clocked_in')
+              : employees;
+
+            if (filtered.length === 0) {
+              return (
+                <div className="p-8 text-center text-gray-400 dark:text-gray-500">
+                  <span className="material-icons-round text-4xl mb-2 block opacity-50">
+                    {clockTab === 'not_clocked_in' ? 'celebration' : 'groups'}
+                  </span>
+                  <p className="text-sm">
+                    {clockTab === 'not_clocked_in' ? 'ทุกคนลงเวลาแล้ว! 🎉' : 'ไม่มีข้อมูล'}
+                  </p>
+                </div>
+              );
+            }
+
+            return filtered.map((emp: any) => {
+              const statusConfig: Record<string, { label: string; bg: string; text: string; icon: string }> = {
+                not_clocked_in: { label: 'ยังไม่ลง', bg: 'bg-red-50 dark:bg-red-900/20', text: 'text-red-600 dark:text-red-400', icon: 'cancel' },
+                clocked_in: { label: emp.clock_in?.substring(0, 5) || 'ลงแล้ว', bg: 'bg-green-50 dark:bg-green-900/20', text: 'text-green-600 dark:text-green-400', icon: 'check_circle' },
+                completed: { label: `${emp.clock_in?.substring(0, 5) || ''} - ${emp.clock_out?.substring(0, 5) || ''}`, bg: 'bg-teal-50 dark:bg-teal-900/20', text: 'text-teal-600 dark:text-teal-400', icon: 'task_alt' },
+                on_leave: { label: 'ลางาน', bg: 'bg-orange-50 dark:bg-orange-900/20', text: 'text-orange-600 dark:text-orange-400', icon: 'beach_access' },
+              };
+              const st = statusConfig[emp.status] || statusConfig.not_clocked_in;
+
+              return (
+                <div key={emp.employee_id} className="flex items-center gap-3 px-4 md:px-6 py-3 border-b border-gray-50 dark:border-gray-800 last:border-0 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors">
+                  <img
+                    src={emp.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(emp.name)}&background=random&size=40`}
+                    alt={emp.name}
+                    className="w-9 h-9 rounded-full object-cover border border-gray-200 dark:border-gray-700 shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                      {emp.name}{emp.nickname ? ` (${emp.nickname})` : ''}
+                      {emp.is_late && <span className="ml-1.5 text-[10px] text-purple-500 font-bold">สาย</span>}
+                    </p>
+                    <p className="text-[11px] text-gray-400 dark:text-gray-500 truncate">{emp.department}</p>
+                  </div>
+                  <div className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold ${st.bg} ${st.text} shrink-0`}>
+                    <span className="material-icons-round text-sm">{st.icon}</span>
+                    <span className="hidden sm:inline">{st.label}</span>
+                  </div>
+                </div>
+              );
+            });
+          })()}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">

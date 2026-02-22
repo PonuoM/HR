@@ -292,6 +292,17 @@ export async function getDashboardStats() {
     return fetchApi<{ stats: any[]; pendingRequests: any[] }>('dashboard.php');
 }
 
+export async function getClockInStatus(departmentId?: number) {
+    const params = new URLSearchParams({ action: 'clock_status' });
+    if (departmentId) params.set('department_id', String(departmentId));
+    return fetchApi<{
+        employees: any[];
+        summary: { total: number; clocked_in: number; not_clocked_in: number; completed: number; on_leave: number; late: number };
+        departments: { id: number; name: string }[];
+        date: string;
+    }>(`dashboard.php?${params}`);
+}
+
 // --- Departments & Positions ---
 export async function getDepartments() {
     return fetchApi<any[]>('departments.php');
