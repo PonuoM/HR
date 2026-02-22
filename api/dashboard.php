@@ -15,7 +15,7 @@ if ($method === 'GET' && isset($_GET['action']) && $_GET['action'] === 'clock_st
 
     // Build employee query with optional department filter
     $empSql = "SELECT e.id, e.name, e.nickname, e.avatar, d.name AS department, d.id AS department_id,
-                      e.work_start_time
+                      d.work_start_time
                FROM employees e
                LEFT JOIN departments d ON e.department_id = d.id
                WHERE e.is_active = 1 AND e.company_id = ?";
