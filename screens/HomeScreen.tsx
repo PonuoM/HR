@@ -677,7 +677,7 @@ const HomeScreen: React.FC = () => {
                     className="mb-6 w-full flex items-center gap-3 bg-red-50 dark:bg-red-900/15 border border-red-200 dark:border-red-800/40 rounded-xl px-4 py-3 hover:bg-red-100 dark:hover:bg-red-900/25 transition-colors group text-left"
                 >
                     <span className="material-icons-round text-red-500 text-lg">warning</span>
-                    <p className="flex-1 text-sm font-semibold text-red-700 dark:text-red-400">คุณมีปัญหาการลงเวลา {attendanceAlerts.length} รายการ</p>
+                    <p className="flex-1 text-sm font-semibold text-red-700 dark:text-red-400">คุณมีแจ้งเตือน {attendanceAlerts.length} รายการ</p>
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-200 dark:bg-red-800/50 text-red-600 dark:text-red-300 font-bold">{attendanceAlerts.length}</span>
                     <span className="material-icons-round text-red-400 text-lg group-hover:translate-x-0.5 transition-transform">chevron_right</span>
                 </button>
@@ -705,15 +705,27 @@ const HomeScreen: React.FC = () => {
                         {/* Body */}
                         <div className="px-5 py-4 space-y-2.5 overflow-y-auto max-h-[60vh]">
                             {attendanceAlerts.map((alert: any, i: number) => (
-                                <div key={i} className={`flex items-start gap-3 p-3 rounded-xl ${alert.type === 'missing' ? 'bg-red-50 dark:bg-red-900/15' : 'bg-orange-50 dark:bg-orange-900/15'}`}>
-                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${alert.type === 'missing' ? 'bg-red-100 dark:bg-red-900/30' : 'bg-orange-100 dark:bg-orange-900/30'}`}>
-                                        <span className={`material-icons-round text-sm ${alert.type === 'missing' ? 'text-red-500' : 'text-orange-500'}`}>
-                                            {alert.type === 'missing' ? 'cancel' : 'error_outline'}
+                                <div key={i} className={`flex items-start gap-3 p-3 rounded-xl ${alert.type === 'missing' ? 'bg-red-50 dark:bg-red-900/15' :
+                                    alert.type === 'vote_reminder' ? 'bg-amber-50 dark:bg-amber-900/15' :
+                                        'bg-orange-50 dark:bg-orange-900/15'
+                                    }`}>
+                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${alert.type === 'missing' ? 'bg-red-100 dark:bg-red-900/30' :
+                                        alert.type === 'vote_reminder' ? 'bg-amber-100 dark:bg-amber-900/30' :
+                                            'bg-orange-100 dark:bg-orange-900/30'
+                                        }`}>
+                                        <span className={`material-icons-round text-sm ${alert.type === 'missing' ? 'text-red-500' :
+                                            alert.type === 'vote_reminder' ? 'text-amber-500' :
+                                                'text-orange-500'
+                                            }`}>
+                                            {alert.type === 'missing' ? 'cancel' : alert.type === 'vote_reminder' ? 'how_to_vote' : 'error_outline'}
                                         </span>
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                        <p className={`text-xs font-semibold ${alert.type === 'missing' ? 'text-red-700 dark:text-red-400' : 'text-orange-700 dark:text-orange-400'}`}>
-                                            {alert.type === 'missing' ? 'ขาดลงเวลา' : 'ลงเวลาไม่ครบ'}
+                                        <p className={`text-xs font-semibold ${alert.type === 'missing' ? 'text-red-700 dark:text-red-400' :
+                                            alert.type === 'vote_reminder' ? 'text-amber-700 dark:text-amber-400' :
+                                                'text-orange-700 dark:text-orange-400'
+                                            }`}>
+                                            {alert.type === 'missing' ? 'ขาดลงเวลา' : alert.type === 'vote_reminder' ? '🏆 โหวตพนักงานดีเด่น' : 'ลงเวลาไม่ครบ'}
                                         </p>
                                         <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">{alert.message}</p>
                                     </div>

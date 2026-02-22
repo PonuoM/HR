@@ -171,6 +171,64 @@ while ($workDaysChecked < 7 && $current >= $startDt) {
     $current->modify('-1 day');
 }
 
+// ══════════════════════════════════════════════════════════
+// VOTE REMINDER: remind if <= 5 days left and haven't voted
+// ══════════════════════════════════════════════════════════
+$voteActStmt = $conn->prepare("SELECT enabled FROM activity_settings WHERE company_id = ? AND activity_key = 'employee_vote'");
+$voteActStmt->bind_param('i', $company_id);
+$voteActStmt->execute();
+$voteActRow = $voteActStmt->get_result()->fetch_assoc();
+
+if ($voteActRow && $voteActRow['enabled']) {
+    $curMonth = (int)date('n');
+    $curYear = (int)date('Y');
+    $lastDay = (int)date('t'); // last day of current month
+    $todayDay = (int)date('j');
+    $daysLeft = $lastDay - $todayDay;
+
+    if ($daysLeft <= 5) {
+        // Check how many votes this employee has cast
+        $voteStmt = $conn->prepare("SELECT COUNT(*) as cnt FROM employee_votes WHERE voter_id = ? AND month = ? AND year = ? AND company_id = ?");
+        $voteStmt->bind_param('siii', $employee_id, $curMonth, $curYear, $company_id);
+        $voteStmt->execute();
+        $votesUsed = (int)$voteStmt->get_result()->fetch_assoc()['cnt'];
+        $maxVotes = 3;
+
+        if ($votesUsed < $maxVotes) {
+            $remaining = $maxVotes - $votesUsed;
+            $deadlineDate = date('Y-m-t'); // last day of month
+            $thaiDeadline = thaiShortDate($deadlineDate);
+
+            if ($votesUsed === 0) {
+                $voteMsg = "คุณยังไม่ได้โหวตพนักงานดีเด่นเดือนนี้ เหลืออีก $daysLeft วัน (หมดเขต $thaiDeadline)";
+            } else {
+                $voteMsg = "คุณยังเหลือสิทธิ์โหวต $remaining คะแนน เหลืออีก $daysLeft วัน (หมดเขต $thaiDeadline)";
+            }
+
+            $alerts[] = [
+                'date' => $today,
+                'type' => 'vote_reminder',
+                'message' => $voteMsg,
+            ];
+
+            // Create notification if not already created today
+            $voteExistStmt = $conn->prepare(
+                "SELECT id FROM notifications WHERE employee_id = ? AND type = 'vote_reminder' AND DATE(created_at) = CURDATE()"
+            );
+            $voteExistStmt->bind_param('s', $employee_id);
+            $voteExistStmt->execute();
+            if ($voteExistStmt->get_result()->num_rows === 0) {
+                $nStmt = $conn->prepare(
+                    "INSERT INTO notifications (employee_id, title, message, icon, icon_bg, type, icon_color) 
+                     VALUES (?, 'โหวตพนักงานดีเด่น', ?, 'how_to_vote', 'bg-amber-100 dark:bg-amber-900/30', 'vote_reminder', 'text-amber-600')"
+                );
+                $nStmt->bind_param('ss', $employee_id, $voteMsg);
+                $nStmt->execute();
+            }
+        }
+    }
+}
+
 json_response([
     'alerts' => $alerts,
     'total' => count($alerts),
