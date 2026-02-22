@@ -68,13 +68,6 @@ try {
     error_log('Allowance auto-migrate failed: ' . $e->getMessage());
 }
 
-// ─── GET: Debug schema ───
-if ($method === 'GET' && isset($_GET['action']) && $_GET['action'] === 'debug_schema') {
-    $result = $conn->query("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'allowance_requests' ORDER BY ORDINAL_POSITION");
-    $cols = [];
-    while ($row = $result->fetch_assoc()) $cols[] = $row['COLUMN_NAME'];
-    json_response(['columns' => $cols, 'count' => count($cols), 'db' => $conn->query("SELECT DATABASE() as db")->fetch_assoc()['db']]);
-}
 
 if ($method === 'GET' && isset($_GET['action']) && $_GET['action'] === 'types') {
     $result = $conn->query("SELECT id, name FROM allowance_types WHERE company_id = $company_id AND is_active = 1 ORDER BY name");
@@ -136,7 +129,7 @@ if ($method === 'GET') {
         while ($row = $result->fetch_assoc()) $rows[] = $row;
         json_response($rows);
     } catch (Throwable $e) {
-        json_response(['error' => $e->getMessage(), 'sql_debug' => $sql], 500);
+        json_response(['error' => 'Internal server error'], 500);
     }
 }
 

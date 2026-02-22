@@ -46,6 +46,7 @@ if ($method === 'GET') {
 
 // ======================== POST (Create) ========================
 if ($method === 'POST') {
+    require_admin($conn);
     $body = get_json_body();
 
     if ($type === 'positions') {
@@ -82,6 +83,7 @@ if ($method === 'POST') {
 
 // ======================== PUT (Update) ========================
 if ($method === 'PUT' && isset($_GET['id'])) {
+    require_admin($conn);
     $id = intval($_GET['id']);
     $body = json_decode(file_get_contents('php://input'), true);
 
@@ -114,6 +116,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
 
 // ======================== DELETE ========================
 if ($method === 'DELETE' && isset($_GET['id'])) {
+    require_admin($conn);
     $id = intval($_GET['id']);
 
     if ($type === 'positions') {

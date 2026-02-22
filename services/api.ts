@@ -516,7 +516,7 @@ export async function checkActivity(key: string) {
 }
 
 export async function checkAttendanceAlerts(employeeId: string) {
-    return fetchApi<{ alerts: any[]; total: number }>(`attendance_alerts.php?action=check&employee_id=${employeeId}`);
+    return fetchApi<{ alerts: any[]; total: number }>(`attendance_alerts.php?action=check`);
 }
 
 export async function setSystemStartDate(startDate: string) {

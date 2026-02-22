@@ -21,8 +21,8 @@ if ($action !== 'check' || $method !== 'GET') {
     json_response(['error' => 'Invalid request'], 400);
 }
 
-$employee_id = $_GET['employee_id'] ?? null;
-if (!$employee_id) json_response(['error' => 'Missing employee_id'], 400);
+$employee_id = get_employee_id();
+if (!$employee_id) json_response(['error' => 'Missing employee ID header'], 400);
 
 // ── Check if attendance_check activity is enabled ──
 $actStmt = $conn->prepare("SELECT enabled, start_date FROM activity_settings WHERE company_id = ? AND activity_key = 'attendance_check'");

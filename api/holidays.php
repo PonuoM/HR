@@ -54,6 +54,7 @@ if ($method === 'GET') {
 
 // ======================== POST (Create / Copy) ========================
 if ($method === 'POST') {
+    require_admin($conn);
     $action = $_GET['action'] ?? '';
     $body = get_json_body();
     
@@ -122,6 +123,7 @@ if ($method === 'POST') {
 
 // ======================== PUT (Update) ========================
 if ($method === 'PUT' && isset($_GET['id'])) {
+    require_admin($conn);
     $id = intval($_GET['id']);
     $body = json_decode(file_get_contents('php://input'), true);
     
@@ -143,6 +145,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
 
 // ======================== DELETE ========================
 if ($method === 'DELETE' && isset($_GET['id'])) {
+    require_admin($conn);
     $id = intval($_GET['id']);
     $stmt = $conn->prepare("DELETE FROM holidays WHERE id = ? AND company_id = ?");
     $stmt->bind_param('ii', $id, $company_id);

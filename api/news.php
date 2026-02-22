@@ -164,6 +164,7 @@ if ($method === 'GET' && !$action) {
 
 // ---- CREATE ----
 if ($method === 'POST' && !$action) {
+    require_admin($conn);
     $body = get_json_body();
     $stmt = $conn->prepare("INSERT INTO news_articles (company_id, title, content, image, department, department_code, is_pinned, is_urgent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
     $stmt->bind_param('isssssis',
@@ -178,6 +179,7 @@ if ($method === 'POST' && !$action) {
 
 // ---- UPDATE ----
 if ($method === 'PUT' && isset($_GET['id']) && !$action) {
+    require_admin($conn);
     $id = (int)$_GET['id'];
     $body = get_json_body();
     $stmt = $conn->prepare("UPDATE news_articles SET title=?, content=?, image=?, department=?, department_code=?, is_pinned=?, is_urgent=? WHERE id=? AND company_id=?");
@@ -192,6 +194,7 @@ if ($method === 'PUT' && isset($_GET['id']) && !$action) {
 
 // ---- DELETE ----
 if ($method === 'DELETE' && isset($_GET['id']) && !$action) {
+    require_admin($conn);
     $id = (int)$_GET['id'];
     $stmt = $conn->prepare("DELETE FROM news_articles WHERE id = ? AND company_id = ?");
     $stmt->bind_param('ii', $id, $company_id);

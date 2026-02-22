@@ -50,6 +50,7 @@ if ($method === 'GET') {
 }
 
 if ($method === 'POST') {
+    require_admin($conn);
     $body = get_json_body();
     $reset_cycle = $body['reset_cycle'] ?? 'year';
     $probation_months = (int)($body['probation_months'] ?? 0);
@@ -82,6 +83,7 @@ if ($method === 'POST') {
 }
 
 if ($method === 'PUT' && isset($_GET['id'])) {
+    require_admin($conn);
     $id = (int)$_GET['id'];
     $body = get_json_body();
     $reset_cycle = $body['reset_cycle'] ?? 'year';
@@ -115,6 +117,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
 }
 
 if ($method === 'DELETE' && isset($_GET['id'])) {
+    require_admin($conn);
     $id = (int)$_GET['id'];
     $stmt = $conn->prepare("DELETE FROM leave_types WHERE id = ? AND company_id = ?");
     $stmt->bind_param('ii', $id, $company_id);

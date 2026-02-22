@@ -66,6 +66,7 @@ if ($action === 'list' && $method === 'GET') {
 
 // ═══ TOGGLE ═══
 if ($action === 'toggle' && $method === 'POST') {
+    require_admin($conn);
     $data = get_json_body();
     $key = $data['key'] ?? null;
     $enabled = isset($data['enabled']) ? (int)$data['enabled'] : null;
@@ -122,6 +123,7 @@ if ($action === 'check' && $method === 'GET') {
 
 // ═══ SET START DATE ═══
 if ($action === 'set_start_date' && $method === 'POST') {
+    require_admin($conn);
     $data = get_json_body();
     $start_date = $data['start_date'] ?? null;
 
