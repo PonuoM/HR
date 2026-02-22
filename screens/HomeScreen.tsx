@@ -49,7 +49,7 @@ const HomeScreen: React.FC = () => {
     useEffect(() => {
         if (!empId) return;
         const cacheKey = `att_alerts_${empId}_${new Date().toISOString().slice(0, 10)}`;
-        const cached = sessionStorage.getItem(cacheKey);
+        const cached = localStorage.getItem(cacheKey);
         if (cached) {
             try { setAttendanceAlerts(JSON.parse(cached)); } catch { }
             return;
@@ -57,7 +57,7 @@ const HomeScreen: React.FC = () => {
         checkAttendanceAlerts(empId).then(data => {
             if (data?.alerts) {
                 setAttendanceAlerts(data.alerts);
-                sessionStorage.setItem(cacheKey, JSON.stringify(data.alerts));
+                localStorage.setItem(cacheKey, JSON.stringify(data.alerts));
             }
         }).catch(() => { });
     }, [empId]);
