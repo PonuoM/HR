@@ -47,11 +47,19 @@ const HomeScreen: React.FC = () => {
     const [attendanceAlerts, setAttendanceAlerts] = useState<any[]>([]);
     const [showAlertModal, setShowAlertModal] = useState(false);
     useEffect(() => {
-        if (empId) {
-            checkAttendanceAlerts(empId).then(data => {
-                if (data?.alerts) setAttendanceAlerts(data.alerts);
-            }).catch(() => { });
+        if (!empId) return;
+        const cacheKey = `att_alerts_${empId}_${new Date().toISOString().slice(0, 10)}`;
+        const cached = sessionStorage.getItem(cacheKey);
+        if (cached) {
+            try { setAttendanceAlerts(JSON.parse(cached)); } catch { }
+            return;
         }
+        checkAttendanceAlerts(empId).then(data => {
+            if (data?.alerts) {
+                setAttendanceAlerts(data.alerts);
+                sessionStorage.setItem(cacheKey, JSON.stringify(data.alerts));
+            }
+        }).catch(() => { });
     }, [empId]);
     // Live clock + greeting
     const [now, setNow] = useState(new Date());

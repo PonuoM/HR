@@ -4,6 +4,11 @@
  * Checks for missing/incomplete clock records and creates notifications
  * 
  * GET ?action=check&employee_id=X → Check and return attendance alerts for past 7 working days
+ * 
+ * Dedup rules:
+ *   - Notifications are only created ONCE per employee per alert-date per day
+ *   - If user dismisses (reads/deletes), won't re-create until next day
+ *   - Frontend caches results in sessionStorage to prevent stacking on re-mount
  */
 
 require_once __DIR__ . '/config.php';
@@ -77,11 +82,13 @@ while ($a = $attResult->fetch_assoc()) {
     $attendance[$a['date']] = $a;
 }
 
-// ── Get existing alert notifications (to avoid duplicates) ──
+// ── Get existing alert notification DATES created today (to avoid stacking) ──
+// Key insight: we track which alert-dates were already notified TODAY
+// If user clears them, they won't come back until tomorrow
 $existStmt = $conn->prepare(
     "SELECT message FROM notifications 
      WHERE employee_id = ? AND type = 'attendance_alert' 
-     AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+     AND DATE(created_at) = CURDATE()"
 );
 $existStmt->bind_param('s', $employee_id);
 $existStmt->execute();
@@ -124,15 +131,14 @@ while ($workDaysChecked < 7 && $current >= $startDt) {
     $thaiDate = thaiShortDate($dateStr);
 
     if (!$att) {
-        // No attendance record at all
+        $msg = "ไม่ได้ลงเวลาเข้างาน วันที่ $thaiDate";
         $alerts[] = [
             'date' => $dateStr,
             'type' => 'missing',
-            'message' => "ไม่ได้ลงเวลาเข้างาน วันที่ $thaiDate",
+            'message' => $msg,
         ];
 
-        // Create notification if not exists
-        $msg = "ไม่ได้ลงเวลาเข้างาน วันที่ $thaiDate";
+        // Only create notification if not already created TODAY
         if (!in_array($msg, $existingAlerts)) {
             $nStmt = $conn->prepare(
                 "INSERT INTO notifications (employee_id, title, message, icon, icon_bg, type, icon_color) 
@@ -140,16 +146,16 @@ while ($workDaysChecked < 7 && $current >= $startDt) {
             );
             $nStmt->bind_param('ss', $employee_id, $msg);
             $nStmt->execute();
+            $existingAlerts[] = $msg; // prevent within same request
         }
     } elseif ($att['clock_in'] && !$att['clock_out']) {
-        // Has clock_in but no clock_out
+        $msg = "ลงเวลาไม่ครบ (ไม่ได้ลงเวลาออก) วันที่ $thaiDate";
         $alerts[] = [
             'date' => $dateStr,
             'type' => 'incomplete',
-            'message' => "ลงเวลาไม่ครบ (ไม่ได้ลงเวลาออก) วันที่ $thaiDate",
+            'message' => $msg,
         ];
 
-        $msg = "ลงเวลาไม่ครบ (ไม่ได้ลงเวลาออก) วันที่ $thaiDate";
         if (!in_array($msg, $existingAlerts)) {
             $nStmt = $conn->prepare(
                 "INSERT INTO notifications (employee_id, title, message, icon, icon_bg, type, icon_color) 
@@ -157,6 +163,7 @@ while ($workDaysChecked < 7 && $current >= $startDt) {
             );
             $nStmt->bind_param('ss', $employee_id, $msg);
             $nStmt->execute();
+            $existingAlerts[] = $msg;
         }
     }
 
