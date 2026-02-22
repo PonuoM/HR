@@ -5,14 +5,14 @@ import React from 'react';
  * Shows a cute animated birthday cake with flickering candle flames,
  * floating sparkles, and subtle bounce animation.
  */
-const BirthdayCakeAnimation: React.FC<{ name?: string }> = ({ name }) => (
-    <div className="flex flex-col items-center gap-2 py-2">
-        <svg viewBox="0 0 100 100" className="w-20 h-20 md:w-24 md:h-24" xmlns="http://www.w3.org/2000/svg">
+const BirthdayCakeAnimation: React.FC<{ name?: string, compact?: boolean }> = ({ name, compact }) => (
+    <div className={`flex items-center gap-2 ${compact ? '' : 'py-2 flex-col'}`}>
+        <svg viewBox="0 0 100 100" className={compact ? "w-10 h-10 md:w-12 md:h-12" : "w-20 h-20 md:w-24 md:h-24"} xmlns="http://www.w3.org/2000/svg">
 
             {/* --- Fireworks / Party Poppers Background --- */}
             <g strokeLinecap="round">
                 {/* Left Firework */}
-                <g stroke="#FF6B6B" strokeWidth="1.5">
+                <g stroke="#FF6B6B" strokeWidth={compact ? "2" : "1.5"}>
                     <path d="M 20 40 L 10 30" strokeDasharray="15" strokeDashoffset="15">
                         <animate attributeName="stroke-dashoffset" values="15; -15" dur="1.5s" repeatCount="indefinite" />
                     </path>
@@ -25,7 +25,7 @@ const BirthdayCakeAnimation: React.FC<{ name?: string }> = ({ name }) => (
                 </g>
 
                 {/* Right Firework */}
-                <g stroke="#FF6B6B" strokeWidth="1.5">
+                <g stroke="#FF6B6B" strokeWidth={compact ? "2" : "1.5"}>
                     <path d="M 80 40 L 90 30" strokeDasharray="15" strokeDashoffset="15">
                         <animate attributeName="stroke-dashoffset" values="15; -15" dur="1.5s" begin="0.1s" repeatCount="indefinite" />
                     </path>
@@ -38,7 +38,7 @@ const BirthdayCakeAnimation: React.FC<{ name?: string }> = ({ name }) => (
                 </g>
 
                 {/* Center Top Firework */}
-                <g stroke="#A8E6CF" strokeWidth="1.5">
+                <g stroke="#A8E6CF" strokeWidth={compact ? "2" : "1.5"}>
                     <path d="M 45 20 L 40 5" strokeDasharray="15" strokeDashoffset="15">
                         <animate attributeName="stroke-dashoffset" values="15; -15" dur="1.5s" begin="0.4s" repeatCount="indefinite" />
                     </path>
@@ -59,7 +59,7 @@ const BirthdayCakeAnimation: React.FC<{ name?: string }> = ({ name }) => (
             ].map((star, i) => (
                 <g key={i}>
                     <circle cx={star.cx} cy={star.cy} r="2" fill={star.c}>
-                        <animate attributeName="r" values="0; 4; 0" dur="1s" begin={star.d} repeatCount="indefinite" />
+                        <animate attributeName="r" values={compact ? "0; 6; 0" : "0; 4; 0"} dur="1s" begin={star.d} repeatCount="indefinite" />
                         <animate attributeName="opacity" values="0; 1; 0" dur="1s" begin={star.d} repeatCount="indefinite" />
                     </circle>
                 </g>
@@ -114,7 +114,7 @@ const BirthdayCakeAnimation: React.FC<{ name?: string }> = ({ name }) => (
                     { cx: 40, cy: 25, c: '#C4E1FF', dur: '4.5s' },
                     { cx: 60, cy: 30, c: '#FFE3D9', dur: '5s' },
                 ].map((dot, i) => (
-                    <circle key={i} cx={dot.cx} cy={dot.cy} r="1" fill={dot.c}>
+                    <circle key={i} cx={dot.cx} cy={dot.cy} r={compact ? "2" : "1"} fill={dot.c}>
                         <animateTransform
                             attributeName="transform"
                             type="translate"
@@ -127,19 +127,21 @@ const BirthdayCakeAnimation: React.FC<{ name?: string }> = ({ name }) => (
             </g>
 
             {/* --- Plate --- */}
-            <ellipse cx="50" cy="85" rx="28" ry="2.5" fill="#F3F0EF" />
+            <ellipse cx="50" cy="85" rx="28" ry="2.5" fill={compact ? "rgba(255,255,255,0.7)" : "#F3F0EF"} />
         </svg>
 
-        <div className="text-center">
-            <h3 className="text-lg font-bold text-rose-500 tracking-wide">
-                Happy Birthday! 🎂
-            </h3>
-            {name && (
-                <p className="text-[13px] text-gray-500 dark:text-gray-400 mt-1">
-                    ขอให้มีความสุขมากๆ นะ {name}
-                </p>
-            )}
-        </div>
+        {!compact && (
+            <div className="text-center">
+                <h3 className="text-lg font-bold text-rose-500 tracking-wide">
+                    Happy Birthday! 🎂
+                </h3>
+                {name && (
+                    <p className="text-[13px] text-gray-500 dark:text-gray-400 mt-1">
+                        ขอให้มีความสุขมากๆ นะ {name}
+                    </p>
+                )}
+            </div>
+        )}
     </div>
 );
 

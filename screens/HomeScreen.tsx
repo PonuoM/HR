@@ -481,6 +481,12 @@ const HomeScreen: React.FC = () => {
                             <p className="text-[10px] text-white/60 mt-0.5 drop-shadow-sm">{currentUser?.position || ''} {currentUser?.department ? `· ${currentUser.department}` : ''}</p>
                         </div>
                         <div className="flex items-center gap-2.5">
+                            {/* Mobile: Birthday Cake */}
+                            {isBirthday && (
+                                <div className="relative z-10 scale-[0.85] origin-right mr-1 -mt-1">
+                                    <BirthdayCakeAnimation compact={true} />
+                                </div>
+                            )}
                             <div className="relative" ref={notifRef}>
                                 <button
                                     onClick={() => setShowNotifications(prev => !prev)}
@@ -531,6 +537,16 @@ const HomeScreen: React.FC = () => {
                             <p className="text-xs text-white/70 mt-0.5 drop-shadow-sm">{currentUser?.position || ''} {currentUser?.department ? `· ${currentUser.department}` : ''}</p>
                         </div>
                         <div className="flex items-center gap-3">
+                            {/* Desktop: Birthday Cake */}
+                            {isBirthday && (
+                                <div className="relative z-10 flex items-center bg-white/10 backdrop-blur-sm rounded-2xl px-4 py-1.5 border border-white/20 mr-2 shadow-sm">
+                                    <BirthdayCakeAnimation compact={true} name={authUser?.name?.split(' ')[0]} />
+                                    <div className="ml-3 text-white text-left hidden lg:block">
+                                        <p className="text-sm font-bold text-pink-200 drop-shadow-sm">Happy Birthday! 🎂</p>
+                                        <p className="text-xs text-white/80 drop-shadow-sm">ขอให้มีความสุขมากๆ นะ</p>
+                                    </div>
+                                </div>
+                            )}
                             <div className="relative" ref={notifRef}>
                                 <button
                                     onClick={() => setShowNotifications(prev => !prev)}
@@ -676,14 +692,6 @@ const HomeScreen: React.FC = () => {
                     </div>
                 )}
             </header>
-
-            {/* ═══════════════════ BIRTHDAY CAKE ═══════════════════ */}
-            {isBirthday && (
-                <div className="mb-6 bg-pink-50/50 dark:bg-pink-900/10 border border-pink-100 dark:border-pink-900/30 rounded-2xl px-4 py-4 shadow-sm">
-                    <BirthdayCakeAnimation name={authUser?.name?.split(' ')[0]} />
-                </div>
-            )}
-
             {/* ═══════════════════ ATTENDANCE ALERTS ═══════════════════ */}
             {attendanceAlerts.length > 0 && (
                 <button
