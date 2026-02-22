@@ -95,8 +95,9 @@ if ($method === 'POST') {
         // Table doesn't exist yet → continue without session management
     }
 
-    // Remove password from response
+    // Remove sensitive/large fields from response
     unset($user['password']);
+    unset($user['face_descriptor']); // Large blob, not needed in auth response
 
     $response = [
         'message' => 'เข้าสู่ระบบสำเร็จ',

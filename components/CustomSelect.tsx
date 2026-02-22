@@ -92,7 +92,7 @@ export default function CustomSelect({ options, value, onChange, placeholder = '
                     <button
                         key={opt.value}
                         type="button"
-                        onClick={() => { onChange(opt.value); setOpen(false); }}
+                        onClick={() => { onChange(opt.value === value ? '' : opt.value); setOpen(false); }}
                         className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center justify-between
                             ${opt.value === value
                                 ? 'bg-primary/10 text-primary font-semibold'

@@ -52,8 +52,8 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
 }
 
 // --- Employees ---
-export async function getEmployees() {
-    return fetchApi<any[]>('employees.php');
+export async function getEmployees(showInactive = false) {
+    return fetchApi<any[]>(`employees.php${showInactive ? '?show_inactive=1' : ''}`);
 }
 
 export async function createEmployee(data: { id: string; name: string; email?: string; password?: string; department_id?: number; position_id?: number; base_salary?: number | null; hire_date?: string | null; approver_id?: string | null; approver2_id?: string | null; company_id?: number; is_admin?: number }) {
@@ -180,10 +180,10 @@ export async function deleteNewsArticle(id: number) {
     return fetchApi<any>(`news.php?id=${id}`, { method: 'DELETE' });
 }
 
-export async function toggleNewsLike(articleId: number, employeeId: string) {
-    return fetchApi<{ liked: boolean }>(`news.php?action=like&id=${articleId}`, {
+export async function toggleNewsLike(articleId: number, employeeId: string, reactionType: string = 'like') {
+    return fetchApi<{ liked: boolean; reaction_type: string | null }>(`news.php?action=like&id=${articleId}`, {
         method: 'POST',
-        body: JSON.stringify({ employee_id: employeeId }),
+        body: JSON.stringify({ employee_id: employeeId, reaction_type: reactionType }),
     });
 }
 
@@ -267,6 +267,24 @@ export async function searchPlaces(query: string): Promise<{ name: string; latit
 // --- Time Records ---
 export async function createTimeRecord(data: any) {
     return fetchApi<any>('time_records.php', { method: 'POST', body: JSON.stringify(data) });
+}
+
+// --- Allowance Requests ---
+export async function getAllowanceTypes() {
+    return fetchApi<any[]>('allowance_requests.php?action=types');
+}
+export async function createAllowanceRequest(data: any) {
+    return fetchApi<any>('allowance_requests.php', { method: 'POST', body: JSON.stringify(data) });
+}
+export async function getAllowanceRequests(filters?: { employee_id?: string; status?: string; approver_id?: string }) {
+    const params = new URLSearchParams();
+    if (filters?.employee_id) params.append('employee_id', filters.employee_id);
+    if (filters?.status) params.append('status', filters.status);
+    if (filters?.approver_id) params.append('approver_id', filters.approver_id);
+    return fetchApi<any[]>(`allowance_requests.php?${params.toString()}`);
+}
+export async function updateAllowanceRequest(id: number, data: { status: string; approved_by?: string; is_bypass?: number }) {
+    return fetchApi<any>(`allowance_requests.php?id=${id}`, { method: 'PUT', body: JSON.stringify(data) });
 }
 
 // --- Dashboard (Admin) ---
@@ -429,4 +447,85 @@ export async function getFaceDescriptor(employeeId: string) {
 
 export async function deleteFaceDescriptor(employeeId: string) {
     return fetchApi<any>(`face.php?employee_id=${employeeId}`, { method: 'DELETE' });
+}
+
+// --- Employee Star Vote ---
+export async function getVoteCandidates() {
+    return fetchApi<any[]>('employee_votes.php?action=candidates');
+}
+
+export async function getMyVotes(month?: number, year?: number) {
+    const m = month || new Date().getMonth() + 1;
+    const y = year || new Date().getFullYear();
+    return fetchApi<{ votes: any[]; votes_used: number; votes_remaining: number }>(`employee_votes.php?action=my_votes&month=${m}&year=${y}`);
+}
+
+export async function castVote(voterId: string, votedForId: string) {
+    const now = new Date();
+    return fetchApi<any>('employee_votes.php?action=vote', {
+        method: 'POST',
+        body: JSON.stringify({ voter_id: voterId, voted_for_id: votedForId, month: now.getMonth() + 1, year: now.getFullYear() }),
+    });
+}
+
+export async function removeVote(voteId: number) {
+    return fetchApi<any>(`employee_votes.php?action=vote&id=${voteId}`, { method: 'DELETE' });
+}
+
+export async function getVoteStatus(month?: number, year?: number) {
+    const m = month || new Date().getMonth() + 1;
+    const y = year || new Date().getFullYear();
+    return fetchApi<any>(`employee_votes.php?action=status&month=${m}&year=${y}`);
+}
+
+export async function getVoteLeaderboard(month: number, year: number) {
+    return fetchApi<any>(`employee_votes.php?action=leaderboard&month=${month}&year=${year}`);
+}
+
+export async function getMyVoteScore(year?: number) {
+    const y = year || new Date().getFullYear();
+    return fetchApi<any>(`employee_votes.php?action=my_score&year=${y}`);
+}
+
+export async function getYearlyVoteRanking(year?: number) {
+    const y = year || new Date().getFullYear();
+    return fetchApi<any>(`employee_votes.php?action=yearly_ranking&year=${y}`);
+}
+
+export async function closeVoteMonth(month: number, year: number) {
+    return fetchApi<any>('employee_votes.php?action=close_month', {
+        method: 'POST',
+        body: JSON.stringify({ month, year }),
+    });
+}
+
+// ─── Activity Settings ───
+export async function getActivitySettings() {
+    return fetchApi<any[]>('activity_settings.php?action=list');
+}
+
+export async function toggleActivity(key: string, enabled: boolean) {
+    return fetchApi<any>('activity_settings.php?action=toggle', {
+        method: 'POST',
+        body: JSON.stringify({ key, enabled: enabled ? 1 : 0 }),
+    });
+}
+
+export async function checkActivity(key: string) {
+    return fetchApi<{ key: string; enabled: boolean; start_date: string | null }>(`activity_settings.php?action=check&key=${key}`);
+}
+
+export async function checkAttendanceAlerts(employeeId: string) {
+    return fetchApi<{ alerts: any[]; total: number }>(`attendance_alerts.php?action=check&employee_id=${employeeId}`);
+}
+
+export async function setSystemStartDate(startDate: string) {
+    return fetchApi<any>('activity_settings.php?action=set_start_date', {
+        method: 'POST',
+        body: JSON.stringify({ start_date: startDate }),
+    });
+}
+
+export async function getSystemStartDate() {
+    return fetchApi<{ start_date: string | null }>('activity_settings.php?action=get_start_date');
 }

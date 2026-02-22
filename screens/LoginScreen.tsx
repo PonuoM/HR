@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../components/Toast';
+import LoginAnimation from '../components/LoginAnimation';
 
 const LoginScreen: React.FC = () => {
     const navigate = useNavigate();
@@ -45,8 +46,15 @@ const LoginScreen: React.FC = () => {
             if (result?.device_warning) {
                 toast(`⚠️ ${result.device_warning}`, 'warning');
             }
-            toast('เข้าสู่ระบบสำเร็จ', 'success');
-            navigate('/', { replace: true });
+
+            // Check face registration — redirect to profile if not registered
+            if (!result?.face_registered_at) {
+                toast('กรุณาลงทะเบียนใบหน้าก่อนใช้งาน', 'warning');
+                navigate('/profile', { replace: true });
+            } else {
+                toast('เข้าสู่ระบบสำเร็จ', 'success');
+                navigate('/', { replace: true });
+            }
         } catch (err: any) {
             toast(err.message || 'เข้าสู่ระบบไม่สำเร็จ', 'error');
         } finally {
@@ -70,33 +78,25 @@ const LoginScreen: React.FC = () => {
 
                     {/* LEFT SIDE — Branding (Desktop only) */}
                     <div className="hidden md:flex flex-col justify-center flex-1 pr-12 text-white">
-                        <div className="flex items-center gap-3 mb-6">
-                            <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center shadow-lg">
-                                <span className="text-3xl font-black text-white">HR</span>
-                            </div>
-                            <div>
-                                <h1 className="text-2xl font-bold">HR Connect</h1>
-                                <p className="text-blue-200 text-sm">Mobile</p>
-                            </div>
-                        </div>
-                        <h2 className="text-4xl font-extrabold leading-tight mb-4">
+                        <LoginAnimation className="w-full max-w-sm h-72 mb-4 -ml-4" />
+                        <h2 className="text-4xl font-extrabold leading-tight mb-4 drop-shadow-lg">
                             ระบบจัดการ<br />ทรัพยากรบุคคล
                         </h2>
-                        <p className="text-blue-100 text-lg leading-relaxed max-w-md">
+                        <p className="text-blue-100 text-lg leading-relaxed max-w-md drop-shadow-md">
                             จัดการข้อมูลพนักงาน ลงเวลา ยื่นคำขอลา และดูสลิปเงินเดือนได้ทุกที่ทุกเวลา
                         </p>
                         <div className="mt-8 flex items-center gap-6">
                             <div className="flex items-center gap-2 text-blue-200">
-                                <span className="material-icons-round text-lg">verified_user</span>
-                                <span className="text-sm">ปลอดภัย</span>
+                                <span className="material-icons-round text-lg drop-shadow">verified_user</span>
+                                <span className="text-sm drop-shadow">ปลอดภัย</span>
                             </div>
                             <div className="flex items-center gap-2 text-blue-200">
-                                <span className="material-icons-round text-lg">speed</span>
-                                <span className="text-sm">รวดเร็ว</span>
+                                <span className="material-icons-round text-lg drop-shadow">speed</span>
+                                <span className="text-sm drop-shadow">รวดเร็ว</span>
                             </div>
                             <div className="flex items-center gap-2 text-blue-200">
-                                <span className="material-icons-round text-lg">devices</span>
-                                <span className="text-sm">ทุกอุปกรณ์</span>
+                                <span className="material-icons-round text-lg drop-shadow">devices</span>
+                                <span className="text-sm drop-shadow">ทุกอุปกรณ์</span>
                             </div>
                         </div>
                     </div>
@@ -104,12 +104,10 @@ const LoginScreen: React.FC = () => {
                     {/* RIGHT SIDE — Login Card */}
                     <div className="w-full max-w-sm md:max-w-md">
                         {/* Mobile Logo */}
-                        <div className="md:hidden text-center mb-8">
-                            <div className="w-16 h-16 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center mx-auto mb-3 shadow-lg">
-                                <span className="text-3xl font-black text-white">HR</span>
-                            </div>
-                            <h1 className="text-xl font-bold text-white">HR Connect</h1>
-                            <p className="text-blue-200 text-sm">เข้าสู่ระบบเพื่อใช้งาน</p>
+                        <div className="md:hidden text-center mb-6">
+                            <LoginAnimation className="w-56 h-56 mx-auto -mt-6 mb-2" />
+                            <h1 className="text-2xl font-extrabold text-white drop-shadow-md">HR Connect</h1>
+                            <p className="text-blue-200 text-sm mt-1 drop-shadow">เข้าสู่ระบบเพื่อใช้งาน</p>
                         </div>
 
                         {/* Card */}

@@ -121,6 +121,17 @@ if ($method === 'POST') {
         json_response(['error' => 'employee_id is required'], 400);
     }
 
+    // ─── Face Registration Check ───
+    // Block clock-in if employee has not registered their face
+    $faceCheck = $conn->prepare("SELECT face_registered_at FROM employees WHERE id = ? AND company_id = ?");
+    $faceCheck->bind_param('si', $employee_id, $company_id);
+    $faceCheck->execute();
+    $faceResult = $faceCheck->get_result();
+    $faceRow = $faceResult->fetch_assoc();
+    if (!$faceRow || empty($faceRow['face_registered_at'])) {
+        json_response(['error' => 'กรุณาลงทะเบียนใบหน้าก่อนลงเวลา'], 403);
+    }
+
     // Check if already clocked in today
     $check = $conn->query("SELECT id, clock_in, clock_out FROM attendance WHERE employee_id = '$employee_id' AND date = '$date'");
     if ($row = $check->fetch_assoc()) {

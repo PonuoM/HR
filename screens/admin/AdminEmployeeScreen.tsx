@@ -20,7 +20,7 @@ const AdminEmployeeScreen: React.FC = () => {
     // Dynamic Data from API
     const { data: rawDepts, refetch: refetchDepts } = useApi(() => getDepartments(), []);
     const { data: rawPositions, refetch: refetchPositions } = useApi(() => getPositions(), []);
-    const { data: employees, loading: loadingEmployees } = useApi(() => getEmployees(), []);
+    const { data: employees, loading: loadingEmployees } = useApi(() => getEmployees(true), []);
 
     const departments = (rawDepts || []).map((d: any) => d.name || d);
     const positions = (rawPositions || []).map((p: any) => p.name || p);
@@ -30,6 +30,10 @@ const AdminEmployeeScreen: React.FC = () => {
     // Filter states
     const [filterDept, setFilterDept] = useState('');
     const [filterStatus, setFilterStatus] = useState('');
+    const [searchText, setSearchText] = useState('');
+
+    // Nickname states
+    const [addNickname, setAddNickname] = useState('');
 
     // Company list for superadmin
     const { data: companiesList } = useApi(() => isSuperAdmin ? getCompanies() : Promise.resolve([]), [isSuperAdmin]);
@@ -51,6 +55,7 @@ const AdminEmployeeScreen: React.FC = () => {
     const [editApprover, setEditApprover] = useState('');
     const [editApprover2, setEditApprover2] = useState('');
     const [editIsAdmin, setEditIsAdmin] = useState(false);
+    const [editNickname, setEditNickname] = useState('');
 
     // Initialize edit modal state when employee selected
     useEffect(() => {
@@ -60,8 +65,27 @@ const AdminEmployeeScreen: React.FC = () => {
             setEditApprover(editingEmployee.approver_id || '');
             setEditApprover2(editingEmployee.approver2_id || '');
             setEditIsAdmin(editingEmployee.is_admin === 1 || editingEmployee.is_admin === '1');
+            setEditNickname(editingEmployee.nickname || '');
         }
     }, [editingEmployee]);
+
+    // Filtered employees
+    const filteredEmployees = (employees || []).filter((emp: any) => {
+        // Search filter
+        if (searchText) {
+            const q = searchText.toLowerCase();
+            const matchName = (emp.name || '').toLowerCase().includes(q);
+            const matchNickname = (emp.nickname || '').toLowerCase().includes(q);
+            const matchId = (emp.id || '').toLowerCase().includes(q);
+            if (!matchName && !matchNickname && !matchId) return false;
+        }
+        // Department filter
+        if (filterDept && String(emp.department_id) !== filterDept) return false;
+        // Status filter
+        if (filterStatus === 'active' && (emp.is_active === 0 || emp.is_active === '0')) return false;
+        if (filterStatus === 'inactive' && emp.is_active !== 0 && emp.is_active !== '0') return false;
+        return true;
+    });
 
     // Handle Navigation State from Dashboard
     useEffect(() => {
@@ -108,7 +132,9 @@ const AdminEmployeeScreen: React.FC = () => {
                     <span className="material-icons-round absolute left-3 top-2.5 text-gray-400">search</span>
                     <input
                         type="text"
-                        placeholder="ค้นหาชื่อ, รหัสพนักงาน..."
+                        placeholder="ค้นหาชื่อ, ชื่อเล่น, รหัสพนักงาน..."
+                        value={searchText}
+                        onChange={(e) => setSearchText(e.target.value)}
                         className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm dark:text-white"
                     />
                 </div>
@@ -118,7 +144,7 @@ const AdminEmployeeScreen: React.FC = () => {
                         value={filterDept}
                         onChange={setFilterDept}
                         placeholder="ทุกแผนก"
-                        options={departments.map(dept => ({ value: dept, label: dept }))}
+                        options={(rawDepts || []).map((d: any) => ({ value: String(d.id), label: d.name }))}
                     />
                     <CustomSelect
                         className="flex-1"
@@ -141,6 +167,7 @@ const AdminEmployeeScreen: React.FC = () => {
                             <tr className="bg-gray-50 dark:bg-gray-900/50 text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider">
                                 <th className="p-4 font-medium">รหัส</th>
                                 <th className="p-4 font-medium">ชื่อ-นามสกุล</th>
+                                <th className="p-4 font-medium">ชื่อเล่น</th>
                                 <th className="p-4 font-medium">ตำแหน่ง</th>
                                 <th className="p-4 font-medium">แผนก</th>
                                 <th className="p-4 font-medium">วันที่เริ่มงาน</th>
@@ -149,7 +176,7 @@ const AdminEmployeeScreen: React.FC = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                            {(employees || []).map((emp: any) => (
+                            {filteredEmployees.map((emp: any) => (
                                 <tr key={emp.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group">
                                     <td className="p-4 text-sm font-mono text-gray-500">{emp.id}</td>
                                     <td className="p-4">
@@ -161,6 +188,7 @@ const AdminEmployeeScreen: React.FC = () => {
                                             </div>
                                         </div>
                                     </td>
+                                    <td className="p-4 text-sm text-gray-600 dark:text-gray-300">{emp.nickname || <span className="text-gray-300 dark:text-gray-600">-</span>}</td>
                                     <td className="p-4 text-sm text-gray-600 dark:text-gray-300">{emp.position}</td>
                                     <td className="p-4 text-sm text-gray-600 dark:text-gray-300">{emp.department}</td>
                                     <td className="p-4 text-sm text-gray-600 dark:text-gray-300">{emp.hire_date ? new Date(emp.hire_date).toLocaleDateString('th-TH') : ''}</td>
@@ -217,13 +245,14 @@ const AdminEmployeeScreen: React.FC = () => {
 
             {/* MOBILE VIEW: Card List */}
             <div className="md:hidden space-y-4 pb-20">
-                {(employees || []).map((emp: any) => (
+                {filteredEmployees.map((emp: any) => (
                     <div key={emp.id} className="bg-white dark:bg-gray-800 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-gray-700">
                         <div className="flex justify-between items-start mb-3">
                             <div className="flex items-center gap-3">
                                 <img src={emp.avatar || `https://picsum.photos/id/${(emp.id?.charCodeAt?.(3) || 60)}/60/60`} className="w-12 h-12 rounded-xl object-cover" alt="avatar" />
                                 <div>
                                     <h3 className="font-bold text-gray-900 dark:text-white">{emp.name}</h3>
+                                    {emp.nickname && <p className="text-xs text-primary font-medium">{emp.nickname}</p>}
                                     <p className="text-xs text-gray-500">{emp.position}</p>
                                 </div>
                             </div>
@@ -315,6 +344,7 @@ const AdminEmployeeScreen: React.FC = () => {
                             if (!empId) { toast('กรุณาระบุรหัสพนักงาน', 'error'); return; }
                             if (!firstName) { toast('กรุณาระบุชื่อจริง', 'error'); return; }
 
+                            const nickname = addNickname.trim();
                             const fullName = lastName ? `${firstName} ${lastName}` : firstName;
 
                             // Find department_id and position_id from name
@@ -345,6 +375,7 @@ const AdminEmployeeScreen: React.FC = () => {
                                 const result = await createEmployee({
                                     id: empId,
                                     name: fullName,
+                                    nickname: nickname || undefined,
                                     email: email || undefined,
                                     password: '1234',
                                     department_id: deptObj?.id ? Number(deptObj.id) : undefined,
@@ -355,7 +386,7 @@ const AdminEmployeeScreen: React.FC = () => {
                                     approver2_id: addApprover2 || null,
                                     ...(addCompanyId ? { company_id: Number(addCompanyId) } : {}),
                                     ...(addIsAdmin ? { is_admin: 1 } : {}),
-                                });
+                                } as any);
                                 if (result?.error) {
                                     toast(result.error, 'error');
                                     return;
@@ -381,6 +412,7 @@ const AdminEmployeeScreen: React.FC = () => {
                                 setAddCompanyId('');
                                 setAddIsAdmin(false);
                                 setAddHireDate('');
+                                setAddNickname('');
                                 setAddAvatarFile(null);
                                 setAddAvatarPreview('');
                                 window.location.reload();
@@ -454,6 +486,11 @@ const AdminEmployeeScreen: React.FC = () => {
                                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">นามสกุล</label>
                                         <input type="text" name="last_name" className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-gray-900 dark:text-white" placeholder="เช่น ใจดี" />
                                     </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">ชื่อเล่น</label>
+                                    <input type="text" value={addNickname} onChange={(e) => setAddNickname(e.target.value)} className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-gray-900 dark:text-white" placeholder="เช่น เอก" />
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -594,6 +631,7 @@ const AdminEmployeeScreen: React.FC = () => {
                                     const approver2Val = formData.get('approver2_id') as string;
                                     await updateEmployee(editingEmployee.id, {
                                         name: formData.get('name') as string,
+                                        nickname: editNickname || null,
                                         email: formData.get('email') as string,
                                         department_id: Number(formData.get('department_id')),
                                         position_id: Number(formData.get('position_id')),
@@ -602,7 +640,7 @@ const AdminEmployeeScreen: React.FC = () => {
                                         approver_id: approverVal || null,
                                         approver2_id: approver2Val || null,
                                         is_admin: editIsAdmin ? 1 : 0,
-                                    });
+                                    } as any);
                                     toast('แก้ไขข้อมูลเรียบร้อย', 'success');
                                     setEditingEmployee(null);
                                     window.location.reload();
@@ -614,6 +652,10 @@ const AdminEmployeeScreen: React.FC = () => {
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">ชื่อ-นามสกุล</label>
                                     <input name="name" type="text" defaultValue={editingEmployee.name} className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-gray-900 dark:text-white" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">ชื่อเล่น</label>
+                                    <input type="text" value={editNickname} onChange={(e) => setEditNickname(e.target.value)} className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-gray-900 dark:text-white" placeholder="เช่น เอก" />
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">อีเมล</label>

@@ -20,9 +20,16 @@ $conn->query("CREATE TABLE IF NOT EXISTS `news_likes` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `article_id` INT NOT NULL,
   `employee_id` VARCHAR(20) NOT NULL,
+  `reaction_type` VARCHAR(10) NOT NULL DEFAULT 'like',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY `uq_article_employee` (`article_id`, `employee_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+// Auto-add reaction_type column if missing (migration)
+$colCheck = $conn->query("SHOW COLUMNS FROM news_likes LIKE 'reaction_type'");
+if ($colCheck && $colCheck->num_rows === 0) {
+    $conn->query("ALTER TABLE news_likes ADD COLUMN `reaction_type` VARCHAR(10) NOT NULL DEFAULT 'like' AFTER `employee_id`");
+}
 
 $conn->query("CREATE TABLE IF NOT EXISTS `news_comments` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -35,35 +42,44 @@ $conn->query("CREATE TABLE IF NOT EXISTS `news_comments` (
 $method = get_method();
 $action = $_GET['action'] ?? null;
 
-// ---- LIKES ----
+// ---- LIKES / REACTIONS ----
 if ($action === 'like' && $method === 'POST' && isset($_GET['id'])) {
     $articleId = (int)$_GET['id'];
     $body = get_json_body();
     $employeeId = $body['employee_id'] ?? '';
+    $reactionType = $body['reaction_type'] ?? 'like';
+    $allowedTypes = ['like', 'love', 'haha', 'wow', 'sad', 'angry'];
+    if (!in_array($reactionType, $allowedTypes)) $reactionType = 'like';
     if (!$employeeId) json_response(['error' => 'employee_id required'], 400);
 
-    // Check if already liked
-    $check = $conn->prepare("SELECT id FROM news_likes WHERE article_id=? AND employee_id=?");
+    // Check if already reacted
+    $check = $conn->prepare("SELECT id, reaction_type FROM news_likes WHERE article_id=? AND employee_id=?");
     $check->bind_param('is', $articleId, $employeeId);
     $check->execute();
     $existing = $check->get_result()->fetch_assoc();
 
     if ($existing) {
-        // Unlike
-        $del = $conn->prepare("DELETE FROM news_likes WHERE article_id=? AND employee_id=?");
-        $del->bind_param('is', $articleId, $employeeId);
-        $del->execute();
-        // Update count
-        $conn->query("UPDATE news_articles SET likes = (SELECT COUNT(*) FROM news_likes WHERE article_id=$articleId) WHERE id=$articleId");
-        json_response(['liked' => false, 'message' => 'Unliked']);
+        if ($existing['reaction_type'] === $reactionType) {
+            // Same reaction → remove (unlike)
+            $del = $conn->prepare("DELETE FROM news_likes WHERE article_id=? AND employee_id=?");
+            $del->bind_param('is', $articleId, $employeeId);
+            $del->execute();
+            $conn->query("UPDATE news_articles SET likes = (SELECT COUNT(*) FROM news_likes WHERE article_id=$articleId) WHERE id=$articleId");
+            json_response(['liked' => false, 'reaction_type' => null, 'message' => 'Removed reaction']);
+        } else {
+            // Different reaction → update
+            $upd = $conn->prepare("UPDATE news_likes SET reaction_type=? WHERE article_id=? AND employee_id=?");
+            $upd->bind_param('sis', $reactionType, $articleId, $employeeId);
+            $upd->execute();
+            json_response(['liked' => true, 'reaction_type' => $reactionType, 'message' => 'Reaction updated']);
+        }
     } else {
-        // Like
-        $ins = $conn->prepare("INSERT INTO news_likes (article_id, employee_id) VALUES (?, ?)");
-        $ins->bind_param('is', $articleId, $employeeId);
+        // New reaction
+        $ins = $conn->prepare("INSERT INTO news_likes (article_id, employee_id, reaction_type) VALUES (?, ?, ?)");
+        $ins->bind_param('iss', $articleId, $employeeId, $reactionType);
         $ins->execute();
-        // Update count
         $conn->query("UPDATE news_articles SET likes = (SELECT COUNT(*) FROM news_likes WHERE article_id=$articleId) WHERE id=$articleId");
-        json_response(['liked' => true, 'message' => 'Liked']);
+        json_response(['liked' => true, 'reaction_type' => $reactionType, 'message' => 'Reacted']);
     }
 }
 
@@ -120,7 +136,7 @@ if ($method === 'GET' && !$action) {
     $sql = "SELECT a.*,
         (SELECT COUNT(*) FROM news_likes WHERE article_id = a.id) as like_count,
         (SELECT COUNT(*) FROM news_comments WHERE article_id = a.id) as comment_count"
-        . ($employeeId ? ", (SELECT COUNT(*) FROM news_likes WHERE article_id = a.id AND employee_id = '" . $conn->real_escape_string($employeeId) . "') as user_liked" : ", 0 as user_liked")
+        . ($employeeId ? ", (SELECT reaction_type FROM news_likes WHERE article_id = a.id AND employee_id = '" . $conn->real_escape_string($employeeId) . "' LIMIT 1) as user_reaction" : ", NULL as user_reaction")
         . " FROM news_articles a WHERE a.company_id = $company_id ORDER BY a.is_pinned DESC, a.published_at DESC";
     $result = $conn->query($sql);
     $articles = [];
@@ -129,7 +145,17 @@ if ($method === 'GET' && !$action) {
         $row['is_urgent'] = (bool)$row['is_urgent'];
         $row['likes'] = (int)$row['like_count'];
         $row['comments'] = (int)$row['comment_count'];
-        $row['user_liked'] = (bool)(int)$row['user_liked'];
+        $row['user_liked'] = !empty($row['user_reaction']);
+        // Reaction summary: count per type
+        $aid = (int)$row['id'];
+        $rq = $conn->query("SELECT reaction_type, COUNT(*) as cnt FROM news_likes WHERE article_id=$aid GROUP BY reaction_type ORDER BY cnt DESC");
+        $summary = [];
+        if ($rq) {
+            while ($rr = $rq->fetch_assoc()) {
+                $summary[$rr['reaction_type']] = (int)$rr['cnt'];
+            }
+        }
+        $row['reaction_summary'] = $summary;
         unset($row['like_count'], $row['comment_count']);
         $articles[] = $row;
     }

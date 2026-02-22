@@ -3,12 +3,13 @@ import ReactDOM from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { QUICK_MENU_ITEMS } from '../data';
 import { useApi } from '../hooks/useApi';
-import { API_BASE, getNotifications, getLeaveQuotas, getAttendance, getNews, getEmployee, markNotificationRead, markAllNotificationsRead, deleteNotification, clockIn, clockOut, checkLocation, getLeaveRequests, updateLeaveRequest, getTimeRecords, updateTimeRecord, getUploads, getFaceDescriptor } from '../services/api';
+import { API_BASE, getNotifications, getLeaveQuotas, getAttendance, getNews, getEmployee, markNotificationRead, markAllNotificationsRead, deleteNotification, clockIn, clockOut, checkLocation, getLeaveRequests, updateLeaveRequest, getTimeRecords, updateTimeRecord, getAllowanceRequests, updateAllowanceRequest, getUploads, getFaceDescriptor, getActivitySettings, checkAttendanceAlerts } from '../services/api';
 import { subscribeToPush } from '../services/pushNotifications';
 import LocationCheckModal from '../components/LocationCheckModal';
 import FaceCapture from '../components/FaceCapture';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../contexts/AuthContext';
+import BannerBackgroundAnimation from '../components/BannerBackgroundAnimation';
 
 const HomeScreen: React.FC = () => {
     const navigate = useNavigate();
@@ -26,6 +27,32 @@ const HomeScreen: React.FC = () => {
     const [approvalLoading, setApprovalLoading] = useState<string | null>(null);
     const [showAllApprovals, setShowAllApprovals] = useState(false);
 
+    // === ACTIVITY SETTINGS — separate activities from quick menu ===
+    const [activitySettings, setActivitySettings] = useState<any[]>([]);
+    useEffect(() => {
+        getActivitySettings().then(data => setActivitySettings(data)).catch(() => { });
+    }, []);
+    // Regular menu = items WITHOUT activityKey
+    const filteredMenuItems = useMemo(() =>
+        QUICK_MENU_ITEMS.filter(item => !item.activityKey),
+        []
+    );
+    // Enabled activities = items WITH activityKey that are enabled in settings
+    const enabledActivities = useMemo(() => {
+        const enabledKeys = new Set(activitySettings.filter((a: any) => a.enabled).map((a: any) => a.activity_key));
+        return QUICK_MENU_ITEMS.filter(item => item.activityKey && enabledKeys.has(item.activityKey));
+    }, [activitySettings]);
+
+    // === ATTENDANCE ALERTS ===
+    const [attendanceAlerts, setAttendanceAlerts] = useState<any[]>([]);
+    const [showAlertModal, setShowAlertModal] = useState(false);
+    useEffect(() => {
+        if (empId) {
+            checkAttendanceAlerts(empId).then(data => {
+                if (data?.alerts) setAttendanceAlerts(data.alerts);
+            }).catch(() => { });
+        }
+    }, [empId]);
     // Live clock + greeting
     const [now, setNow] = useState(new Date());
     useEffect(() => {
@@ -34,7 +61,6 @@ const HomeScreen: React.FC = () => {
     }, []);
     const hour = now.getHours();
     const greeting = hour >= 5 && hour < 12 ? 'สวัสดีตอนเช้า' : hour >= 12 && hour < 17 ? 'สวัสดีตอนบ่าย' : hour >= 17 && hour < 20 ? 'สวัสดีตอนเย็น' : 'สวัสดีตอนค่ำ';
-    const bannerImage = hour >= 5 && hour < 12 ? '/images/banners/banner-morning.jpg' : hour >= 12 && hour < 17 ? '/images/banners/banner-afternoon.jpg' : hour >= 17 && hour < 20 ? '/images/banners/banner-evening.jpg' : '/images/banners/banner-night.jpg';
     const clockStr = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
 
     // Auto-subscribe to push notifications
@@ -70,6 +96,10 @@ const HomeScreen: React.FC = () => {
         () => empId ? getTimeRecords({ status: 'pending' }) : Promise.resolve([]),
         [empId]
     );
+    const { data: pendingAllowanceReqs, refetch: refetchPendingAllowance } = useApi(
+        () => empId ? getAllowanceRequests({ status: 'pending' }) : Promise.resolve([]),
+        [empId]
+    );
 
     // Filter: show only requests where I am the current pending approver
     const myPendingRequests = useMemo(() => {
@@ -83,8 +113,9 @@ const HomeScreen: React.FC = () => {
         };
         const leaveItems = (pendingRequests || []).filter(filterFn).map((r: any) => ({ ...r, _type: 'leave' }));
         const timeItems = (pendingTimeRecords || []).filter(filterFn).map((r: any) => ({ ...r, _type: 'time' }));
-        return [...leaveItems, ...timeItems];
-    }, [pendingRequests, pendingTimeRecords, empId, isAdmin]);
+        const allowanceItems = (pendingAllowanceReqs || []).filter(filterFn).map((r: any) => ({ ...r, _type: 'allowance' }));
+        return [...leaveItems, ...timeItems, ...allowanceItems];
+    }, [pendingRequests, pendingTimeRecords, pendingAllowanceReqs, empId, isAdmin]);
 
     const pendingCount = myPendingRequests.length;
 
@@ -92,14 +123,16 @@ const HomeScreen: React.FC = () => {
     const pendingLeave = useMemo(() => myPendingRequests.filter((r: any) => r._type === 'leave' && !r.reason?.startsWith('[OT]')), [myPendingRequests]);
     const pendingOT = useMemo(() => myPendingRequests.filter((r: any) => r._type === 'leave' && r.reason?.startsWith('[OT]')), [myPendingRequests]);
     const pendingTime = useMemo(() => myPendingRequests.filter((r: any) => r._type === 'time'), [myPendingRequests]);
+    const pendingAllowance = useMemo(() => myPendingRequests.filter((r: any) => r._type === 'allowance'), [myPendingRequests]);
 
     // Open detail modal and fetch attachments
     const openApprovalDetail = async (req: any) => {
         setApprovalDetail(req);
         setApprovalAttachments([]);
         try {
-            const isOT = req.reason?.startsWith('[OT]');
-            const category = isOT ? 'ot_attachment' : 'leave_attachment';
+            const isOT = req._type === 'leave' && req.reason?.startsWith('[OT]');
+            const isAllowanceType = req._type === 'allowance';
+            const category = isAllowanceType ? 'allowance_attachment' : isOT ? 'ot_attachment' : 'leave_attachment';
             const files = await getUploads(category, String(req.id));
             setApprovalAttachments(files || []);
         } catch { }
@@ -126,8 +159,11 @@ const HomeScreen: React.FC = () => {
         setApprovalLoading(`${id}-${action}`);
         try {
             const isTimeRecord = req?._type === 'time';
+            const isAllowance = req?._type === 'allowance';
             if (isTimeRecord) {
                 await updateTimeRecord(id, { status: action, approved_by: empId, is_bypass: isBypass });
+            } else if (isAllowance) {
+                await updateAllowanceRequest(id, { status: action, approved_by: empId, is_bypass: isBypass });
             } else {
                 await updateLeaveRequest(id, { status: action, approved_by: empId, is_bypass: isBypass });
             }
@@ -140,6 +176,7 @@ const HomeScreen: React.FC = () => {
             setApprovalDetail(null);
             refetchPending();
             refetchPendingTime();
+            refetchPendingAllowance();
             refetchNotifs();
         } catch (err: any) {
             toast(err.message || 'เกิดข้อผิดพลาด', 'error');
@@ -276,13 +313,18 @@ const HomeScreen: React.FC = () => {
                     setShowFaceVerify(true);
                     return; // Wait for face verification → handleFaceVerified → proceedToLocationCheck
                 }
-                // No face registered → skip face check
+                // No face registered → block clock-in and redirect to profile
+                toast('กรุณาลงทะเบียนใบหน้าก่อนลงเวลา', 'warning');
+                navigate('/profile');
+                return;
             } catch {
-                // Face API error → skip face check gracefully
+                // Face API error → block clock-in to be safe
+                toast('ไม่สามารถตรวจสอบข้อมูลใบหน้าได้ กรุณาลองใหม่', 'error');
+                return;
             }
         }
 
-        // ─── No face check needed → go straight to GPS ───
+        // ─── No face check needed (clock-out) → go straight to GPS ───
         await proceedToLocationCheck(action);
     };
 
@@ -382,11 +424,39 @@ const HomeScreen: React.FC = () => {
     return (
         <div className="pt-14 md:pt-8 pb-24 md:pb-8 px-4 md:px-8 max-w-7xl mx-auto min-h-full">
 
+            <style>{`
+              @keyframes voteIconGlow {
+                0%, 100% { box-shadow: 0 0 0 0 rgba(251,191,36,0); }
+                50% { box-shadow: 0 0 10px 2px rgba(251,191,36,0.2); }
+              }
+              @keyframes voteIconBounce {
+                0%, 100% { transform: translateY(0) rotate(0deg); }
+                25% { transform: translateY(-1.5px) rotate(-3deg); }
+                75% { transform: translateY(-0.5px) rotate(3deg); }
+              }
+              @keyframes activityCardGlow {
+                0%, 100% { box-shadow: 0 1px 3px rgba(251,191,36,0.08); }
+                50% { box-shadow: 0 2px 12px rgba(251,191,36,0.15); }
+              }
+              @keyframes bellSwing {
+                0% { transform: rotate(0deg); }
+                10% { transform: rotate(14deg); }
+                20% { transform: rotate(-12deg); }
+                30% { transform: rotate(10deg); }
+                40% { transform: rotate(-8deg); }
+                50% { transform: rotate(5deg); }
+                60% { transform: rotate(-3deg); }
+                70% { transform: rotate(1deg); }
+                80% { transform: rotate(0deg); }
+                100% { transform: rotate(0deg); }
+              }
+            `}</style>
+
             {/* ═══════════════════ HERO HEADER ═══════════════════ */}
             <header className="mb-6 md:mb-8 relative">
                 {/* Mobile: Banner with time-based background image */}
                 <div className="md:hidden relative overflow-hidden rounded-2xl shadow-md -mx-1">
-                    <img src={bannerImage} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                    <BannerBackgroundAnimation hour={hour} className="absolute inset-0 w-full h-full" />
                     <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/40 to-black/50"></div>
                     <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent"></div>
                     <div className="relative z-10 px-4 py-5 flex justify-between items-center">
@@ -404,9 +474,17 @@ const HomeScreen: React.FC = () => {
                                         : 'bg-white/15 hover:bg-white/25 backdrop-blur-md'
                                         }`}
                                 >
-                                    <span className="material-icons-round text-white text-xl drop-shadow-sm">
-                                        {showNotifications ? 'notifications_active' : 'notifications_none'}
-                                    </span>
+                                    {unreadCount > 0 ? (
+                                        <svg viewBox="0 0 24 24" className="w-5 h-5" style={{ animation: 'bellSwing 1.5s ease-in-out infinite', transformOrigin: 'top center' }}>
+                                            <path d="M12 2C10.9 2 10 2.9 10 4C10 4.1 10 4.2 10 4.3C7.7 5 6 7.2 6 9.8V15L4 17V18H20V17L18 15V9.8C18 7.2 16.3 5 14 4.3C14 4.2 14 4.1 14 4C14 2.9 13.1 2 12 2Z" fill="#FBBF24" stroke="white" strokeWidth="0.8" />
+                                            <path d="M10 19C10 20.1 10.9 21 12 21C13.1 21 14 20.1 14 19" fill="#F59E0B" stroke="white" strokeWidth="0.5" />
+                                            <circle cx="18" cy="5" r="3.5" fill="#EF4444" stroke="white" strokeWidth="1" />
+                                        </svg>
+                                    ) : (
+                                        <span className="material-icons-round text-white text-xl drop-shadow-sm">
+                                            {showNotifications ? 'notifications_active' : 'notifications_none'}
+                                        </span>
+                                    )}
                                     {unreadCount > 0 && (
                                         <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] bg-red-500 rounded-full border-2 border-white/50 flex items-center justify-center">
                                             <span className="text-[10px] font-bold text-white leading-none">{unreadCount}</span>
@@ -426,21 +504,16 @@ const HomeScreen: React.FC = () => {
                 {/* Desktop: Premium hero banner with time-based background image */}
                 <div className="hidden md:block relative overflow-hidden rounded-2xl shadow-lg shadow-black/10 dark:shadow-black/30">
                     {/* Background Image */}
-                    <img src={bannerImage} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                    <BannerBackgroundAnimation hour={hour} className="absolute inset-0 w-full h-full" />
                     {/* Dark overlay for text readability */}
                     <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/40 to-black/50"></div>
                     <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent"></div>
                     {/* Content */}
                     <div className="relative z-10 p-6 lg:p-8 flex justify-between items-center">
-                        <div className="flex items-center gap-5">
-                            <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center shadow-lg border border-white/20">
-                                <span className="material-icons-round text-white text-3xl">waving_hand</span>
-                            </div>
-                            <div>
-                                <p className="text-sm text-white/80 font-medium">{greeting}, <span className="text-white">{clockStr}</span></p>
-                                <h1 className="text-2xl lg:text-3xl font-bold text-white tracking-tight drop-shadow-md">{currentUser?.name || 'ผู้ใช้งาน'}</h1>
-                                <p className="text-xs text-white/70 mt-0.5 drop-shadow-sm">{currentUser?.position || ''} {currentUser?.department ? `· ${currentUser.department}` : ''}</p>
-                            </div>
+                        <div>
+                            <p className="text-sm text-white/80 font-medium">{greeting}, <span className="text-white">{clockStr}</span></p>
+                            <h1 className="text-2xl lg:text-3xl font-bold text-white tracking-tight drop-shadow-md">{currentUser?.name || 'ผู้ใช้งาน'}</h1>
+                            <p className="text-xs text-white/70 mt-0.5 drop-shadow-sm">{currentUser?.position || ''} {currentUser?.department ? `· ${currentUser.department}` : ''}</p>
                         </div>
                         <div className="flex items-center gap-3">
                             <div className="relative" ref={notifRef}>
@@ -451,9 +524,17 @@ const HomeScreen: React.FC = () => {
                                         : 'bg-white/15 hover:bg-white/25 backdrop-blur-md'
                                         }`}
                                 >
-                                    <span className="material-icons-round text-white drop-shadow-sm">
-                                        {showNotifications ? 'notifications_active' : 'notifications_none'}
-                                    </span>
+                                    {unreadCount > 0 ? (
+                                        <svg viewBox="0 0 24 24" className="w-6 h-6" style={{ animation: 'bellSwing 1.5s ease-in-out infinite', transformOrigin: 'top center' }}>
+                                            <path d="M12 2C10.9 2 10 2.9 10 4C10 4.1 10 4.2 10 4.3C7.7 5 6 7.2 6 9.8V15L4 17V18H20V17L18 15V9.8C18 7.2 16.3 5 14 4.3C14 4.2 14 4.1 14 4C14 2.9 13.1 2 12 2Z" fill="#FBBF24" stroke="white" strokeWidth="0.8" />
+                                            <path d="M10 19C10 20.1 10.9 21 12 21C13.1 21 14 20.1 14 19" fill="#F59E0B" stroke="white" strokeWidth="0.5" />
+                                            <circle cx="18" cy="5" r="3.5" fill="#EF4444" stroke="white" strokeWidth="1" />
+                                        </svg>
+                                    ) : (
+                                        <span className="material-icons-round text-white drop-shadow-sm">
+                                            {showNotifications ? 'notifications_active' : 'notifications_none'}
+                                        </span>
+                                    )}
                                     {unreadCount > 0 && (
                                         <span className="absolute -top-1 -right-1 min-w-[20px] h-[20px] bg-red-500 rounded-full border-2 border-white/50 flex items-center justify-center shadow-lg">
                                             <span className="text-[10px] font-bold text-white leading-none">{unreadCount}</span>
@@ -580,6 +661,64 @@ const HomeScreen: React.FC = () => {
                     </div>
                 )}
             </header>
+
+            {/* ═══════════════════ ATTENDANCE ALERTS ═══════════════════ */}
+            {attendanceAlerts.length > 0 && (
+                <button
+                    onClick={() => setShowAlertModal(true)}
+                    className="mb-6 w-full flex items-center gap-3 bg-red-50 dark:bg-red-900/15 border border-red-200 dark:border-red-800/40 rounded-xl px-4 py-3 hover:bg-red-100 dark:hover:bg-red-900/25 transition-colors group text-left"
+                >
+                    <span className="material-icons-round text-red-500 text-lg">warning</span>
+                    <p className="flex-1 text-sm font-semibold text-red-700 dark:text-red-400">คุณมีปัญหาการลงเวลา {attendanceAlerts.length} รายการ</p>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-200 dark:bg-red-800/50 text-red-600 dark:text-red-300 font-bold">{attendanceAlerts.length}</span>
+                    <span className="material-icons-round text-red-400 text-lg group-hover:translate-x-0.5 transition-transform">chevron_right</span>
+                </button>
+            )}
+
+            {/* Attendance Alert Modal */}
+            {showAlertModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setShowAlertModal(false)}>
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+                        {/* Header */}
+                        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+                            <div className="flex items-center gap-2">
+                                <div className="w-9 h-9 rounded-xl bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+                                    <span className="material-icons-round text-red-500">schedule</span>
+                                </div>
+                                <div>
+                                    <h3 className="text-sm font-bold text-gray-900 dark:text-white">แจ้งเตือนการลงเวลา</h3>
+                                    <p className="text-[10px] text-gray-500 dark:text-gray-400">พบปัญหา {attendanceAlerts.length} รายการ</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setShowAlertModal(false)} className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center hover:bg-gray-200 transition-colors">
+                                <span className="material-icons-round text-sm text-gray-500">close</span>
+                            </button>
+                        </div>
+                        {/* Body */}
+                        <div className="px-5 py-4 space-y-2.5 overflow-y-auto max-h-[60vh]">
+                            {attendanceAlerts.map((alert: any, i: number) => (
+                                <div key={i} className={`flex items-start gap-3 p-3 rounded-xl ${alert.type === 'missing' ? 'bg-red-50 dark:bg-red-900/15' : 'bg-orange-50 dark:bg-orange-900/15'}`}>
+                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${alert.type === 'missing' ? 'bg-red-100 dark:bg-red-900/30' : 'bg-orange-100 dark:bg-orange-900/30'}`}>
+                                        <span className={`material-icons-round text-sm ${alert.type === 'missing' ? 'text-red-500' : 'text-orange-500'}`}>
+                                            {alert.type === 'missing' ? 'cancel' : 'error_outline'}
+                                        </span>
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <p className={`text-xs font-semibold ${alert.type === 'missing' ? 'text-red-700 dark:text-red-400' : 'text-orange-700 dark:text-orange-400'}`}>
+                                            {alert.type === 'missing' ? 'ขาดลงเวลา' : 'ลงเวลาไม่ครบ'}
+                                        </p>
+                                        <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">{alert.message}</p>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        {/* Footer */}
+                        <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-700">
+                            <button onClick={() => setShowAlertModal(false)} className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold shadow-sm hover:bg-primary/90 transition-all">ปิด</button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* ═══════════════════ ROW 1: Attendance + Quotas + Quick Menu ═══════════════════ */}
             <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-6 mb-6">
@@ -762,34 +901,98 @@ const HomeScreen: React.FC = () => {
                         </h3>
                         {/* Mobile: icon grid */}
                         <div className={`md:hidden grid ${isAdmin ? 'grid-cols-4' : 'grid-cols-3'} gap-3`}>
-                            {QUICK_MENU_ITEMS.filter(item => !item.adminOnly || isAdmin).map((item, i) => {
+                            {filteredMenuItems.filter(item => !item.adminOnly || isAdmin).map((item, i) => {
                                 const action = item.path ? () => navigate(item.path!) : undefined;
+                                const isVoteItem = item.path === '/vote';
                                 return (
                                     <button key={i} onClick={action} className="flex flex-col items-center gap-1.5 group">
-                                        <div className="w-12 h-12 rounded-xl bg-primary/5 border border-primary/10 flex items-center justify-center shadow-sm group-active:scale-95 transition-transform relative">
-                                            <span className="material-icons-round text-primary text-xl">{item.icon}</span>
+                                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-sm group-active:scale-95 transition-transform relative ${isVoteItem
+                                            ? 'bg-gradient-to-br from-amber-100 to-orange-100 dark:from-amber-900/30 dark:to-orange-900/30 border border-amber-200/60 dark:border-amber-700/40'
+                                            : 'bg-primary/5 border border-primary/10'
+                                            }`} style={isVoteItem ? { animation: 'voteIconGlow 3s ease-in-out infinite' } : undefined}>
+                                            {isVoteItem ? (
+                                                <svg viewBox="0 0 40 40" className="w-7 h-7" style={{ animation: 'voteIconBounce 2.5s ease-in-out infinite' }}>
+                                                    {/* Trophy */}
+                                                    <path d="M12 7h16v3.5c0 5-3.5 9.5-8 11-4.5-1.5-8-6-8-11V7z" fill="url(#hsTrophyG)" stroke="#D97706" strokeWidth="1.2" />
+                                                    <path d="M12 10H9c-.8 0-1.5.7-1.5 1.5v1c0 2.5 1.5 4 3 4.5H12" fill="none" stroke="#D97706" strokeWidth="1.2" strokeLinecap="round" />
+                                                    <path d="M28 10h3c.8 0 1.5.7 1.5 1.5v1c0 2.5-1.5 4-3 4.5h-1.5" fill="none" stroke="#D97706" strokeWidth="1.2" strokeLinecap="round" />
+                                                    <rect x="17" y="21" width="6" height="5" rx="1" fill="#D97706" />
+                                                    <rect x="13" y="26" width="14" height="3.5" rx="1.5" fill="url(#hsTrophyG)" stroke="#D97706" strokeWidth="0.8" />
+                                                    {/* Star */}
+                                                    <path d="M20 11l1.2 2.5 2.8.4-2 2 .4 2.8L20 17.2l-2.4 1.5.4-2.8-2-2 2.8-.4z" fill="#FFF" opacity="0.85">
+                                                        <animate attributeName="opacity" values="0.85;0.4;0.85" dur="1.8s" repeatCount="indefinite" />
+                                                    </path>
+                                                    {/* Sparkles */}
+                                                    <circle cx="7" cy="5" r="0" fill="#FBBF24">
+                                                        <animate attributeName="r" values="0;1.5;0" dur="2s" begin="0s" repeatCount="indefinite" />
+                                                        <animate attributeName="opacity" values="0;1;0" dur="2s" begin="0s" repeatCount="indefinite" />
+                                                    </circle>
+                                                    <circle cx="33" cy="4" r="0" fill="#F59E0B">
+                                                        <animate attributeName="r" values="0;1.3;0" dur="2s" begin="0.6s" repeatCount="indefinite" />
+                                                        <animate attributeName="opacity" values="0;1;0" dur="2s" begin="0.6s" repeatCount="indefinite" />
+                                                    </circle>
+                                                    <circle cx="5" cy="18" r="0" fill="#FCD34D">
+                                                        <animate attributeName="r" values="0;1;0" dur="2.5s" begin="1s" repeatCount="indefinite" />
+                                                        <animate attributeName="opacity" values="0;1;0" dur="2.5s" begin="1s" repeatCount="indefinite" />
+                                                    </circle>
+                                                    <circle cx="35" cy="16" r="0" fill="#FBBF24">
+                                                        <animate attributeName="r" values="0;1.2;0" dur="2.2s" begin="0.3s" repeatCount="indefinite" />
+                                                        <animate attributeName="opacity" values="0;1;0" dur="2.2s" begin="0.3s" repeatCount="indefinite" />
+                                                    </circle>
+                                                    <defs>
+                                                        <linearGradient id="hsTrophyG" x1="0" y1="0" x2="0" y2="1">
+                                                            <stop offset="0%" stopColor="#FCD34D" />
+                                                            <stop offset="100%" stopColor="#F59E0B" />
+                                                        </linearGradient>
+                                                    </defs>
+                                                </svg>
+                                            ) : (
+                                                <span className="material-icons-round text-primary text-xl">{item.icon}</span>
+                                            )}
                                             {item.hasNotif && (
                                                 <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white dark:border-gray-800"></span>
                                             )}
                                         </div>
-                                        <span className="text-[10px] text-center font-medium text-gray-600 dark:text-gray-300 leading-tight">{item.label}</span>
+                                        <span className={`text-[10px] text-center font-medium leading-tight ${isVoteItem ? 'text-amber-700 dark:text-amber-400 font-semibold' : 'text-gray-600 dark:text-gray-300'}`}>{item.label}</span>
                                     </button>
                                 );
                             })}
                         </div>
                         {/* Desktop: list-style buttons */}
                         <div className="hidden md:grid grid-cols-2 gap-2.5">
-                            {QUICK_MENU_ITEMS.filter(item => !item.adminOnly || isAdmin).map((item, i) => {
+                            {filteredMenuItems.filter(item => !item.adminOnly || isAdmin).map((item, i) => {
                                 const action = item.path ? () => navigate(item.path!) : undefined;
+                                const isVoteItem = item.path === '/vote';
                                 return (
-                                    <button key={i} onClick={action} className="flex items-center px-3 py-2.5 gap-3 group bg-gray-50 dark:bg-gray-700/50 rounded-xl hover:bg-primary/5 dark:hover:bg-primary/10 transition-all text-left border border-transparent hover:border-primary/20">
-                                        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 relative group-hover:bg-primary/20 transition-colors">
-                                            <span className="material-icons-round text-primary text-base">{item.icon}</span>
+                                    <button key={i} onClick={action} className={`flex items-center px-3 py-2.5 gap-3 group rounded-xl transition-all text-left border ${isVoteItem
+                                        ? 'bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/15 dark:to-orange-900/15 border-amber-200/50 dark:border-amber-700/30 hover:border-amber-300 hover:shadow-md'
+                                        : 'bg-gray-50 dark:bg-gray-700/50 border-transparent hover:bg-primary/5 dark:hover:bg-primary/10 hover:border-primary/20'
+                                        }`} style={isVoteItem ? { animation: 'voteIconGlow 3s ease-in-out infinite' } : undefined}>
+                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 relative transition-colors ${isVoteItem ? 'bg-amber-100 dark:bg-amber-900/40' : 'bg-primary/10 group-hover:bg-primary/20'
+                                            }`}>
+                                            {isVoteItem ? (
+                                                <svg viewBox="0 0 40 40" className="w-5 h-5" style={{ animation: 'voteIconBounce 2.5s ease-in-out infinite' }}>
+                                                    <path d="M12 7h16v3.5c0 5-3.5 9.5-8 11-4.5-1.5-8-6-8-11V7z" fill="url(#hsTrophyGD)" stroke="#D97706" strokeWidth="1.2" />
+                                                    <path d="M12 10H9c-.8 0-1.5.7-1.5 1.5v1c0 2.5 1.5 4 3 4.5H12" fill="none" stroke="#D97706" strokeWidth="1.2" strokeLinecap="round" />
+                                                    <path d="M28 10h3c.8 0 1.5.7 1.5 1.5v1c0 2.5-1.5 4-3 4.5h-1.5" fill="none" stroke="#D97706" strokeWidth="1.2" strokeLinecap="round" />
+                                                    <rect x="17" y="21" width="6" height="5" rx="1" fill="#D97706" />
+                                                    <rect x="13" y="26" width="14" height="3.5" rx="1.5" fill="url(#hsTrophyGD)" stroke="#D97706" strokeWidth="0.8" />
+                                                    <path d="M20 11l1.2 2.5 2.8.4-2 2 .4 2.8L20 17.2l-2.4 1.5.4-2.8-2-2 2.8-.4z" fill="#FFF" opacity="0.85">
+                                                        <animate attributeName="opacity" values="0.85;0.4;0.85" dur="1.8s" repeatCount="indefinite" />
+                                                    </path>
+                                                    <circle cx="7" cy="5" r="0" fill="#FBBF24"><animate attributeName="r" values="0;1.5;0" dur="2s" repeatCount="indefinite" /><animate attributeName="opacity" values="0;1;0" dur="2s" repeatCount="indefinite" /></circle>
+                                                    <circle cx="33" cy="4" r="0" fill="#F59E0B"><animate attributeName="r" values="0;1.3;0" dur="2s" begin="0.6s" repeatCount="indefinite" /><animate attributeName="opacity" values="0;1;0" dur="2s" begin="0.6s" repeatCount="indefinite" /></circle>
+                                                    <defs><linearGradient id="hsTrophyGD" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#FCD34D" /><stop offset="100%" stopColor="#F59E0B" /></linearGradient></defs>
+                                                </svg>
+                                            ) : (
+                                                <span className="material-icons-round text-primary text-base">{item.icon}</span>
+                                            )}
                                             {item.hasNotif && (
                                                 <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white dark:border-gray-800"></span>
                                             )}
                                         </div>
-                                        <span className="text-xs font-medium text-gray-600 dark:text-gray-300 group-hover:text-primary transition-colors leading-tight">{item.label}</span>
+                                        <span className={`text-xs font-medium leading-tight transition-colors ${isVoteItem ? 'text-amber-700 dark:text-amber-400 font-semibold' : 'text-gray-600 dark:text-gray-300 group-hover:text-primary'
+                                            }`}>{item.label}</span>
                                     </button>
                                 );
                             })}
@@ -798,8 +1001,62 @@ const HomeScreen: React.FC = () => {
                 </section>
             </div>
 
+            {/* ═══════════════════ ACTIVITIES SECTION ═══════════════════ */}
+            {enabledActivities.length > 0 && (
+                <section className="mt-6">
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-5">
+                        <h3 className="text-base font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                            <span className="material-icons-round text-amber-500 text-lg">celebration</span>
+                            กิจกรรม
+                        </h3>
+                        {/* Mobile: icon grid — same as quick menu */}
+                        <div className="md:hidden grid grid-cols-3 gap-3">
+                            {enabledActivities.map((item, i) => (
+                                <button key={i} onClick={() => item.path && navigate(item.path)} className="flex flex-col items-center gap-1.5 group">
+                                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-100 to-orange-100 dark:from-amber-900/30 dark:to-orange-900/30 border border-amber-200/60 dark:border-amber-700/40 flex items-center justify-center shadow-sm group-active:scale-95 transition-transform" style={{ animation: 'activityCardGlow 4s ease-in-out infinite' }}>
+                                        <svg viewBox="0 0 40 40" className="w-7 h-7" style={{ animation: 'voteIconBounce 2.5s ease-in-out infinite' }}>
+                                            <path d="M12 7h16v3.5c0 5-3.5 9.5-8 11-4.5-1.5-8-6-8-11V7z" fill="url(#actGridTM)" stroke="#D97706" strokeWidth="1.2" />
+                                            <path d="M12 10H9c-.8 0-1.5.7-1.5 1.5v1c0 2.5 1.5 4 3 4.5H12" fill="none" stroke="#D97706" strokeWidth="1.2" strokeLinecap="round" />
+                                            <path d="M28 10h3c.8 0 1.5.7 1.5 1.5v1c0 2.5-1.5 4-3 4.5h-1.5" fill="none" stroke="#D97706" strokeWidth="1.2" strokeLinecap="round" />
+                                            <rect x="17" y="21" width="6" height="5" rx="1" fill="#D97706" />
+                                            <rect x="13" y="26" width="14" height="3.5" rx="1.5" fill="url(#actGridTM)" stroke="#D97706" strokeWidth="0.8" />
+                                            <path d="M20 11l1.2 2.5 2.8.4-2 2 .4 2.8L20 17.2l-2.4 1.5.4-2.8-2-2 2.8-.4z" fill="#FFF" opacity="0.85">
+                                                <animate attributeName="opacity" values="0.85;0.4;0.85" dur="1.8s" repeatCount="indefinite" />
+                                            </path>
+                                            <circle cx="7" cy="5" r="0" fill="#FBBF24"><animate attributeName="r" values="0;1.5;0" dur="2s" repeatCount="indefinite" /><animate attributeName="opacity" values="0;1;0" dur="2s" repeatCount="indefinite" /></circle>
+                                            <circle cx="33" cy="4" r="0" fill="#F59E0B"><animate attributeName="r" values="0;1.3;0" dur="2s" begin="0.6s" repeatCount="indefinite" /><animate attributeName="opacity" values="0;1;0" dur="2s" begin="0.6s" repeatCount="indefinite" /></circle>
+                                            <defs><linearGradient id="actGridTM" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#FCD34D" /><stop offset="100%" stopColor="#F59E0B" /></linearGradient></defs>
+                                        </svg>
+                                    </div>
+                                    <span className="text-[10px] text-center font-semibold text-amber-700 dark:text-amber-400 leading-tight">{item.label}</span>
+                                </button>
+                            ))}
+                        </div>
+                        {/* Desktop: list-style buttons — same as quick menu */}
+                        <div className="hidden md:flex flex-wrap gap-2.5">
+                            {enabledActivities.map((item, i) => (
+                                <button key={i} onClick={() => item.path && navigate(item.path)} className="inline-flex items-center px-4 py-2.5 gap-3 group bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/15 dark:to-orange-900/15 rounded-xl hover:shadow-md border border-amber-200/50 dark:border-amber-700/30 hover:border-amber-300 transition-all">
+                                    <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center shrink-0">
+                                        <svg viewBox="0 0 40 40" className="w-5 h-5" style={{ animation: 'voteIconBounce 2.5s ease-in-out infinite' }}>
+                                            <path d="M12 7h16v3.5c0 5-3.5 9.5-8 11-4.5-1.5-8-6-8-11V7z" fill="url(#actGridTD)" stroke="#D97706" strokeWidth="1.2" />
+                                            <rect x="17" y="21" width="6" height="5" rx="1" fill="#D97706" />
+                                            <rect x="13" y="26" width="14" height="3.5" rx="1.5" fill="url(#actGridTD)" stroke="#D97706" strokeWidth="0.8" />
+                                            <path d="M20 11l1.2 2.5 2.8.4-2 2 .4 2.8L20 17.2l-2.4 1.5.4-2.8-2-2 2.8-.4z" fill="#FFF" opacity="0.85">
+                                                <animate attributeName="opacity" values="0.85;0.4;0.85" dur="1.8s" repeatCount="indefinite" />
+                                            </path>
+                                            <defs><linearGradient id="actGridTD" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#FCD34D" /><stop offset="100%" stopColor="#F59E0B" /></linearGradient></defs>
+                                        </svg>
+                                    </div>
+                                    <span className="text-xs font-semibold text-amber-700 dark:text-amber-400 leading-tight">{item.label}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </section>
+            )}
+
             {/* ═══════════════════ ROW 2: Approvals + News ═══════════════════ */}
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-6">
+            <div className="mt-6 grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-6">
 
                 {/* ── Pending Approvals ── */}
                 <section className="md:col-span-7">
@@ -827,16 +1084,18 @@ const HomeScreen: React.FC = () => {
                                     <thead>
                                         <tr className="border-b border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30">
                                             <th className="text-left px-5 py-2.5 text-xs font-semibold text-gray-500">พนักงาน</th>
-                                            <th className="text-center px-2 py-2.5 text-xs font-semibold text-gray-500">ประเภท</th>
+                                            <th className="text-center px-2 py-2.5 text-xs font-semibold text-gray-500">ประเภทการขอ</th>
+                                            <th className="text-center px-2 py-2.5 text-xs font-semibold text-gray-500">รายละเอียด</th>
                                             <th className="text-center px-2 py-2.5 text-xs font-semibold text-gray-500">จำนวน</th>
                                             <th className="text-center px-2 py-2.5 text-xs font-semibold text-gray-500">สถานะขั้น</th>
                                             <th className="text-center px-5 py-2.5 text-xs font-semibold text-gray-500">ดำเนินการ</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {([...pendingOT, ...pendingLeave, ...pendingTime].slice(0, showAllApprovals ? undefined : 5)).map((req: any) => {
+                                        {([...pendingOT, ...pendingLeave, ...pendingTime, ...pendingAllowance].slice(0, showAllApprovals ? undefined : 5)).map((req: any) => {
                                             const isOT = req._type === 'leave' && req.reason?.startsWith('[OT]');
                                             const isTime = req._type === 'time';
+                                            const isAllowanceReq = req._type === 'allowance';
                                             return (
                                                 <tr key={`${req._type}-${req.id}`} className="border-b last:border-0 border-gray-50 dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors cursor-pointer" onClick={() => openApprovalDetail(req)}>
                                                     <td className="px-5 py-3">
@@ -846,12 +1105,17 @@ const HomeScreen: React.FC = () => {
                                                         </div>
                                                     </td>
                                                     <td className="text-center px-2 py-3">
-                                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${isTime ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600' : isOT ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : `bg-${req.leave_type_color || 'gray'}-100 dark:bg-${req.leave_type_color || 'gray'}-900/30 text-${req.leave_type_color || 'gray'}-600`}`}>
-                                                            {isTime ? 'บันทึกเวลา' : isOT ? 'OT' : req.leave_type_name}
+                                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${isAllowanceReq ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600' : isTime ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600' : isOT ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : 'bg-green-100 dark:bg-green-900/30 text-green-600'}`}>
+                                                            {isAllowanceReq ? 'เบี้ยเลี้ยง' : isTime ? 'บันทึกเวลา' : isOT ? 'โอที' : 'ลา'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="text-center px-2 py-3">
+                                                        <span className="text-[10px] font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                                                            {isAllowanceReq ? req.allowance_type : isTime ? (req.record_date ? new Date(req.record_date).toLocaleDateString('th-TH', { day: '2-digit', month: 'short' }) : '-') : isOT ? 'OT' : req.leave_type_name}
                                                         </span>
                                                     </td>
                                                     <td className="text-center px-2 py-3 text-xs text-gray-600 dark:text-gray-400">
-                                                        {isTime ? (req.record_date ? new Date(req.record_date).toLocaleDateString('th-TH', { day: '2-digit', month: 'short' }) : '-') : isOT ? `${req.total_days} ชม.` : `${req.total_days} วัน`}
+                                                        {isAllowanceReq ? `฿${Number(req.amount || 0).toLocaleString()}` : isTime ? (req.record_date ? new Date(req.record_date).toLocaleDateString('th-TH', { day: '2-digit', month: 'short' }) : '-') : isOT ? `${req.total_days} ชม.` : `${req.total_days} วัน`}
                                                     </td>
                                                     <td className="text-center px-2 py-3">
                                                         <div className="flex flex-col items-center gap-0.5">
@@ -886,9 +1150,10 @@ const HomeScreen: React.FC = () => {
                         {/* Mobile: Card list */}
                         <div className="md:hidden px-4 pb-4 space-y-2.5">
                             {pendingCount > 0 ? (
-                                ([...pendingOT, ...pendingLeave, ...pendingTime].slice(0, showAllApprovals ? undefined : 3)).map((req: any) => {
+                                ([...pendingOT, ...pendingLeave, ...pendingTime, ...pendingAllowance].slice(0, showAllApprovals ? undefined : 3)).map((req: any) => {
                                     const isOT = req._type === 'leave' && req.reason?.startsWith('[OT]');
                                     const isTime = req._type === 'time';
+                                    const isAllowanceReq = req._type === 'allowance';
                                     return (
                                         <button key={`${req._type}-${req.id}`} onClick={() => openApprovalDetail(req)}
                                             className="w-full bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3.5 hover:shadow-md transition-all active:scale-[0.99] text-left">
@@ -898,12 +1163,15 @@ const HomeScreen: React.FC = () => {
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-center gap-2">
                                                         <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{req.employee_name}</p>
-                                                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${isTime ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600' : isOT ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : `bg-${req.leave_type_color || 'gray'}-100 dark:bg-${req.leave_type_color || 'gray'}-900/30 text-${req.leave_type_color || 'gray'}-600`}`}>
-                                                            {isTime ? 'บันทึกเวลา' : isOT ? 'OT' : req.leave_type_name}
+                                                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${isAllowanceReq ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600' : isTime ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600' : isOT ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : 'bg-green-100 dark:bg-green-900/30 text-green-600'}`}>
+                                                            {isAllowanceReq ? 'เบี้ยเลี้ยง' : isTime ? 'บันทึกเวลา' : isOT ? 'โอที' : 'ลา'}
+                                                        </span>
+                                                        <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                                                            {isAllowanceReq ? req.allowance_type : isTime ? '' : isOT ? '' : req.leave_type_name}
                                                         </span>
                                                     </div>
                                                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                                                        {req.department || 'ไม่ระบุแผนก'} · {isTime ? (req.record_date ? new Date(req.record_date).toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' }) : '-') : isOT ? `${req.total_days} ชม.` : `${req.total_days} วัน`}
+                                                        {req.department || 'ไม่ระบุแผนก'} · {isAllowanceReq ? `฿${Number(req.amount || 0).toLocaleString()}` : isTime ? (req.record_date ? new Date(req.record_date).toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' }) : '-') : isOT ? `${req.total_days} ชม.` : `${req.total_days} วัน`}
                                                     </p>
                                                     <div className="flex items-center gap-2 mt-1">
                                                         <span className={`flex items-center gap-0.5 text-[10px] ${req.tier1_status === 'approved' ? 'text-green-600' : req.tier1_status === 'rejected' ? 'text-red-500' : 'text-yellow-500'}`}>
@@ -1090,8 +1358,10 @@ function ApprovalDetailModal({ req, attachments, onClose, onApprove, onReject, l
 }) {
     const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
     const isTimeRecord = req._type === 'time';
-    const isOT = !isTimeRecord && req.reason?.startsWith('[OT]');
-    const reasonText = isTimeRecord ? req.reason : (isOT ? req.reason.replace('[OT] ', '').replace(/^\[OT\]\s*/, '') : req.reason);
+    const isAllowance = req._type === 'allowance';
+    const isOT = !isTimeRecord && !isAllowance && req.reason?.startsWith('[OT]');
+    const isLeave = !isTimeRecord && !isAllowance && !isOT;
+    const reasonText = isTimeRecord ? req.reason : isAllowance ? req.reason : (isOT ? req.reason?.replace('[OT] ', '').replace(/^\[OT\]\s*/, '') : req.reason);
     const startDate = req.start_date ? new Date(req.start_date) : null;
     const endDate = req.end_date ? new Date(req.end_date) : null;
     const fmtDate = (d: Date | null) => d ? d.toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
@@ -1100,10 +1370,18 @@ function ApprovalDetailModal({ req, attachments, onClose, onApprove, onReject, l
     const imageAttachments = attachments.filter((f: any) => f.mime_type?.startsWith('image/'));
     const otherAttachments = attachments.filter((f: any) => !f.mime_type?.startsWith('image/'));
 
+    // Determine type label and colors
+    const typeLabel = isAllowance ? `เบี้ยเลี้ยง — ${req.allowance_type || ''}` : isTimeRecord ? 'บันทึกเวลา' : isOT ? 'ขอ OT' : req.leave_type_name;
+    const typeIcon = isAllowance ? 'savings' : isTimeRecord ? 'edit_calendar' : isOT ? 'schedule' : 'event';
+    const typeBadgeClass = isAllowance ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+        : isTimeRecord ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
+            : isOT ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                : `bg-${req.leave_type_color || 'gray'}-100 dark:bg-${req.leave_type_color || 'gray'}-900/30 text-${req.leave_type_color || 'gray'}-700`;
+
     const modal = (
         <div className="fixed inset-0 z-[99999] flex items-end sm:items-center justify-center" onClick={onClose}>
             <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-            <div className="relative bg-white dark:bg-gray-800 w-full sm:w-[420px] sm:rounded-2xl rounded-t-2xl shadow-2xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="relative bg-white dark:bg-gray-800 w-full sm:w-[440px] sm:rounded-2xl rounded-t-2xl shadow-2xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                 {/* Header */}
                 <div className="sticky top-0 bg-white dark:bg-gray-800 px-5 pt-5 pb-3 border-b border-gray-100 dark:border-gray-700 z-10">
                     <div className="flex items-center justify-between">
@@ -1115,25 +1393,106 @@ function ApprovalDetailModal({ req, attachments, onClose, onApprove, onReject, l
                 </div>
 
                 <div className="p-5 space-y-5">
-                    {/* Employee Profile */}
+                    {/* Employee Profile + Type Badge */}
                     <div className="flex items-center gap-3">
                         <img src={req.employee_avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(req.employee_name || '')}
                             alt="" className="w-14 h-14 rounded-full object-cover border-2 border-gray-100 dark:border-gray-700" />
-                        <div>
+                        <div className="flex-1 min-w-0">
                             <p className="text-base font-bold text-gray-900 dark:text-white">{req.employee_name}</p>
                             <p className="text-sm text-gray-500 dark:text-gray-400">{req.department || 'ไม่ระบุแผนก'}</p>
                         </div>
                     </div>
 
                     {/* Type Badge */}
-                    <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold ${isTimeRecord ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300' : isOT ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : `bg-${req.leave_type_color || 'gray'}-100 dark:bg-${req.leave_type_color || 'gray'}-900/30 text-${req.leave_type_color || 'gray'}-700`}`}>
-                        <span className="material-icons-round text-sm">{isTimeRecord ? 'edit_calendar' : isOT ? 'schedule' : 'event'}</span>
-                        {isTimeRecord ? 'บันทึกเวลา' : isOT ? 'ขอ OT' : req.leave_type_name}
+                    <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold ${typeBadgeClass}`}>
+                        <span className="material-icons-round text-sm">{typeIcon}</span>
+                        {typeLabel}
                     </div>
 
-                    {/* Date / Time Info */}
-                    <div className="bg-gray-50 dark:bg-gray-900/50 rounded-xl p-4 space-y-3">
-                        {isTimeRecord ? (<>
+                    {/* ═══ Allowance-specific Details ═══ */}
+                    {isAllowance && (
+                        <div className="bg-amber-50/60 dark:bg-amber-900/10 rounded-xl p-4 space-y-3 border border-amber-100 dark:border-amber-900/30">
+                            {/* Amount - highlighted */}
+                            <div className="flex items-center justify-between">
+                                <span className="text-sm text-gray-500 flex items-center gap-1.5">
+                                    <span className="material-icons-round text-sm text-amber-500">payments</span>
+                                    จำนวนเงิน
+                                </span>
+                                <span className="font-bold text-xl text-amber-600 dark:text-amber-400">฿{Number(req.amount || 0).toLocaleString()}</span>
+                            </div>
+
+                            {/* Location Name */}
+                            {req.location_name && (
+                                <div className="flex items-start justify-between text-sm gap-2">
+                                    <span className="text-gray-500 flex items-center gap-1.5 shrink-0">
+                                        <span className="material-icons-round text-sm text-amber-500">place</span>
+                                        สถานที่
+                                    </span>
+                                    <span className="font-semibold text-gray-900 dark:text-white text-right">{req.location_name}</span>
+                                </div>
+                            )}
+
+                            {/* Location Address */}
+                            {req.location_address && (
+                                <div className="flex items-start justify-between text-sm gap-2">
+                                    <span className="text-gray-500 flex items-center gap-1.5 shrink-0">
+                                        <span className="material-icons-round text-sm text-amber-500">home</span>
+                                        ที่อยู่
+                                    </span>
+                                    <span className="text-gray-700 dark:text-gray-300 text-right text-xs leading-relaxed">{req.location_address}</span>
+                                </div>
+                            )}
+
+                            {/* Date range */}
+                            <div className="flex items-center justify-between text-sm">
+                                <span className="text-gray-500 flex items-center gap-1.5">
+                                    <span className="material-icons-round text-sm text-amber-500">calendar_today</span>
+                                    วันที่
+                                </span>
+                                <span className="font-semibold text-gray-900 dark:text-white">
+                                    {fmtDate(startDate)}{endDate && startDate?.getTime() !== endDate?.getTime() ? ` – ${fmtDate(endDate)}` : ''}
+                                </span>
+                            </div>
+
+                            {/* Time range */}
+                            {(req.start_time || req.end_time) && (
+                                <div className="flex items-center justify-between text-sm">
+                                    <span className="text-gray-500 flex items-center gap-1.5">
+                                        <span className="material-icons-round text-sm text-amber-500">schedule</span>
+                                        เวลา
+                                    </span>
+                                    <span className="font-semibold text-gray-900 dark:text-white">
+                                        {req.start_time?.substring(0, 5) || '-'} – {req.end_time?.substring(0, 5) || '-'}
+                                    </span>
+                                </div>
+                            )}
+
+                            {/* Google Maps link */}
+                            {req.location_link && (
+                                <a href={req.location_link} target="_blank" rel="noopener noreferrer"
+                                    className="flex items-center gap-2 bg-white dark:bg-gray-800 rounded-lg px-3 py-2 border border-amber-200 dark:border-amber-800 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors text-sm">
+                                    <span className="material-icons-round text-red-500 text-lg">map</span>
+                                    <span className="text-blue-600 dark:text-blue-400 font-medium flex-1 truncate">ดูตำแหน่งใน Google Maps</span>
+                                    <span className="material-icons-round text-gray-400 text-sm">open_in_new</span>
+                                </a>
+                            )}
+
+                            {/* Location Detail (text from employee) */}
+                            {req.location_detail && (
+                                <div className="space-y-1">
+                                    <span className="text-xs text-gray-500 font-semibold flex items-center gap-1">
+                                        <span className="material-icons-round text-xs text-amber-500">edit_note</span>
+                                        รายละเอียดสถานที่
+                                    </span>
+                                    <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap bg-white dark:bg-gray-800 rounded-lg px-3 py-2 border border-amber-100 dark:border-amber-900/30">{req.location_detail}</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* ═══ Time Record Details ═══ */}
+                    {isTimeRecord && (
+                        <div className="bg-gray-50 dark:bg-gray-900/50 rounded-xl p-4 space-y-3">
                             <div className="flex items-center justify-between text-sm">
                                 <span className="text-gray-500">วันที่</span>
                                 <span className="font-semibold text-gray-900 dark:text-white">{req.record_date ? new Date(req.record_date).toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}</span>
@@ -1150,12 +1509,17 @@ function ApprovalDetailModal({ req, attachments, onClose, onApprove, onReject, l
                                 <span className="text-gray-500">สถานที่</span>
                                 <span className="font-semibold text-gray-900 dark:text-white">{req.work_location_name || req.location_name}</span>
                             </div>)}
-                        </>) : (<>
+                        </div>
+                    )}
+
+                    {/* ═══ Leave / OT Details ═══ */}
+                    {(isLeave || isOT) && (
+                        <div className="bg-gray-50 dark:bg-gray-900/50 rounded-xl p-4 space-y-3">
                             <div className="flex items-center justify-between text-sm">
                                 <span className="text-gray-500">{isOT ? 'วันที่' : 'วันเริ่ม'}</span>
                                 <span className="font-semibold text-gray-900 dark:text-white">{fmtDate(startDate)} {isOT && fmtTime(startDate)}</span>
                             </div>
-                            {!isOT && (<div className="flex items-center justify-between text-sm">
+                            {isLeave && (<div className="flex items-center justify-between text-sm">
                                 <span className="text-gray-500">วันสิ้นสุด</span>
                                 <span className="font-semibold text-gray-900 dark:text-white">{fmtDate(endDate)}</span>
                             </div>)}
@@ -1167,8 +1531,8 @@ function ApprovalDetailModal({ req, attachments, onClose, onApprove, onReject, l
                                 <span className="text-gray-500">{isOT ? 'ชั่วโมง OT' : 'จำนวนวัน'}</span>
                                 <span className="font-bold text-lg text-primary">{req.total_days} {isOT ? 'ชม.' : 'วัน'}</span>
                             </div>
-                        </>)}
-                    </div>
+                        </div>
+                    )}
 
                     {/* Reason */}
                     {reasonText && (

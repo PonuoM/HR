@@ -51,7 +51,7 @@ if ($method === 'GET') {
     $show_inactive = isset($_GET['show_inactive']) && $_GET['show_inactive'] === '1';
     $where = $show_inactive ? "e.company_id = ?" : "e.is_active = 1 AND e.company_id = ?";
 
-    $stmt = $conn->prepare("SELECT e.id, e.name, e.email, e.avatar, e.is_admin, e.is_active, e.employment_type,
+    $stmt = $conn->prepare("SELECT e.id, e.name, e.nickname, e.email, e.avatar, e.is_admin, e.is_active, e.employment_type,
                    e.approver_id, e.approver2_id, e.base_salary, e.hire_date, e.terminated_at,
                    d.name AS department, d.id AS department_id,
                    p.name AS position, p.id AS position_id, p.can_have_subordinates,
@@ -80,6 +80,7 @@ if ($method === 'POST') {
     $body = get_json_body();
     $id = $conn->real_escape_string($body['id'] ?? '');
     $name = $conn->real_escape_string($body['name'] ?? '');
+    $nickname = !empty($body['nickname']) ? $conn->real_escape_string($body['nickname']) : null;
     $email = $body['email'] ?? '';
     $password = $body['password'] ?? '1234';
     $department_id = isset($body['department_id']) ? (int)$body['department_id'] : null;
@@ -124,9 +125,9 @@ if ($method === 'POST') {
     $hashedPassword = password_hash($password, PASSWORD_BCRYPT);
     $is_admin = (!empty($body['is_admin']) && $is_caller_superadmin) ? 1 : 0;
 
-    $stmt = $conn->prepare("INSERT INTO employees (id, company_id, name, email, password, department_id, position_id, base_salary, hire_date, approver_id, approver2_id, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param('sisssiidsssi',
-        $id, $target_company_id, $name, $email, $hashedPassword,
+    $stmt = $conn->prepare("INSERT INTO employees (id, company_id, name, nickname, email, password, department_id, position_id, base_salary, hire_date, approver_id, approver2_id, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $stmt->bind_param('sissssiidsssi',
+        $id, $target_company_id, $name, $nickname, $email, $hashedPassword,
         $department_id, $position_id, $base_salary, $hire_date, $approver_id, $approver2_id, $is_admin
     );
     $stmt->execute();
@@ -174,6 +175,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
     // Map of allowed fields => SQL type for bind_param
     $allowed = [
         'name'          => 's',
+        'nickname'      => 's',
         'email'         => 's',
         'department_id' => 'i',
         'position_id'   => 'i',
@@ -194,7 +196,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
         if (array_key_exists($field, $body)) {
             $val = $body[$field];
             // Handle empty strings for nullable fields
-            if (in_array($field, ['department_id', 'position_id', 'base_salary', 'hire_date', 'approver_id', 'approver2_id']) && ($val === '' || $val === null)) {
+            if (in_array($field, ['department_id', 'position_id', 'base_salary', 'hire_date', 'approver_id', 'approver2_id', 'nickname']) && ($val === '' || $val === null)) {
                 $val = null;
             }
             $setClauses[] = "$field = ?";

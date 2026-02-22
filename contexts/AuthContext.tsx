@@ -14,6 +14,7 @@ interface AuthUser {
     is_active: number;
     company_id: number;
     is_superadmin: number;
+    face_registered_at: string | null;
 }
 
 interface Company {
@@ -30,7 +31,7 @@ interface AuthContextValue {
     isAdmin: boolean;
     isSuperAdmin: boolean;
     loading: boolean;
-    login: (employeeId: string, password: string) => Promise<{ device_warning?: string }>;
+    login: (employeeId: string, password: string) => Promise<{ device_warning?: string; face_registered_at?: string | null }>;
     logout: () => void;
     updateUser: (updates: Partial<AuthUser>) => void;
     setActiveCompany: (company: Company) => void;
@@ -144,7 +145,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             token: data.token,
         }));
 
-        return { device_warning: data.device_warning };
+        return { device_warning: data.device_warning, face_registered_at: data.user?.face_registered_at ?? null };
     }, []);
 
     const logout = useCallback(async () => {

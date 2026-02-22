@@ -84,6 +84,7 @@ export interface QuickMenuItem {
   path?: string;
   hasNotif?: boolean;
   adminOnly?: boolean;
+  activityKey?: string;
 }
 
 export interface LeaveTypeOption {

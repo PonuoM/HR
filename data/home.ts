@@ -21,6 +21,7 @@ export const QUICK_MENU_ITEMS: QuickMenuItem[] = [
     { icon: 'calendar_month', label: 'ปฏิทิน', path: '/calendar' },
     { icon: 'history', label: 'ประวัติขออนุมัติ', path: '/approval/history' },
     { icon: 'how_to_reg', label: 'อนุมัติลา', path: '/leave/approvals' },
+    { icon: 'star', label: 'พนักงานดีเด่น', path: '/vote', activityKey: 'employee_vote' },
 ];
 
 /** Attendance / clock-in data */

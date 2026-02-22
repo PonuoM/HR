@@ -34,6 +34,7 @@ export const SIDEBAR_ADMIN_ITEMS: NavItem[] = [
     { path: '/admin/holidays', icon: 'celebration', label: 'วันหยุดบริษัท' },
     { path: '/admin/face-registration', icon: 'face', label: 'ลงทะเบียนใบหน้า' },
     { path: '/admin/security', icon: 'shield', label: 'แจ้งเตือนความปลอดภัย' },
+    { path: '/admin/activities', icon: 'extension', label: 'ตั้งค่ากิจกรรม' },
 ];
 
 /** Profile page — general menu items */
@@ -57,4 +58,5 @@ export const PROFILE_ADMIN_ITEMS: ProfileMenuItem[] = [
     { icon: 'celebration', label: 'วันหยุดบริษัท', path: '/admin/holidays', color: 'bg-rose-100 text-rose-600' },
     { icon: 'face', label: 'ลงทะเบียนใบหน้า', path: '/admin/face-registration', color: 'bg-cyan-100 text-cyan-600' },
     { icon: 'shield', label: 'แจ้งเตือนความปลอดภัย', path: '/admin/security', color: 'bg-red-100 text-red-600', superadminOnly: true },
+    { icon: 'extension', label: 'ตั้งค่ากิจกรรม', path: '/admin/activities', color: 'bg-violet-100 text-violet-600' },
 ];

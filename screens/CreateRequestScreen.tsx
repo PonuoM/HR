@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
-import { getLeaveTypes, getLeaveQuotas, getWorkLocations, getEmployee, createLeaveRequest, createTimeRecord, uploadFile } from '../services/api';
+import { getLeaveTypes, getLeaveQuotas, getWorkLocations, getEmployee, createLeaveRequest, createTimeRecord, uploadFile, getAllowanceTypes, createAllowanceRequest } from '../services/api';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import DatePickerModal from '../components/DatePickerModal';
+import LocationPickerModal, { LocationData } from '../components/LocationPickerModal';
 
 // Calculate leave days based on department work hours
 function calcLeaveDays(start: string, end: string, workHoursPerDay: number): number {
@@ -43,6 +44,7 @@ const CreateRequestScreen: React.FC = () => {
     const { data: leaveTypes } = useApi(() => getLeaveTypes(), []);
     const { data: leaveQuotasRaw } = useApi(() => getLeaveQuotas(empId), [empId]);
     const { data: workLocations } = useApi(() => getWorkLocations(), []);
+    const { data: allowanceTypesRaw } = useApi(() => getAllowanceTypes(), []);
     const { data: empData } = useApi(() => getEmployee(empId), [empId]);
 
     // Department work hours from employee data
@@ -56,7 +58,7 @@ const CreateRequestScreen: React.FC = () => {
     }));
 
     // --- TAB STATE ---
-    const [requestType, setRequestType] = useState<'leave' | 'ot' | 'timerecord'>('leave');
+    const [requestType, setRequestType] = useState<'leave' | 'ot' | 'timerecord' | 'allowance'>('leave');
 
     // --- LEAVE FORM ---
     const [leaveTypeId, setLeaveTypeId] = useState('1');
@@ -142,6 +144,30 @@ const CreateRequestScreen: React.FC = () => {
     const [trLocationOpen, setTrLocationOpen] = useState(false);
     const [trCustomLocation, setTrCustomLocation] = useState('');
     const [trUseCustom, setTrUseCustom] = useState(false);
+
+    // --- ALLOWANCE FORM ---
+    const [alType, setAlType] = useState('');
+    const [alCustomType, setAlCustomType] = useState('');
+    const [alUseCustomType, setAlUseCustomType] = useState(false);
+    const [alTypeOpen, setAlTypeOpen] = useState(false);
+    const [alLocation, setAlLocation] = useState('');
+    const [alLocationAddress, setAlLocationAddress] = useState('');
+    const [alLocationDetail, setAlLocationDetail] = useState('');
+    const [alLocationLink, setAlLocationLink] = useState('');
+    const [alLocationLat, setAlLocationLat] = useState<number | null>(null);
+    const [alLocationLng, setAlLocationLng] = useState<number | null>(null);
+    const [alLocationPickerOpen, setAlLocationPickerOpen] = useState(false);
+    const [alStartDate, setAlStartDate] = useState('');
+    const [alEndDate, setAlEndDate] = useState('');
+    const [alStartTime, setAlStartTime] = useState('09:00');
+    const [alEndTime, setAlEndTime] = useState('17:00');
+    const [alAmount, setAlAmount] = useState('');
+    const [alReason, setAlReason] = useState('');
+    const [alSubmitting, setAlSubmitting] = useState(false);
+    const [alFile, setAlFile] = useState<File | null>(null);
+    const alFileRef = useRef<HTMLInputElement>(null);
+    const [alCalendarOpen, setAlCalendarOpen] = useState<'start' | 'end' | null>(null);
+    const allowanceTypeOptions = (allowanceTypesRaw || []).map((t: any) => ({ value: t.name, label: t.name }));
 
     const handleTrDateSelect = (dateStr: string) => {
         setTrForm(prev => ({
@@ -273,13 +299,50 @@ const CreateRequestScreen: React.FC = () => {
         }
     };
 
+    const handleAllowanceSubmit = async () => {
+        const typeName = alUseCustomType ? alCustomType.trim() : alType;
+        if (!typeName) return toast('กรุณาเลือกหรือระบุประเภทเบี้ยเลี้ยง', 'warning');
+        if (!alStartDate) return toast('กรุณาเลือกวันที่เริ่มต้น', 'warning');
+        if (!alAmount || parseFloat(alAmount) <= 0) return toast('กรุณาระบุจำนวนเงิน', 'warning');
+        const locationName = alLocation || 'ไม่ระบุ';
+        setAlSubmitting(true);
+        try {
+            const result = await createAllowanceRequest({
+                employee_id: empId,
+                allowance_type: typeName,
+                location_name: locationName,
+                location_address: alLocationAddress,
+                location_detail: alLocationDetail,
+                location_link: alLocationLink,
+                location_lat: alLocationLat,
+                location_lng: alLocationLng,
+                start_date: alStartDate,
+                end_date: alEndDate || alStartDate,
+                start_time: alStartTime || null,
+                end_time: alEndTime || null,
+                amount: parseFloat(alAmount),
+                reason: alReason.trim(),
+            });
+            if (alFile) {
+                try { await uploadFile(alFile, 'allowance_attachment', String(result.id)); } catch { }
+            }
+            toast('ส่งคำขอเบี้ยเลี้ยงเรียบร้อย', 'success');
+            navigate(-1);
+        } catch (err: any) {
+            toast(err.message || 'เกิดข้อผิดพลาด', 'error');
+        } finally {
+            setAlSubmitting(false);
+        }
+    };
+
     const handleSubmit = () => {
         if (requestType === 'leave') handleLeaveSubmit();
         else if (requestType === 'ot') handleOtSubmit();
+        else if (requestType === 'allowance') handleAllowanceSubmit();
         else handleTimeRecordSubmit();
     };
 
-    const isSubmitting = leaveSubmitting || otSubmitting || trSubmitting;
+    const isSubmitting = leaveSubmitting || otSubmitting || trSubmitting || alSubmitting;
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -313,11 +376,12 @@ const CreateRequestScreen: React.FC = () => {
                         <div className="bg-slate-200/60 dark:bg-slate-800 p-1 rounded-xl flex">
                             {([
                                 { key: 'leave' as const, label: 'ใบลา', icon: 'beach_access' },
-                                { key: 'ot' as const, label: 'ขอโอที', icon: 'access_time' },
-                                { key: 'timerecord' as const, label: 'บันทึกเวลา', icon: 'edit_calendar' },
+                                { key: 'ot' as const, label: 'โอที', icon: 'access_time' },
+                                { key: 'timerecord' as const, label: 'เวลา', icon: 'edit_calendar' },
+                                { key: 'allowance' as const, label: 'เบี้ยเลี้ยง', icon: 'savings' },
                             ]).map(tab => (
                                 <button key={tab.key} onClick={() => setRequestType(tab.key)}
-                                    className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all text-center flex items-center justify-center gap-1.5 ${requestType === tab.key ? 'bg-white dark:bg-slate-700 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400'}`}>
+                                    className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all text-center flex items-center justify-center gap-1 ${requestType === tab.key ? 'bg-white dark:bg-slate-700 text-primary dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400'}`}>
                                     <span className="material-icons-round text-sm">{tab.icon}</span>{tab.label}
                                 </button>
                             ))}
@@ -657,6 +721,258 @@ const CreateRequestScreen: React.FC = () => {
                                 <div className="space-y-2">
                                     <label className={labelCls}>เหตุผล</label>
                                     <textarea value={trForm.reason} onChange={(e) => setTrForm({ ...trForm, reason: e.target.value })} className={`${inputCls} resize-none !py-3`} placeholder="เช่น ลืมลงเวลา / ไปทำงานที่สาขาเชียงใหม่" rows={3} />
+                                </div>
+                            </>
+                        )}
+
+                        {/* =============== ALLOWANCE FORM =============== */}
+                        {requestType === 'allowance' && (
+                            <>
+                                <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-3 border border-emerald-100 dark:border-emerald-900/30">
+                                    <p className="text-xs text-emerald-600 dark:text-emerald-300 flex gap-2">
+                                        <span className="material-icons-round text-sm">info</span>
+                                        <span>ระบุประเภทเบี้ยเลี้ยง สถานที่ วันเวลา และจำนวนเงินที่ต้องการเบิก</span>
+                                    </p>
+                                </div>
+
+                                {/* Allowance Type — Hybrid Dropdown */}
+                                <div className="space-y-2">
+                                    <label className={labelCls}>ประเภทเบี้ยเลี้ยง</label>
+                                    {!alUseCustomType ? (
+                                        <div className="relative">
+                                            <button type="button" onClick={() => setAlTypeOpen(!alTypeOpen)} className={`${inputCls} text-left flex items-center justify-between !rounded-2xl`}>
+                                                <span className={alType ? 'text-slate-900 dark:text-white' : 'text-slate-400'}>
+                                                    {alType || '— เลือกประเภท —'}
+                                                </span>
+                                                <span className={`material-icons-round text-lg text-slate-400 transition-transform ${alTypeOpen ? 'rotate-180' : ''}`}>keyboard_arrow_down</span>
+                                            </button>
+                                            {alTypeOpen && (
+                                                <>
+                                                    <div className="fixed inset-0 z-40" onClick={() => setAlTypeOpen(false)} />
+                                                    <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-white dark:bg-gray-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-lg overflow-hidden">
+                                                        {allowanceTypeOptions.map((opt: any) => (
+                                                            <button key={opt.value} type="button" onClick={() => { setAlType(opt.value); setAlTypeOpen(false); }}
+                                                                className={`w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center gap-2 ${opt.value === alType ? 'bg-primary/10 text-primary font-semibold' : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50'}`}>
+                                                                <span className="material-icons-round text-sm">{opt.value === alType ? 'check_circle' : 'label'}</span>
+                                                                {opt.label}
+                                                            </button>
+                                                        ))}
+                                                        <div className="border-t border-slate-200 dark:border-slate-700" />
+                                                        <button type="button" onClick={() => { setAlUseCustomType(true); setAlTypeOpen(false); }}
+                                                            className="w-full text-left px-4 py-2.5 text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 flex items-center gap-2 font-medium">
+                                                            <span className="material-icons-round text-sm">add_circle</span>
+                                                            พิมพ์ประเภทใหม่...
+                                                        </button>
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <div className="flex gap-2">
+                                            <input type="text" value={alCustomType} onChange={(e) => setAlCustomType(e.target.value)}
+                                                placeholder="พิมพ์ประเภทใหม่ เช่น ค่ารถ" className={`${inputCls} flex-1`} autoFocus />
+                                            <button type="button" onClick={() => { setAlUseCustomType(false); setAlCustomType(''); }}
+                                                className="px-3 py-2 text-sm text-slate-500 hover:text-primary border border-slate-200 dark:border-slate-700 rounded-xl">
+                                                <span className="material-icons-round text-sm">list</span>
+                                            </button>
+                                        </div>
+                                    )}
+                                    {alUseCustomType && alCustomType && (
+                                        <p className="text-xs text-blue-500 flex items-center gap-1 px-1">
+                                            <span className="material-icons-round text-xs">auto_awesome</span>
+                                            ประเภทนี้จะถูกบันทึกอัตโนมัติเพื่อใช้ครั้งถัดไป
+                                        </p>
+                                    )}
+                                </div>
+
+                                {/* Location — Map Picker */}
+                                <div className="space-y-2">
+                                    <label className={labelCls}>สถานที่</label>
+                                    <div className="flex gap-2">
+                                        <div className="relative flex-1">
+                                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                                                <span className="material-icons-round text-lg">location_on</span>
+                                            </span>
+                                            <input
+                                                type="text"
+                                                value={alLocation}
+                                                onChange={(e) => setAlLocation(e.target.value)}
+                                                placeholder="พิมพ์ชื่อสถานที่..."
+                                                className={`${inputCls} !pl-10`}
+                                            />
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => setAlLocationPickerOpen(true)}
+                                            className="px-3 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl flex items-center gap-1.5 text-sm font-semibold transition-colors shadow-sm whitespace-nowrap"
+                                        >
+                                            <span className="material-icons-round text-base">map</span>
+                                            แผนที่
+                                        </button>
+                                    </div>
+                                    {/* Show extracted address if available */}
+                                    {alLocationAddress && (
+                                        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-2.5 text-xs text-blue-700 dark:text-blue-300 flex items-start gap-2">
+                                            <span className="material-icons-round text-sm mt-0.5 shrink-0">pin_drop</span>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="break-words">{alLocationAddress}</p>
+                                                {alLocationLat && alLocationLng && (
+                                                    <p className="text-[10px] text-blue-400 mt-0.5 font-mono">{alLocationLat.toFixed(6)}, {alLocationLng.toFixed(6)}</p>
+                                                )}
+                                                {alLocationLink && (
+                                                    <a href={alLocationLink} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-500 hover:underline flex items-center gap-0.5 mt-0.5">
+                                                        <span className="material-icons-round text-[10px]">open_in_new</span>
+                                                        เปิด Google Maps
+                                                    </a>
+                                                )}
+                                            </div>
+                                            <button type="button" onClick={() => { setAlLocationAddress(''); setAlLocationLink(''); setAlLocationLat(null); setAlLocationLng(null); }}
+                                                className="text-blue-400 hover:text-blue-600 shrink-0">
+                                                <span className="material-icons-round text-sm">close</span>
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Location detail — employee additional info */}
+                                <div className="space-y-1.5">
+                                    <label className={labelCls}>รายละเอียดสถานที่ <span className="text-slate-400 font-normal">(เพิ่มเติม)</span></label>
+                                    <textarea
+                                        value={alLocationDetail}
+                                        onChange={(e) => setAlLocationDetail(e.target.value)}
+                                        placeholder="เช่น อาคาร A ชั้น 3 ห้อง 301 / หน้าร้าน 7-11 สาขาตลาดสด..."
+                                        rows={2}
+                                        className={`${inputCls} resize-none`}
+                                    />
+                                </div>
+
+                                {alLocationPickerOpen && (
+                                    <LocationPickerModal
+                                        initialName={alLocation}
+                                        onSelect={(data: LocationData) => {
+                                            setAlLocation(data.name);
+                                            setAlLocationAddress(data.address);
+                                            setAlLocationLink(data.link);
+                                            setAlLocationLat(data.lat);
+                                            setAlLocationLng(data.lng);
+                                            setAlLocationPickerOpen(false);
+                                        }}
+                                        onClose={() => setAlLocationPickerOpen(false)}
+                                    />
+                                )}
+
+                                {/* Date Range */}
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="space-y-1.5">
+                                        <label className={labelCls}>วันที่เริ่ม</label>
+                                        <button type="button" onClick={() => setAlCalendarOpen('start')} className={`${inputCls} text-left flex items-center justify-between`}>
+                                            <span className={alStartDate ? 'text-slate-900 dark:text-white text-xs' : 'text-slate-400 text-xs'}>
+                                                {alStartDate ? new Date(alStartDate).toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: '2-digit' }) : 'เลือกวัน'}
+                                            </span>
+                                            <span className="material-icons-round text-sm text-slate-400">calendar_today</span>
+                                        </button>
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className={labelCls}>ถึงวันที่</label>
+                                        <button type="button" onClick={() => setAlCalendarOpen('end')} className={`${inputCls} text-left flex items-center justify-between`}>
+                                            <span className={alEndDate ? 'text-slate-900 dark:text-white text-xs' : 'text-slate-400 text-xs'}>
+                                                {alEndDate ? new Date(alEndDate).toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: '2-digit' }) : 'เลือกวัน'}
+                                            </span>
+                                            <span className="material-icons-round text-sm text-slate-400">calendar_today</span>
+                                        </button>
+                                    </div>
+                                </div>
+                                {alCalendarOpen && (
+                                    <DatePickerModal
+                                        title={alCalendarOpen === 'start' ? 'เลือกวันที่เริ่ม' : 'เลือกวันที่สิ้นสุด'}
+                                        value={alCalendarOpen === 'start' ? alStartDate : alEndDate}
+                                        onSelect={(d) => {
+                                            if (alCalendarOpen === 'start') {
+                                                setAlStartDate(d);
+                                                if (!alEndDate || d > alEndDate) setAlEndDate(d);
+                                            } else {
+                                                setAlEndDate(d);
+                                            }
+                                            setAlCalendarOpen(null);
+                                        }}
+                                        onClose={() => setAlCalendarOpen(null)}
+                                    />
+                                )}
+
+                                {/* Time — only show after date is selected */}
+                                {alStartDate && (
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="space-y-1.5">
+                                            <label className={labelCls}>เวลาเริ่ม</label>
+                                            <input type="time" value={alStartTime} onChange={(e) => setAlStartTime(e.target.value)} className={inputCls} />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className={labelCls}>เวลาสิ้นสุด</label>
+                                            <input type="time" value={alEndTime} onChange={(e) => setAlEndTime(e.target.value)} className={inputCls} />
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Amount */}
+                                <div className="space-y-2">
+                                    <label className={labelCls}>จำนวนเงินขอเบิก (บาท)</label>
+                                    <div className="relative">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-medium">฿</span>
+                                        <input
+                                            type="text"
+                                            inputMode="decimal"
+                                            value={alAmount}
+                                            onChange={(e) => {
+                                                let v = e.target.value.replace(/[^0-9.]/g, '');
+                                                // Strip leading zeros (keep "0." for decimals)
+                                                v = v.replace(/^0+(?=\d)/, '');
+                                                setAlAmount(v);
+                                            }}
+                                            placeholder="0.00"
+                                            className={`${inputCls} !pl-8 text-right text-lg font-semibold`}
+                                        />
+                                    </div>
+                                    {parseFloat(alAmount) > 0 && (
+                                        <p className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1 px-1">
+                                            <span className="material-icons-round text-xs">payments</span>
+                                            ขอเบิก ฿{parseFloat(alAmount).toLocaleString('th-TH', { minimumFractionDigits: 2 })}
+                                        </p>
+                                    )}
+                                </div>
+
+                                {/* Reason */}
+                                <div className="space-y-2">
+                                    <label className={labelCls}>หมายเหตุ</label>
+                                    <div className="relative">
+                                        <textarea value={alReason} onChange={(e) => setAlReason(e.target.value.slice(0, 300))} className={`${inputCls} resize-none !py-3`} placeholder="ระบุรายละเอียดเพิ่มเติม..." rows={3} />
+                                        <span className="absolute bottom-3 right-3 text-xs text-slate-400">{alReason.length}/300</span>
+                                    </div>
+                                </div>
+
+                                {/* File Attachment */}
+                                <div className="space-y-2">
+                                    <label className={labelCls}>แนบใบเสร็จ / หลักฐาน (ถ้ามี)</label>
+                                    <input ref={alFileRef} type="file" accept="image/*" className="hidden" onChange={(e) => {
+                                        const f = e.target.files?.[0];
+                                        if (f && f.size > 5 * 1024 * 1024) { toast('ไฟล์ต้องไม่เกิน 5MB', 'warning'); return; }
+                                        setAlFile(f || null);
+                                    }} />
+                                    {alFile ? (
+                                        <div className="flex items-center gap-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl py-2.5 px-4 border border-emerald-100 dark:border-emerald-900/30">
+                                            <span className="material-icons-round text-emerald-500 text-lg">image</span>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">{alFile.name}</p>
+                                                <p className="text-xs text-slate-400">{(alFile.size / 1024).toFixed(0)} KB</p>
+                                            </div>
+                                            <button onClick={() => { setAlFile(null); if (alFileRef.current) alFileRef.current.value = ''; }} className="text-red-400 hover:text-red-600">
+                                                <span className="material-icons-round text-lg">close</span>
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <button onClick={() => alFileRef.current?.click()} className="w-full border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl py-3 px-4 flex items-center justify-center hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors group active:scale-[0.98]">
+                                            <span className="text-sm font-medium text-slate-500 dark:text-slate-400 group-hover:text-primary transition-colors">📸 แนบรูปใบเสร็จ (ไม่เกิน 5MB)</span>
+                                        </button>
+                                    )}
                                 </div>
                             </>
                         )}

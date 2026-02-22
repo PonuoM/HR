@@ -1,0 +1,182 @@
+<?php
+/**
+ * Attendance Alerts API
+ * Checks for missing/incomplete clock records and creates notifications
+ * 
+ * GET ?action=check&employee_id=X → Check and return attendance alerts for past 7 working days
+ */
+
+require_once __DIR__ . '/config.php';
+
+$company_id = get_company_id();
+$method = get_method();
+$action = $_GET['action'] ?? 'check';
+
+if ($action !== 'check' || $method !== 'GET') {
+    json_response(['error' => 'Invalid request'], 400);
+}
+
+$employee_id = $_GET['employee_id'] ?? null;
+if (!$employee_id) json_response(['error' => 'Missing employee_id'], 400);
+
+// ── Check if attendance_check activity is enabled ──
+$actStmt = $conn->prepare("SELECT enabled, start_date FROM activity_settings WHERE company_id = ? AND activity_key = 'attendance_check'");
+$actStmt->bind_param('i', $company_id);
+$actStmt->execute();
+$actRow = $actStmt->get_result()->fetch_assoc();
+
+if (!$actRow || !$actRow['enabled'] || !$actRow['start_date']) {
+    json_response(['alerts' => [], 'message' => 'Attendance check is not active']);
+}
+
+$startDate = $actRow['start_date']; // System start date
+$today = date('Y-m-d');
+
+// Don't check today (still working), start from yesterday
+$checkDate = date('Y-m-d', strtotime('-1 day'));
+
+// ── Get holidays for the company ──
+$hStmt = $conn->prepare("SELECT date FROM holidays WHERE company_id = ? AND date BETWEEN ? AND ?");
+$hStmt->bind_param('iss', $company_id, $startDate, $checkDate);
+$hStmt->execute();
+$hResult = $hStmt->get_result();
+$holidays = [];
+while ($h = $hResult->fetch_assoc()) {
+    $holidays[] = $h['date'];
+}
+
+// ── Get approved leaves for this employee ──
+$lvStmt = $conn->prepare(
+    "SELECT lr.start_date, lr.end_date FROM leave_requests lr 
+     WHERE lr.employee_id = ? AND lr.status = 'approved' 
+     AND lr.end_date >= ? AND lr.start_date <= ?"
+);
+$lvStmt->bind_param('sss', $employee_id, $startDate, $checkDate);
+$lvStmt->execute();
+$lvResult = $lvStmt->get_result();
+$leaveDays = [];
+while ($lv = $lvResult->fetch_assoc()) {
+    $cur = new DateTime($lv['start_date']);
+    $end = new DateTime($lv['end_date']);
+    while ($cur <= $end) {
+        $leaveDays[] = $cur->format('Y-m-d');
+        $cur->modify('+1 day');
+    }
+}
+
+// ── Get attendance records ──
+$attStmt = $conn->prepare(
+    "SELECT date, clock_in, clock_out FROM attendance 
+     WHERE employee_id = ? AND date BETWEEN ? AND ?"
+);
+$attStmt->bind_param('sss', $employee_id, $startDate, $checkDate);
+$attStmt->execute();
+$attResult = $attStmt->get_result();
+$attendance = [];
+while ($a = $attResult->fetch_assoc()) {
+    $attendance[$a['date']] = $a;
+}
+
+// ── Get existing alert notifications (to avoid duplicates) ──
+$existStmt = $conn->prepare(
+    "SELECT message FROM notifications 
+     WHERE employee_id = ? AND type = 'attendance_alert' 
+     AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+);
+$existStmt->bind_param('s', $employee_id);
+$existStmt->execute();
+$existResult = $existStmt->get_result();
+$existingAlerts = [];
+while ($e = $existResult->fetch_assoc()) {
+    $existingAlerts[] = $e['message'];
+}
+
+// ── Check working days (loop backward from yesterday, max 7 working days) ──
+$alerts = [];
+$workDaysChecked = 0;
+$current = new DateTime($checkDate);
+$startDt = new DateTime($startDate);
+
+while ($workDaysChecked < 7 && $current >= $startDt) {
+    $dateStr = $current->format('Y-m-d');
+    $dow = (int)$current->format('N'); // 1=Mon, 7=Sun
+
+    // Skip weekends
+    if ($dow >= 6) {
+        $current->modify('-1 day');
+        continue;
+    }
+
+    // Skip holidays
+    if (in_array($dateStr, $holidays)) {
+        $current->modify('-1 day');
+        continue;
+    }
+
+    // Skip approved leave days
+    if (in_array($dateStr, $leaveDays)) {
+        $current->modify('-1 day');
+        $workDaysChecked++;
+        continue;
+    }
+
+    $att = $attendance[$dateStr] ?? null;
+    $thaiDate = thaiShortDate($dateStr);
+
+    if (!$att) {
+        // No attendance record at all
+        $alerts[] = [
+            'date' => $dateStr,
+            'type' => 'missing',
+            'message' => "ไม่ได้ลงเวลาเข้างาน วันที่ $thaiDate",
+        ];
+
+        // Create notification if not exists
+        $msg = "ไม่ได้ลงเวลาเข้างาน วันที่ $thaiDate";
+        if (!in_array($msg, $existingAlerts)) {
+            $nStmt = $conn->prepare(
+                "INSERT INTO notifications (employee_id, title, message, icon, icon_bg, type, icon_color) 
+                 VALUES (?, 'ขาดลงเวลา', ?, 'error_outline', 'bg-red-100 dark:bg-red-900/30', 'attendance_alert', 'text-red-600')"
+            );
+            $nStmt->bind_param('ss', $employee_id, $msg);
+            $nStmt->execute();
+        }
+    } elseif ($att['clock_in'] && !$att['clock_out']) {
+        // Has clock_in but no clock_out
+        $alerts[] = [
+            'date' => $dateStr,
+            'type' => 'incomplete',
+            'message' => "ลงเวลาไม่ครบ (ไม่ได้ลงเวลาออก) วันที่ $thaiDate",
+        ];
+
+        $msg = "ลงเวลาไม่ครบ (ไม่ได้ลงเวลาออก) วันที่ $thaiDate";
+        if (!in_array($msg, $existingAlerts)) {
+            $nStmt = $conn->prepare(
+                "INSERT INTO notifications (employee_id, title, message, icon, icon_bg, type, icon_color) 
+                 VALUES (?, 'ลงเวลาไม่ครบ', ?, 'warning_amber', 'bg-orange-100 dark:bg-orange-900/30', 'attendance_alert', 'text-orange-600')"
+            );
+            $nStmt->bind_param('ss', $employee_id, $msg);
+            $nStmt->execute();
+        }
+    }
+
+    $workDaysChecked++;
+    $current->modify('-1 day');
+}
+
+json_response([
+    'alerts' => $alerts,
+    'total' => count($alerts),
+    'start_date' => $startDate,
+    'checked_up_to' => $checkDate,
+]);
+
+// ── Helper: Format date to Thai short format ──
+function thaiShortDate($dateStr) {
+    $months = ['', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+    $d = new DateTime($dateStr);
+    $day = (int)$d->format('j');
+    $month = (int)$d->format('n');
+    $year = (int)$d->format('Y') + 543;
+    return "$day {$months[$month]} $year";
+}

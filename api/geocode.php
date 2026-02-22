@@ -13,8 +13,46 @@ if ($method !== 'GET') {
 }
 
 $query = $_GET['q'] ?? '';
+$isReverse = !empty($_GET['reverse']) && !empty($_GET['lat']) && !empty($_GET['lon']);
+
+// ─── Reverse Geocode: lat/lng → address ───
+if ($isReverse) {
+    $params = http_build_query([
+        'format' => 'json',
+        'lat' => $_GET['lat'],
+        'lon' => $_GET['lon'],
+        'accept-language' => $_GET['accept-language'] ?? 'th,en',
+        'addressdetails' => 1,
+        'zoom' => 18,
+    ]);
+    $url = 'https://nominatim.openstreetmap.org/reverse?' . $params;
+
+    $ch = curl_init();
+    curl_setopt_array($ch, [
+        CURLOPT_URL => $url,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 8,
+        CURLOPT_CONNECTTIMEOUT => 5,
+        CURLOPT_USERAGENT => 'HRMobileConnect/1.0 (hr.prima49.com)',
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => 0,
+    ]);
+    $response = curl_exec($ch);
+    $error = curl_error($ch);
+    curl_close($ch);
+
+    if ($error) {
+        json_response(['display_name' => '', 'address' => null]);
+        exit;
+    }
+    header('Content-Type: application/json; charset=utf-8');
+    echo $response ?: '{}';
+    exit;
+}
+
+// ─── Forward Geocode: query → results ───
 if (!$query) {
-    json_response([], 200); // Return empty array
+    json_response([], 200);
 }
 
 $params = http_build_query([

@@ -1,10 +1,46 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useApi } from '../hooks/useApi';
-import { API_BASE, getAuthHeaders, getLeaveRequests, updateLeaveRequest, getTimeRecords, updateTimeRecord } from '../services/api';
+import { API_BASE, getAuthHeaders, getLeaveRequests, updateLeaveRequest, getTimeRecords, updateTimeRecord, getAllowanceRequests, updateAllowanceRequest, getUploads } from '../services/api';
 
-type AdminTab = 'leave' | 'time';
+// Inline component to fetch and show allowance attachments
+function AllowanceAttachments({ requestId }: { requestId: number }) {
+    const [images, setImages] = useState<any[]>([]);
+    const [lightbox, setLightbox] = useState<string | null>(null);
+    useEffect(() => {
+        getUploads('allowance_attachment', String(requestId)).then(files => {
+            setImages((files || []).filter((f: any) => f.mime_type?.startsWith('image/')));
+        }).catch(() => { });
+    }, [requestId]);
+    if (images.length === 0) return null;
+    return (
+        <>
+            <div className="mt-2">
+                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">รูปหลักฐาน</p>
+                <div className="flex gap-2 flex-wrap">
+                    {images.map((img: any) => (
+                        <button key={img.id} onClick={(e) => { e.stopPropagation(); setLightbox(img.url); }}
+                            className="w-16 h-16 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-600 hover:ring-2 hover:ring-primary transition-all">
+                            <img src={img.url} alt="" className="w-full h-full object-cover" />
+                        </button>
+                    ))}
+                </div>
+            </div>
+            {lightbox && (
+                <div className="fixed inset-0 z-[99999] bg-black/90 flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
+                    <button onClick={() => setLightbox(null)}
+                        className="absolute top-4 right-4 p-2 bg-white/10 backdrop-blur rounded-full hover:bg-white/20 transition-colors z-10">
+                        <span className="material-icons-round text-white text-2xl">close</span>
+                    </button>
+                    <img src={lightbox} alt="หลักฐาน" className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl" onClick={(e) => e.stopPropagation()} />
+                </div>
+            )}
+        </>
+    );
+}
+
+type AdminTab = 'leave' | 'time' | 'allowance';
 
 function formatThaiDate(dateStr: string): string {
     const d = new Date(dateStr);
@@ -56,16 +92,28 @@ const LeaveApprovalScreen: React.FC = () => {
     const pendingTime = (allTimeRecords || []).filter((r: any) => r.status === 'pending');
     const historyTime = (allTimeRecords || []).filter((r: any) => r.status !== 'pending');
 
+    // ─── Allowance Requests ───
+    const { data: allAllowance = [], loading: loadingAllowance, refetch: refetchAllowance } = useApi(
+        () => isAdmin
+            ? getAllowanceRequests({ status: 'pending' })
+            : getAllowanceRequests({ approver_id: empId }),
+        [empId, isAdmin]
+    );
+
+    const pendingAllowance = (allAllowance || []).filter((r: any) => r.status === 'pending');
+    const historyAllowance = (allAllowance || []).filter((r: any) => r.status !== 'pending');
+
     // ─── Current display data ───
-    const loading = adminTab === 'leave' ? loadingLeave : loadingTime;
-    const pendingRequests = adminTab === 'leave' ? pendingLeave : pendingTime;
-    const historyRequests = adminTab === 'leave' ? historyLeave : historyTime;
+    const loading = adminTab === 'leave' ? loadingLeave : adminTab === 'time' ? loadingTime : loadingAllowance;
+    const pendingRequests = adminTab === 'leave' ? pendingLeave : adminTab === 'time' ? pendingTime : pendingAllowance;
+    const historyRequests = adminTab === 'leave' ? historyLeave : adminTab === 'time' ? historyTime : historyAllowance;
     const displayRequests = tab === 'pending' ? pendingRequests : historyRequests;
 
     const refetchAll = useCallback(() => {
         refetchLeave();
         refetchTime();
-    }, [refetchLeave, refetchTime]);
+        refetchAllowance();
+    }, [refetchLeave, refetchTime, refetchAllowance]);
 
     // Handle approve/reject for leave
     const handleLeaveAction = useCallback(async (requestId: number, action: 'approve' | 'reject') => {
@@ -93,7 +141,20 @@ const LeaveApprovalScreen: React.FC = () => {
         }
     }, [empId, refetchAll]);
 
-    const handleAction = adminTab === 'leave' ? handleLeaveAction : handleTimeAction;
+    // Handle approve/reject for allowance requests
+    const handleAllowanceAction = useCallback(async (recordId: number, action: 'approve' | 'reject') => {
+        setActionLoading(recordId);
+        try {
+            await updateAllowanceRequest(recordId, { status: action === 'approve' ? 'approved' : 'rejected', approved_by: empId });
+            refetchAll();
+        } catch (e) {
+            console.error('Action failed:', e);
+        } finally {
+            setActionLoading(null);
+        }
+    }, [empId, refetchAll]);
+
+    const handleAction = adminTab === 'leave' ? handleLeaveAction : adminTab === 'time' ? handleTimeAction : handleAllowanceAction;
 
     return (
         <div className="flex flex-col min-h-full bg-background-light dark:bg-background-dark font-display pb-20">
@@ -111,7 +172,8 @@ const LeaveApprovalScreen: React.FC = () => {
                 <div className="flex">
                     {[
                         { key: 'leave' as AdminTab, label: 'ลา / OT', icon: 'event_busy', count: pendingLeave.length },
-                        { key: 'time' as AdminTab, label: 'บันทึกเวลา', icon: 'edit_calendar', count: pendingTime.length },
+                        { key: 'time' as AdminTab, label: 'เวลา', icon: 'edit_calendar', count: pendingTime.length },
+                        { key: 'allowance' as AdminTab, label: 'เบี้ยเลี้ยง', icon: 'savings', count: pendingAllowance.length },
                     ].map(t => (
                         <button
                             key={t.key}
@@ -188,6 +250,7 @@ const LeaveApprovalScreen: React.FC = () => {
                             const badge = getStatusBadge(r.status);
                             const isOT = r.reason?.startsWith('[OT]');
                             const isTimeRecord = adminTab === 'time';
+                            const isAllowance = adminTab === 'allowance';
 
                             return (
                                 <div
@@ -214,7 +277,66 @@ const LeaveApprovalScreen: React.FC = () => {
 
                                     {/* Request details */}
                                     <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-3 mb-3">
-                                        {isTimeRecord ? (
+                                        {isAllowance ? (
+                                            <>
+                                                {/* Allowance type + amount */}
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <span className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-1">
+                                                        <span className="material-icons-round text-sm text-amber-500">savings</span>
+                                                        {r.allowance_type}
+                                                    </span>
+                                                    <span className="text-base font-bold text-amber-600 dark:text-amber-400">฿{parseFloat(r.amount).toLocaleString('th-TH', { minimumFractionDigits: 2 })}</span>
+                                                </div>
+
+                                                {/* Location name */}
+                                                {r.location_name && (
+                                                    <div className="flex items-start gap-1.5 text-xs text-gray-600 dark:text-gray-400 mb-1">
+                                                        <span className="material-icons-round text-xs text-amber-500 mt-0.5">place</span>
+                                                        <span className="font-medium">{r.location_name}</span>
+                                                    </div>
+                                                )}
+
+                                                {/* Location address */}
+                                                {r.location_address && (
+                                                    <div className="flex items-start gap-1.5 text-xs text-gray-400 dark:text-gray-500 mb-1">
+                                                        <span className="material-icons-round text-xs mt-0.5">home</span>
+                                                        <span className="leading-relaxed">{r.location_address}</span>
+                                                    </div>
+                                                )}
+
+                                                {/* Date + Time */}
+                                                <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 mt-2">
+                                                    <span className="flex items-center gap-1">
+                                                        <span className="material-icons-round text-xs">calendar_today</span>
+                                                        {formatThaiDate(r.start_date)}{r.end_date && r.end_date !== r.start_date ? ` – ${formatThaiDate(r.end_date)}` : ''}
+                                                    </span>
+                                                    {(r.start_time || r.end_time) && (
+                                                        <span className="flex items-center gap-1">
+                                                            <span className="material-icons-round text-xs">schedule</span>
+                                                            {r.start_time?.substring(0, 5) || '-'} – {r.end_time?.substring(0, 5) || '-'}
+                                                        </span>
+                                                    )}
+                                                </div>
+
+                                                {/* Google Maps link */}
+                                                {r.location_link && (
+                                                    <a href={r.location_link} target="_blank" rel="noopener noreferrer"
+                                                        className="flex items-center gap-1.5 mt-2 text-xs text-blue-600 dark:text-blue-400 hover:underline">
+                                                        <span className="material-icons-round text-sm text-red-500">map</span>
+                                                        ดูตำแหน่งใน Google Maps
+                                                        <span className="material-icons-round text-xs">open_in_new</span>
+                                                    </a>
+                                                )}
+
+                                                {/* Location detail */}
+                                                {r.location_detail && (
+                                                    <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                                                        <span className="font-semibold text-gray-600 dark:text-gray-300">รายละเอียดสถานที่: </span>
+                                                        {r.location_detail}
+                                                    </div>
+                                                )}
+                                            </>
+                                        ) : isTimeRecord ? (
                                             <>
                                                 <div className="flex items-center justify-between mb-1">
                                                     <span className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-1">
@@ -258,6 +380,7 @@ const LeaveApprovalScreen: React.FC = () => {
                                         {r.reason && !isOT && (
                                             <p className="text-xs text-gray-400 mt-1 italic">เหตุผล: {r.reason}</p>
                                         )}
+                                        {isAllowance && <AllowanceAttachments requestId={r.id} />}
                                     </div>
 
                                     {/* Tier status */}
