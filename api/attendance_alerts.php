@@ -229,11 +229,74 @@ if ($voteActRow && $voteActRow['enabled']) {
     }
 }
 
+// ══════════════════════════════════════════════════════════
+// BIRTHDAY CHECK: check if today is the user's birthday
+// Also notify about colleagues' birthdays
+// ══════════════════════════════════════════════════════════
+$isBirthday = false;
+$birthdayColleagues = [];
+
+// Check current user's birthday
+$bdStmt = $conn->prepare("SELECT birth_date, name FROM employees WHERE id = ? AND is_active = 1");
+$bdStmt->bind_param('s', $employee_id);
+$bdStmt->execute();
+$bdRow = $bdStmt->get_result()->fetch_assoc();
+
+if ($bdRow && $bdRow['birth_date']) {
+    $bdMonth = (int)date('n', strtotime($bdRow['birth_date']));
+    $bdDay = (int)date('j', strtotime($bdRow['birth_date']));
+    $todayMonth = (int)date('n');
+    $todayDay = (int)date('j');
+    if ($bdMonth === $todayMonth && $bdDay === $todayDay) {
+        $isBirthday = true;
+    }
+}
+
+// Check colleagues' birthdays today
+$collStmt = $conn->prepare(
+    "SELECT id, name, birth_date FROM employees 
+     WHERE company_id = ? AND is_active = 1 AND id != ? 
+     AND birth_date IS NOT NULL 
+     AND MONTH(birth_date) = MONTH(CURDATE()) AND DAY(birth_date) = DAY(CURDATE())"
+);
+$collStmt->bind_param('is', $company_id, $employee_id);
+$collStmt->execute();
+$collResult = $collStmt->get_result();
+while ($coll = $collResult->fetch_assoc()) {
+    $birthdayColleagues[] = $coll['name'];
+    $alerts[] = [
+        'date' => $today,
+        'type' => 'birthday',
+        'message' => "🎂 วันนี้เป็นวันเกิดของ {$coll['name']}!",
+    ];
+}
+
+// Create birthday notification for colleagues (one per day)
+if (!empty($birthdayColleagues)) {
+    $bdExistStmt = $conn->prepare(
+        "SELECT id FROM notifications WHERE employee_id = ? AND type = 'birthday' AND DATE(created_at) = CURDATE()"
+    );
+    $bdExistStmt->bind_param('s', $employee_id);
+    $bdExistStmt->execute();
+    if ($bdExistStmt->get_result()->num_rows === 0) {
+        $names = implode(', ', $birthdayColleagues);
+        $bdMsg = "🎂 วันนี้เป็นวันเกิดของ $names";
+        $nStmt = $conn->prepare(
+            "INSERT INTO notifications (employee_id, title, message, icon, icon_bg, type, icon_color) 
+             VALUES (?, 'วันเกิดเพื่อนร่วมงาน', ?, 'cake', 'bg-pink-100 dark:bg-pink-900/30', 'birthday', 'text-pink-600')"
+        );
+        $nStmt->bind_param('ss', $employee_id, $bdMsg);
+        $nStmt->execute();
+    }
+}
+
 json_response([
     'alerts' => $alerts,
     'total' => count($alerts),
     'start_date' => $startDate,
     'checked_up_to' => $checkDate,
+    'is_birthday' => $isBirthday,
+    'birthday_colleagues' => $birthdayColleagues,
 ]);
 
 // ── Helper: Format date to Thai short format ──

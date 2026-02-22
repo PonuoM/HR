@@ -8,6 +8,7 @@ import { subscribeToPush } from '../services/pushNotifications';
 import LocationCheckModal from '../components/LocationCheckModal';
 import FaceCapture from '../components/FaceCapture';
 import { useToast } from '../components/Toast';
+import BirthdayCakeAnimation from '../components/BirthdayCakeAnimation';
 import { useAuth } from '../contexts/AuthContext';
 import BannerBackgroundAnimation from '../components/BannerBackgroundAnimation';
 
@@ -46,18 +47,24 @@ const HomeScreen: React.FC = () => {
     // === ATTENDANCE ALERTS ===
     const [attendanceAlerts, setAttendanceAlerts] = useState<any[]>([]);
     const [showAlertModal, setShowAlertModal] = useState(false);
+    const [isBirthday, setIsBirthday] = useState(false);
     useEffect(() => {
         if (!empId) return;
         const cacheKey = `att_alerts_${empId}_${new Date().toISOString().slice(0, 10)}`;
         const cached = localStorage.getItem(cacheKey);
         if (cached) {
-            try { setAttendanceAlerts(JSON.parse(cached)); } catch { }
+            try {
+                const parsed = JSON.parse(cached);
+                setAttendanceAlerts(parsed.alerts || parsed);
+                setIsBirthday(parsed.is_birthday || false);
+            } catch { }
             return;
         }
         checkAttendanceAlerts(empId).then(data => {
             if (data?.alerts) {
                 setAttendanceAlerts(data.alerts);
-                localStorage.setItem(cacheKey, JSON.stringify(data.alerts));
+                setIsBirthday(data.is_birthday || false);
+                localStorage.setItem(cacheKey, JSON.stringify({ alerts: data.alerts, is_birthday: data.is_birthday }));
             }
         }).catch(() => { });
     }, [empId]);
@@ -670,6 +677,13 @@ const HomeScreen: React.FC = () => {
                 )}
             </header>
 
+            {/* ═══════════════════ BIRTHDAY CAKE ═══════════════════ */}
+            {isBirthday && (
+                <div className="mb-6 bg-gradient-to-r from-pink-50 via-amber-50 to-pink-50 dark:from-pink-900/15 dark:via-amber-900/10 dark:to-pink-900/15 border border-pink-200 dark:border-pink-800/40 rounded-2xl px-4 py-3">
+                    <BirthdayCakeAnimation name={authUser?.name?.split(' ')[0]} />
+                </div>
+            )}
+
             {/* ═══════════════════ ATTENDANCE ALERTS ═══════════════════ */}
             {attendanceAlerts.length > 0 && (
                 <button
@@ -707,25 +721,29 @@ const HomeScreen: React.FC = () => {
                             {attendanceAlerts.map((alert: any, i: number) => (
                                 <div key={i} className={`flex items-start gap-3 p-3 rounded-xl ${alert.type === 'missing' ? 'bg-red-50 dark:bg-red-900/15' :
                                     alert.type === 'vote_reminder' ? 'bg-amber-50 dark:bg-amber-900/15' :
-                                        'bg-orange-50 dark:bg-orange-900/15'
+                                        alert.type === 'birthday' ? 'bg-pink-50 dark:bg-pink-900/15' :
+                                            'bg-orange-50 dark:bg-orange-900/15'
                                     }`}>
                                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${alert.type === 'missing' ? 'bg-red-100 dark:bg-red-900/30' :
                                         alert.type === 'vote_reminder' ? 'bg-amber-100 dark:bg-amber-900/30' :
-                                            'bg-orange-100 dark:bg-orange-900/30'
+                                            alert.type === 'birthday' ? 'bg-pink-100 dark:bg-pink-900/30' :
+                                                'bg-orange-100 dark:bg-orange-900/30'
                                         }`}>
                                         <span className={`material-icons-round text-sm ${alert.type === 'missing' ? 'text-red-500' :
                                             alert.type === 'vote_reminder' ? 'text-amber-500' :
-                                                'text-orange-500'
+                                                alert.type === 'birthday' ? 'text-pink-500' :
+                                                    'text-orange-500'
                                             }`}>
-                                            {alert.type === 'missing' ? 'cancel' : alert.type === 'vote_reminder' ? 'how_to_vote' : 'error_outline'}
+                                            {alert.type === 'missing' ? 'cancel' : alert.type === 'vote_reminder' ? 'how_to_vote' : alert.type === 'birthday' ? 'cake' : 'error_outline'}
                                         </span>
                                     </div>
                                     <div className="flex-1 min-w-0">
                                         <p className={`text-xs font-semibold ${alert.type === 'missing' ? 'text-red-700 dark:text-red-400' :
                                             alert.type === 'vote_reminder' ? 'text-amber-700 dark:text-amber-400' :
-                                                'text-orange-700 dark:text-orange-400'
+                                                alert.type === 'birthday' ? 'text-pink-700 dark:text-pink-400' :
+                                                    'text-orange-700 dark:text-orange-400'
                                             }`}>
-                                            {alert.type === 'missing' ? 'ขาดลงเวลา' : alert.type === 'vote_reminder' ? '🏆 โหวตพนักงานดีเด่น' : 'ลงเวลาไม่ครบ'}
+                                            {alert.type === 'missing' ? 'ขาดลงเวลา' : alert.type === 'vote_reminder' ? '🏆 โหวตพนักงานดีเด่น' : alert.type === 'birthday' ? '🎂 วันเกิด' : 'ลงเวลาไม่ครบ'}
                                         </p>
                                         <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">{alert.message}</p>
                                     </div>

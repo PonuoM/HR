@@ -51,8 +51,14 @@ if ($method === 'GET') {
     $show_inactive = isset($_GET['show_inactive']) && $_GET['show_inactive'] === '1';
     $where = $show_inactive ? "e.company_id = ?" : "e.is_active = 1 AND e.company_id = ?";
 
+    // Auto-add birth_date column if missing
+    $bdCheck = $conn->query("SHOW COLUMNS FROM employees LIKE 'birth_date'");
+    if ($bdCheck->num_rows === 0) {
+        $conn->query("ALTER TABLE employees ADD COLUMN birth_date DATE DEFAULT NULL AFTER hire_date");
+    }
+
     $stmt = $conn->prepare("SELECT e.id, e.name, e.nickname, e.email, e.avatar, e.is_admin, e.is_active, e.employment_type,
-                   e.approver_id, e.approver2_id, e.base_salary, e.hire_date, e.terminated_at,
+                   e.approver_id, e.approver2_id, e.base_salary, e.hire_date, e.birth_date, e.terminated_at,
                    d.name AS department, d.id AS department_id,
                    p.name AS position, p.id AS position_id, p.can_have_subordinates,
                    a.name AS approver_name, a2.name AS approver2_name
@@ -87,6 +93,7 @@ if ($method === 'POST') {
     $position_id = isset($body['position_id']) ? (int)$body['position_id'] : null;
     $base_salary = isset($body['base_salary']) ? (float)$body['base_salary'] : null;
     $hire_date = !empty($body['hire_date']) ? $body['hire_date'] : null;
+    $birth_date = !empty($body['birth_date']) ? $body['birth_date'] : null;
     $approver_id = !empty($body['approver_id']) ? $body['approver_id'] : null;
     $approver2_id = !empty($body['approver2_id']) ? $body['approver2_id'] : null;
 
@@ -125,10 +132,10 @@ if ($method === 'POST') {
     $hashedPassword = password_hash($password, PASSWORD_BCRYPT);
     $is_admin = (!empty($body['is_admin']) && $is_caller_superadmin) ? 1 : 0;
 
-    $stmt = $conn->prepare("INSERT INTO employees (id, company_id, name, nickname, email, password, department_id, position_id, base_salary, hire_date, approver_id, approver2_id, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param('sissssiidsssi',
+    $stmt = $conn->prepare("INSERT INTO employees (id, company_id, name, nickname, email, password, department_id, position_id, base_salary, hire_date, birth_date, approver_id, approver2_id, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $stmt->bind_param('sissssiidssssi',
         $id, $target_company_id, $name, $nickname, $email, $hashedPassword,
-        $department_id, $position_id, $base_salary, $hire_date, $approver_id, $approver2_id, $is_admin
+        $department_id, $position_id, $base_salary, $hire_date, $birth_date, $approver_id, $approver2_id, $is_admin
     );
     $stmt->execute();
     json_response(['message' => 'Employee created', 'id' => $id], 201);
@@ -181,6 +188,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
         'position_id'   => 'i',
         'base_salary'   => 'd',
         'hire_date'     => 's',
+        'birth_date'    => 's',
         'approver_id'   => 's',
         'approver2_id'  => 's',
         'avatar'        => 's',
@@ -196,7 +204,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
         if (array_key_exists($field, $body)) {
             $val = $body[$field];
             // Handle empty strings for nullable fields
-            if (in_array($field, ['department_id', 'position_id', 'base_salary', 'hire_date', 'approver_id', 'approver2_id', 'nickname']) && ($val === '' || $val === null)) {
+            if (in_array($field, ['department_id', 'position_id', 'base_salary', 'hire_date', 'birth_date', 'approver_id', 'approver2_id', 'nickname']) && ($val === '' || $val === null)) {
                 $val = null;
             }
             $setClauses[] = "$field = ?";

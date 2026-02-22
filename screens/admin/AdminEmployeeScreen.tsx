@@ -46,6 +46,7 @@ const AdminEmployeeScreen: React.FC = () => {
     const [addApprover, setAddApprover] = useState('');
     const [addApprover2, setAddApprover2] = useState('');
     const [addHireDate, setAddHireDate] = useState('');
+    const [addBirthDate, setAddBirthDate] = useState('');
     const [addAvatarFile, setAddAvatarFile] = useState<File | null>(null);
     const [addAvatarPreview, setAddAvatarPreview] = useState('');
 
@@ -382,6 +383,7 @@ const AdminEmployeeScreen: React.FC = () => {
                                     position_id: posObj?.id ? Number(posObj.id) : undefined,
                                     base_salary: salary ? Number(salary) : null,
                                     hire_date: addHireDate || null,
+                                    birth_date: addBirthDate || null,
                                     approver_id: addApprover || null,
                                     approver2_id: addApprover2 || null,
                                     ...(addCompanyId ? { company_id: Number(addCompanyId) } : {}),
@@ -412,6 +414,7 @@ const AdminEmployeeScreen: React.FC = () => {
                                 setAddCompanyId('');
                                 setAddIsAdmin(false);
                                 setAddHireDate('');
+                                setAddBirthDate('');
                                 setAddNickname('');
                                 setAddAvatarFile(null);
                                 setAddAvatarPreview('');
@@ -548,6 +551,17 @@ const AdminEmployeeScreen: React.FC = () => {
                                     />
                                 </div>
 
+                                {/* BIRTH DATE INPUT */}
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">วันเกิด</label>
+                                    <input
+                                        type="date"
+                                        value={addBirthDate}
+                                        onChange={(e) => setAddBirthDate(e.target.value)}
+                                        className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-gray-900 dark:text-white"
+                                    />
+                                </div>
+
                                 <div className="border-t border-gray-100 dark:border-gray-800 pt-4 mt-2">
                                     <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
                                         <span className="material-icons-round text-primary text-base">supervisor_account</span>
@@ -637,6 +651,7 @@ const AdminEmployeeScreen: React.FC = () => {
                                         position_id: Number(formData.get('position_id')),
                                         base_salary: formData.get('base_salary') ? Number(formData.get('base_salary')) : null,
                                         hire_date: (formData.get('hire_date') as string) || null,
+                                        birth_date: (formData.get('birth_date') as string) || null,
                                         approver_id: approverVal || null,
                                         approver2_id: approver2Val || null,
                                         is_admin: editIsAdmin ? 1 : 0,
@@ -664,6 +679,10 @@ const AdminEmployeeScreen: React.FC = () => {
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">วันที่เริ่มงาน</label>
                                     <input name="hire_date" type="date" defaultValue={editingEmployee.hire_date || ''} className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-gray-900 dark:text-white" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">วันเกิด</label>
+                                    <input name="birth_date" type="date" defaultValue={editingEmployee.birth_date || ''} className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-gray-900 dark:text-white" />
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
