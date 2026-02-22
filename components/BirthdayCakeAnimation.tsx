@@ -6,146 +6,79 @@ import React from 'react';
  * floating sparkles, and subtle bounce animation.
  */
 const BirthdayCakeAnimation: React.FC<{ name?: string }> = ({ name }) => (
-    <div className="flex flex-col items-center gap-2 py-2">
-        <svg viewBox="0 0 200 200" className="w-28 h-28 md:w-32 md:h-32" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-                {/* Candle flame glow */}
-                <radialGradient id="flameGlow" cx="50%" cy="50%" r="50%">
-                    <stop offset="0%" stopColor="#FFA500" stopOpacity="0.6" />
-                    <stop offset="100%" stopColor="#FFA500" stopOpacity="0" />
-                </radialGradient>
-                {/* Sparkle filter */}
-                <filter id="sparkleBlur">
-                    <feGaussianBlur stdDeviation="1" />
-                </filter>
-            </defs>
+    <div className="flex flex-col items-center gap-3 py-3">
+        <svg viewBox="0 0 100 100" className="w-24 h-24 md:w-28 md:h-28" xmlns="http://www.w3.org/2000/svg">
+            {/* Soft bounce animation for the cake */}
+            <g>
+                <animateTransform
+                    attributeName="transform"
+                    type="translate"
+                    values="0,0; 0,-2; 0,0"
+                    dur="3s"
+                    repeatCount="indefinite"
+                />
 
-            {/* Floating sparkles */}
-            {[
-                { cx: 30, cy: 40, delay: '0s' },
-                { cx: 170, cy: 50, delay: '0.5s' },
-                { cx: 50, cy: 25, delay: '1s' },
-                { cx: 150, cy: 30, delay: '1.5s' },
-                { cx: 85, cy: 15, delay: '0.3s' },
-                { cx: 120, cy: 20, delay: '0.8s' },
-            ].map((s, i) => (
-                <g key={i}>
-                    <circle cx={s.cx} cy={s.cy} r="2" fill="#FFD700" filter="url(#sparkleBlur)">
-                        <animate attributeName="opacity" values="0;1;0" dur="2s" begin={s.delay} repeatCount="indefinite" />
-                        <animate attributeName="cy" values={`${s.cy};${s.cy - 15};${s.cy}`} dur="3s" begin={s.delay} repeatCount="indefinite" />
-                    </circle>
-                    {/* Star shape */}
-                    <text x={s.cx} y={s.cy} textAnchor="middle" dominantBaseline="central" fontSize="8" fill="#FFD700">
-                        <animate attributeName="opacity" values="0;1;0" dur="2s" begin={s.delay} repeatCount="indefinite" />
-                        ✦
-                    </text>
+                {/* --- Bottom Tier --- */}
+                <rect x="25" y="60" width="50" height="25" rx="3" fill="#FFEFEA" />
+                <rect x="25" y="75" width="50" height="4" fill="#FFD6CC" opacity="0.4" />
+
+                {/* Frosting Drip Bottom */}
+                <path d="M25,60 C35,68 40,60 50,60 C60,60 65,65 75,60 L75,65 L25,65 Z" fill="#FFE3D9" />
+
+                {/* --- Top Tier --- */}
+                <rect x="35" y="40" width="30" height="20" rx="2" fill="#FFF8F6" />
+                <rect x="35" y="48" width="30" height="3" fill="#FFE5DF" opacity="0.4" />
+
+                {/* Frosting Drip Top */}
+                <path d="M35,40 C42.5,45 45,40 50,40 C55,40 57.5,45 65,40 L65,43 L35,43 Z" fill="#FFD5CB" />
+
+                {/* --- Candle --- */}
+                <rect x="48" y="25" width="4" height="15" rx="1" fill="#FFDEE2" />
+                <rect x="48" y="28" width="4" height="2" fill="#FFC9D2" />
+                <rect x="48" y="34" width="4" height="2" fill="#FFC9D2" />
+                <line x1="50" y1="25" x2="50" y2="23" stroke="#A09E9F" strokeWidth="0.8" />
+
+                {/* --- Flame (bouncing/flickering) --- */}
+                <g>
+                    <ellipse cx="50" cy="18" rx="2" ry="4" fill="#FFB054">
+                        <animate attributeName="ry" values="4; 4.5; 3.5; 4" dur="0.8s" repeatCount="indefinite" />
+                        <animate attributeName="rx" values="2; 1.8; 2.2; 2" dur="0.8s" repeatCount="indefinite" />
+                        <animate attributeName="cy" values="18; 17.5; 18" dur="0.8s" repeatCount="indefinite" />
+                    </ellipse>
+                    <ellipse cx="50" cy="19" rx="1.2" ry="2" fill="#FFE270">
+                        <animate attributeName="ry" values="2; 2.5; 1.8; 2" dur="0.8s" repeatCount="indefinite" />
+                    </ellipse>
                 </g>
-            ))}
 
-            {/* Cake base - bottom tier */}
-            <rect x="45" y="130" width="110" height="40" rx="8" fill="#E8A87C" stroke="#D4956B" strokeWidth="1.5" />
-            <rect x="45" y="130" width="110" height="12" rx="4" fill="#F0C8A0" opacity="0.5" />
-
-            {/* Frosting drips - bottom */}
-            {[55, 75, 95, 115, 135].map((x, i) => (
-                <ellipse key={i} cx={x} cy="130" rx="6" ry={4 + (i % 2) * 3} fill="#FCEAE0" />
-            ))}
-
-            {/* Cake top tier */}
-            <rect x="60" y="95" width="80" height="38" rx="6" fill="#F4A8C1" stroke="#E8929B" strokeWidth="1.5" />
-            <rect x="60" y="95" width="80" height="10" rx="4" fill="#F8C8D8" opacity="0.5" />
-
-            {/* Frosting drips - top */}
-            {[70, 88, 105, 122].map((x, i) => (
-                <ellipse key={i} cx={x} cy="95" rx="5" ry={3 + (i % 2) * 2} fill="#FFE4EE" />
-            ))}
-
-            {/* Decorations - dots on cake */}
-            {[58, 73, 88, 103, 118, 133, 148].map((x, i) => (
-                <circle key={i} cx={x} cy="150" r="3" fill={i % 2 === 0 ? '#FF6B9D' : '#FFD700'} />
-            ))}
-
-            {/* Candle 1 (left) */}
-            <rect x="80" y="70" width="5" height="27" rx="2" fill="#FFD700" />
-            <rect x="80" y="70" width="5" height="8" rx="2" fill="#FFE44D" opacity="0.6" />
-            {/* Wick */}
-            <line x1="82.5" y1="70" x2="82.5" y2="65" stroke="#333" strokeWidth="1" />
-            {/* Flame */}
-            <g>
-                <ellipse cx="82.5" cy="58" rx="8" ry="10" fill="url(#flameGlow)">
-                    <animate attributeName="ry" values="10;12;10" dur="0.5s" repeatCount="indefinite" />
-                </ellipse>
-                <ellipse cx="82.5" cy="60" rx="4" ry="7" fill="#FF8C00">
-                    <animate attributeName="ry" values="7;8;6;7" dur="0.4s" repeatCount="indefinite" />
-                    <animate attributeName="rx" values="4;3;4" dur="0.3s" repeatCount="indefinite" />
-                </ellipse>
-                <ellipse cx="82.5" cy="61" rx="2.5" ry="5" fill="#FFDD44">
-                    <animate attributeName="ry" values="5;6;4;5" dur="0.35s" repeatCount="indefinite" />
-                </ellipse>
-                <ellipse cx="82.5" cy="62" rx="1.5" ry="3" fill="#FFF8DC">
-                    <animate attributeName="ry" values="3;4;3" dur="0.3s" repeatCount="indefinite" />
-                </ellipse>
+                {/* --- Subtle Confetti Dots Minimal --- */}
+                {[
+                    { cx: 20, cy: 30, c: '#FFB8B8', dur: '4s' },
+                    { cx: 80, cy: 45, c: '#FFDA8A', dur: '3.5s' },
+                    { cx: 30, cy: 15, c: '#C4E1FF', dur: '4.5s' },
+                    { cx: 75, cy: 25, c: '#FFE3D9', dur: '5s' },
+                ].map((dot, i) => (
+                    <circle key={i} cx={dot.cx} cy={dot.cy} r="1.5" fill={dot.c}>
+                        <animateTransform
+                            attributeName="transform"
+                            type="translate"
+                            values={`0,0; 0,-4; 0,0`}
+                            dur={dot.dur}
+                            repeatCount="indefinite"
+                        />
+                    </circle>
+                ))}
             </g>
 
-            {/* Candle 2 (center) */}
-            <rect x="97" y="72" width="5" height="25" rx="2" fill="#87CEEB" />
-            <rect x="97" y="72" width="5" height="8" rx="2" fill="#ADD8E6" opacity="0.6" />
-            <line x1="99.5" y1="72" x2="99.5" y2="67" stroke="#333" strokeWidth="1" />
-            <g>
-                <ellipse cx="99.5" cy="60" rx="8" ry="10" fill="url(#flameGlow)">
-                    <animate attributeName="ry" values="10;12;10" dur="0.6s" repeatCount="indefinite" />
-                </ellipse>
-                <ellipse cx="99.5" cy="62" rx="4" ry="7" fill="#FF8C00">
-                    <animate attributeName="ry" values="7;6;8;7" dur="0.45s" repeatCount="indefinite" />
-                    <animate attributeName="rx" values="4;3.5;4" dur="0.35s" repeatCount="indefinite" />
-                </ellipse>
-                <ellipse cx="99.5" cy="63" rx="2.5" ry="5" fill="#FFDD44">
-                    <animate attributeName="ry" values="5;4;6;5" dur="0.4s" repeatCount="indefinite" />
-                </ellipse>
-                <ellipse cx="99.5" cy="64" rx="1.5" ry="3" fill="#FFF8DC">
-                    <animate attributeName="ry" values="3;4;3" dur="0.35s" repeatCount="indefinite" />
-                </ellipse>
-            </g>
-
-            {/* Candle 3 (right) */}
-            <rect x="114" y="68" width="5" height="29" rx="2" fill="#FF69B4" />
-            <rect x="114" y="68" width="5" height="8" rx="2" fill="#FFB6C1" opacity="0.6" />
-            <line x1="116.5" y1="68" x2="116.5" y2="63" stroke="#333" strokeWidth="1" />
-            <g>
-                <ellipse cx="116.5" cy="56" rx="8" ry="10" fill="url(#flameGlow)">
-                    <animate attributeName="ry" values="10;12;10" dur="0.55s" repeatCount="indefinite" />
-                </ellipse>
-                <ellipse cx="116.5" cy="58" rx="4" ry="7" fill="#FF8C00">
-                    <animate attributeName="ry" values="7;8;6;7" dur="0.5s" repeatCount="indefinite" />
-                    <animate attributeName="rx" values="4;3;4" dur="0.25s" repeatCount="indefinite" />
-                </ellipse>
-                <ellipse cx="116.5" cy="59" rx="2.5" ry="5" fill="#FFDD44">
-                    <animate attributeName="ry" values="5;6;4;5" dur="0.3s" repeatCount="indefinite" />
-                </ellipse>
-                <ellipse cx="116.5" cy="60" rx="1.5" ry="3" fill="#FFF8DC">
-                    <animate attributeName="ry" values="3;4;3" dur="0.25s" repeatCount="indefinite" />
-                </ellipse>
-            </g>
-
-            {/* Plate */}
-            <ellipse cx="100" cy="172" rx="70" ry="8" fill="#E8E8E8" stroke="#D0D0D0" strokeWidth="1" />
-            <ellipse cx="100" cy="170" rx="65" ry="5" fill="#F5F5F5" />
-
-            {/* Subtle bounce animation on the whole cake */}
-            <animateTransform
-                attributeName="transform"
-                type="translate"
-                values="0,0; 0,-3; 0,0"
-                dur="2s"
-                repeatCount="indefinite"
-            />
+            {/* --- Plate --- */}
+            <ellipse cx="50" cy="85" rx="35" ry="3" fill="#F3F0EF" />
         </svg>
+
         <div className="text-center">
-            <p className="text-lg font-bold bg-gradient-to-r from-pink-500 via-amber-500 to-pink-500 bg-clip-text text-transparent animate-pulse">
-                🎉 สุขสันต์วันเกิด! 🎉
-            </p>
+            <h3 className="text-lg font-bold text-rose-500 tracking-wide">
+                Happy Birthday! 🎂
+            </h3>
             {name && (
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                <p className="text-[13px] text-gray-500 dark:text-gray-400 mt-1">
                     ขอให้มีความสุขมากๆ นะ {name}
                 </p>
             )}

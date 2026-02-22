@@ -679,7 +679,7 @@ const HomeScreen: React.FC = () => {
 
             {/* ═══════════════════ BIRTHDAY CAKE ═══════════════════ */}
             {isBirthday && (
-                <div className="mb-6 bg-gradient-to-r from-pink-50 via-amber-50 to-pink-50 dark:from-pink-900/15 dark:via-amber-900/10 dark:to-pink-900/15 border border-pink-200 dark:border-pink-800/40 rounded-2xl px-4 py-3">
+                <div className="mb-6 bg-pink-50/50 dark:bg-pink-900/10 border border-pink-100 dark:border-pink-900/30 rounded-2xl px-4 py-4 shadow-sm">
                     <BirthdayCakeAnimation name={authUser?.name?.split(' ')[0]} />
                 </div>
             )}
