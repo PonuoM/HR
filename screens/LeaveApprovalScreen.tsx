@@ -1,8 +1,10 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../components/Toast';
+import { formatLeaveDuration } from '../utils/leaveHelpers';
 import { useApi } from '../hooks/useApi';
-import { API_BASE, getAuthHeaders, getLeaveRequests, updateLeaveRequest, getTimeRecords, updateTimeRecord, getAllowanceRequests, updateAllowanceRequest, getUploads } from '../services/api';
+import { API_BASE, getLeaveRequests, updateLeaveRequest, getTimeRecords, updateTimeRecord, getAllowanceRequests, updateAllowanceRequest, getUploads } from '../services/api';
 
 // Inline component to fetch and show allowance attachments
 function AllowanceAttachments({ requestId }: { requestId: number }) {
@@ -57,7 +59,7 @@ function getStatusBadge(status: string) {
 
 const LeaveApprovalScreen: React.FC = () => {
     const navigate = useNavigate();
-    const { user: authUser, isAdmin } = useAuth();
+    const { user: authUser, isAdmin, isSuperAdmin } = useAuth();
     const empId = authUser?.id || '';
 
     const [adminTab, setAdminTab] = useState<AdminTab>('leave');
@@ -65,43 +67,42 @@ const LeaveApprovalScreen: React.FC = () => {
     const [actionLoading, setActionLoading] = useState<number | null>(null);
 
     // ─── Leave Requests ───
-    const { data: allRequests = [], loading: loadingLeave, refetch: refetchLeave } = useApi(
-        () => isAdmin
-            ? getLeaveRequests({ status: 'pending' })
-            : getLeaveRequests({ employee_id: '' }).then(() => []),
-        [empId, isAdmin]
-    );
-
-    const { data: approverRequests = [] } = useApi(
-        () => empId ? fetch(`${API_BASE}/leave_requests.php?approver_id=${empId}`, { headers: getAuthHeaders() }).then(r => r.json()) : Promise.resolve([]),
+    // All users (including superadmin) see only requests they are approver for
+    const { data: leaveRequests = [], loading: loadingLeave, refetch: refetchLeave } = useApi(
+        () => empId ? getLeaveRequests({ approver_id: empId }) : Promise.resolve([]),
         [empId]
     );
 
-    const leaveRequests = isAdmin ? (allRequests || []) : (approverRequests || []);
-    const pendingLeave = leaveRequests.filter((r: any) => r.status === 'pending');
-    const historyLeave = leaveRequests.filter((r: any) => r.status !== 'pending');
+    // Smart filter: "pending for me" = it's actually MY turn to act
+    const isMyTurn = (r: any) => {
+        if (r.status !== 'pending') return false;
+        const isTier1 = String(r.expected_approver1_id) === String(empId);
+        const isTier2 = String(r.expected_approver2_id) === String(empId);
+        if (isTier1 && r.tier1_status === 'pending') return true;
+        if (isTier2 && r.tier1_status === 'approved' && r.tier2_status === 'pending') return true;
+        return false;
+    };
+
+    const pendingLeave = (leaveRequests || []).filter(isMyTurn);
+    const historyLeave = (leaveRequests || []).filter((r: any) => !isMyTurn(r));
 
     // ─── Time Records ───
     const { data: allTimeRecords = [], loading: loadingTime, refetch: refetchTime } = useApi(
-        () => isAdmin
-            ? getTimeRecords({ status: 'pending' })
-            : getTimeRecords({ approver_id: empId }),
-        [empId, isAdmin]
+        () => empId ? getTimeRecords({ approver_id: empId }) : Promise.resolve([]),
+        [empId]
     );
 
-    const pendingTime = (allTimeRecords || []).filter((r: any) => r.status === 'pending');
-    const historyTime = (allTimeRecords || []).filter((r: any) => r.status !== 'pending');
+    const pendingTime = (allTimeRecords || []).filter(isMyTurn);
+    const historyTime = (allTimeRecords || []).filter((r: any) => !isMyTurn(r));
 
     // ─── Allowance Requests ───
     const { data: allAllowance = [], loading: loadingAllowance, refetch: refetchAllowance } = useApi(
-        () => isAdmin
-            ? getAllowanceRequests({ status: 'pending' })
-            : getAllowanceRequests({ approver_id: empId }),
-        [empId, isAdmin]
+        () => empId ? getAllowanceRequests({ approver_id: empId }) : Promise.resolve([]),
+        [empId]
     );
 
-    const pendingAllowance = (allAllowance || []).filter((r: any) => r.status === 'pending');
-    const historyAllowance = (allAllowance || []).filter((r: any) => r.status !== 'pending');
+    const pendingAllowance = (allAllowance || []).filter(isMyTurn);
+    const historyAllowance = (allAllowance || []).filter((r: any) => !isMyTurn(r));
 
     // ─── Current display data ───
     const loading = adminTab === 'leave' ? loadingLeave : adminTab === 'time' ? loadingTime : loadingAllowance;
@@ -268,7 +269,7 @@ const LeaveApprovalScreen: React.FC = () => {
                                         />
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2">
-                                                <h3 className="font-semibold text-gray-900 dark:text-white text-sm truncate">{r.employee_name}</h3>
+                                                <h3 className="font-semibold text-gray-900 dark:text-white text-sm truncate">{r.employee_name}{isSuperAdmin && r.company_code && <span className="ml-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400">{r.company_code}</span>}</h3>
                                                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${badge.cls}`}>{badge.label}</span>
                                             </div>
                                             <p className="text-xs text-gray-500 dark:text-gray-400">{r.department || 'ไม่ระบุแผนก'}</p>
@@ -370,10 +371,15 @@ const LeaveApprovalScreen: React.FC = () => {
                                                     <span className="text-sm font-semibold text-gray-900 dark:text-white">
                                                         {isOT ? 'ขอทำ OT' : r.leave_type_name}
                                                     </span>
-                                                    <span className="text-xs text-gray-500">{r.total_days} {isOT ? 'ชม.' : 'วัน'}</span>
+                                                    <span className="text-xs text-gray-500">{isOT ? `${r.total_days} ชม.` : formatLeaveDuration(r.total_days, 8, r.start_date, r.end_date)}</span>
                                                 </div>
-                                                <p className="text-xs text-gray-500 dark:text-gray-400">
-                                                    {formatThaiDate(r.start_date)} - {formatThaiDate(r.end_date)}
+                                                <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                                                    <span className="material-icons-round text-xs">calendar_today</span>
+                                                    <span>
+                                                        {formatThaiDate(r.start_date)}{r.start_date?.length > 10 && !r.start_date.includes('00:00:00') ? ' ' + r.start_date.substring(11, 16) + ' น.' : ''} 
+                                                        {' - '} 
+                                                        {formatThaiDate(r.end_date)}{r.end_date?.length > 10 && !r.end_date.includes('00:00:00') ? ' ' + r.end_date.substring(11, 16) + ' น.' : ''}
+                                                    </span>
                                                 </p>
                                             </>
                                         )}
@@ -401,8 +407,8 @@ const LeaveApprovalScreen: React.FC = () => {
                                         </div>
                                     )}
 
-                                    {/* Action buttons — only for pending */}
-                                    {r.status === 'pending' && (
+                                    {/* Action buttons — only when it's my turn */}
+                                    {isMyTurn(r) && (
                                         <div className="flex gap-2">
                                             <button
                                                 onClick={() => handleAction(r.id, 'reject')}
@@ -432,6 +438,22 @@ const LeaveApprovalScreen: React.FC = () => {
                                         <p className="text-xs text-gray-400 text-right">
                                             {r.status === 'approved' ? 'อนุมัติ' : 'ปฏิเสธ'}เมื่อ {formatThaiDate(r.approved_at)}
                                         </p>
+                                    )}
+
+                                    {/* Show status when I already acted but request is still pending for next tier */}
+                                    {!isMyTurn(r) && r.status === 'pending' && (
+                                        <div className="flex items-center justify-end gap-1.5 mt-1">
+                                            {(String(r.tier1_by) === String(empId) && r.tier1_status === 'approved') && (
+                                                <span className="text-xs text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 px-2.5 py-1 rounded-full font-medium">
+                                                    ✓ คุณอนุมัติขั้น 1 แล้ว — รอขั้น 2
+                                                </span>
+                                            )}
+                                            {(String(r.tier1_by) === String(empId) && r.tier1_status === 'rejected') && (
+                                                <span className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-2.5 py-1 rounded-full font-medium">
+                                                    ✕ คุณปฏิเสธแล้ว
+                                                </span>
+                                            )}
+                                        </div>
                                     )}
                                 </div>
                             );

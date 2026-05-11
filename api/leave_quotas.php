@@ -15,20 +15,37 @@ $method = get_method();
  * Helper: Calculate the correct quota for an employee + leave type,
  * considering seniority tiers and employee's years of service.
  */
-function get_tier_quota($conn, $employee_id, $leave_type_id, $default_quota, $company_id) {
+function get_tier_quota($conn, $employee_id, $leave_type_id, $default_quota, $company_id, $quota_year = null) {
+    if (!$quota_year) {
+        $quota_year = (int)date('Y');
+    }
+
     // Get employee's hire_date
     $empStmt = $conn->prepare("SELECT hire_date FROM employees WHERE id = ?");
     $empStmt->bind_param('s', $employee_id);
     $empStmt->execute();
     $empRow = $empStmt->get_result()->fetch_assoc();
 
+    // Look up leave type category and settings
+    $ltInfoStmt = $conn->prepare("SELECT type, prorate_first_year, probation_months FROM leave_types WHERE id = ?");
+    $ltInfoStmt->bind_param('i', $leave_type_id);
+    $ltInfoStmt->execute();
+    $ltInfoRow = $ltInfoStmt->get_result()->fetch_assoc();
+    $leave_category = $ltInfoRow ? $ltInfoRow['type'] : 'annual';
+    $prorate_first_year = $ltInfoRow ? (int)$ltInfoRow['prorate_first_year'] : 0;
+    $probation_months = $ltInfoRow ? (int)$ltInfoRow['probation_months'] : 4;
+
     if (!$empRow || empty($empRow['hire_date'])) {
-        return (int)$default_quota;
+        return $leave_category === 'seniority' ? 0 : (int)$default_quota;
     }
 
     $startDate = new DateTime($empRow['hire_date']);
     $now = new DateTime();
-    $yearsOfService = (int)$startDate->diff($now)->y;
+    $hireYear = (int)$startDate->format('Y');
+    
+    $diff = $startDate->diff($now);
+    $yearsOfService = (int)$diff->y;
+    $monthsOfService = ($yearsOfService * 12) + (int)$diff->m;
 
     // Find matching seniority tier (highest min_years that the employee qualifies for)
     $tierStmt = $conn->prepare(
@@ -42,6 +59,24 @@ function get_tier_quota($conn, $employee_id, $leave_type_id, $default_quota, $co
 
     if ($tierRow) {
         return (int)$tierRow['days'];
+    }
+
+    if ($leave_category === 'seniority') {
+        // If they haven't reached 1 year
+        if ($yearsOfService === 0) {
+            // Once they enter a new calendar year after their hire year, they get the full base quota
+            if ($quota_year > $hireYear) {
+                return (int)$default_quota;
+            }
+
+            // Check if prorating is enabled and they passed probation
+            if ($prorate_first_year === 1 && $monthsOfService >= $probation_months) {
+                $prorated = round(($monthsOfService / 12) * $default_quota);
+                return (int)$prorated;
+            }
+        }
+        // Otherwise, 0 days
+        return 0;
     }
 
     return (int)$default_quota;
@@ -58,42 +93,56 @@ if ($method === 'GET') {
     $empRow = $empStmt->get_result()->fetch_assoc();
     $emp_company_id = $empRow ? (int)$empRow['company_id'] : 1;
 
-    // Auto-provision: if no quotas for this employee+year, create defaults with seniority tier
-    $check = $conn->query("SELECT COUNT(*) as cnt FROM leave_quotas WHERE employee_id = '$employee_id' AND year = $year");
-    $row = $check->fetch_assoc();
-    if ((int)$row['cnt'] === 0) {
-        // Fetch leave types for that company
-        $ltStmt = $conn->prepare("SELECT id, default_quota FROM leave_types WHERE company_id = ? AND is_active = 1 ORDER BY id");
-        $ltStmt->bind_param('i', $emp_company_id);
-        $ltStmt->execute();
-        $ltResult = $ltStmt->get_result();
+    // Clean up any cross-company quota rows (wrong company leave types)
+    $cleanupStmt = $conn->prepare(
+        "DELETE lq FROM leave_quotas lq
+         JOIN leave_types lt ON lq.leave_type_id = lt.id
+         WHERE lq.employee_id = ? AND lq.year = ? AND lt.company_id != ?"
+    );
+    $cleanupStmt->bind_param('sii', $employee_id, $year, $emp_company_id);
+    $cleanupStmt->execute();
 
-        $stmt = $conn->prepare("INSERT IGNORE INTO leave_quotas (employee_id, leave_type_id, total, used, year) VALUES (?, ?, ?, 0, ?)");
-        while ($lt = $ltResult->fetch_assoc()) {
-            $lt_id = (int)$lt['id'];
-            // Use seniority tier quota instead of default
-            $lt_total = get_tier_quota($conn, $employee_id, $lt_id, $lt['default_quota'], $emp_company_id);
-            $stmt->bind_param('siis', $employee_id, $lt_id, $lt_total, $year);
-            $stmt->execute();
+    // Auto-provision: create missing quota rows per leave type (not just count-based)
+    $ltStmt = $conn->prepare("SELECT id, default_quota FROM leave_types WHERE company_id = ? AND is_active = 1 ORDER BY id");
+    $ltStmt->bind_param('i', $emp_company_id);
+    $ltStmt->execute();
+    $ltResult = $ltStmt->get_result();
+
+    $insertStmt = $conn->prepare("INSERT IGNORE INTO leave_quotas (employee_id, leave_type_id, total, used, year) VALUES (?, ?, ?, 0, ?)");
+    $provisioned = false;
+    while ($lt = $ltResult->fetch_assoc()) {
+        $lt_id = (int)$lt['id'];
+        // Check if this specific leave type quota already exists
+        $existsCheck = $conn->prepare("SELECT id FROM leave_quotas WHERE employee_id = ? AND leave_type_id = ? AND year = ?");
+        $existsCheck->bind_param('sii', $employee_id, $lt_id, $year);
+        $existsCheck->execute();
+        if ($existsCheck->get_result()->num_rows === 0) {
+            $lt_total = get_tier_quota($conn, $employee_id, $lt_id, $lt['default_quota'], $emp_company_id, $year);
+            $insertStmt->bind_param('siis', $employee_id, $lt_id, $lt_total, $year);
+            $insertStmt->execute();
+            $provisioned = true;
         }
-    } else {
+    }
+
+    if (!$provisioned) {
         // ── Auto-upgrade existing quotas based on seniority tiers ──
         // For each existing quota, check if the employee now qualifies for a higher tier
         $existingStmt = $conn->prepare(
             "SELECT lq.id, lq.leave_type_id, lq.total, lt.default_quota 
              FROM leave_quotas lq 
              JOIN leave_types lt ON lq.leave_type_id = lt.id 
-             WHERE lq.employee_id = ? AND lq.year = ?"
+             WHERE lq.employee_id = ? AND lq.year = ? AND lt.company_id = ?"
         );
-        $existingStmt->bind_param('si', $employee_id, $year);
+        $existingStmt->bind_param('sii', $employee_id, $year, $emp_company_id);
         $existingStmt->execute();
         $existingResult = $existingStmt->get_result();
 
         $updateStmt = $conn->prepare("UPDATE leave_quotas SET total = ? WHERE id = ?");
         while ($eq = $existingResult->fetch_assoc()) {
-            $correctQuota = get_tier_quota($conn, $employee_id, (int)$eq['leave_type_id'], $eq['default_quota'], $emp_company_id);
+            $correctQuota = get_tier_quota($conn, $employee_id, (int)$eq['leave_type_id'], $eq['default_quota'], $emp_company_id, $year);
             // Only upgrade, never downgrade (admin may have set a custom higher value)
-            if ($correctQuota > (int)$eq['total']) {
+            // Exception: If current total is exactly the default_quota but they should have 0, fix the incorrect auto-provision.
+            if ($correctQuota > (int)$eq['total'] || ($correctQuota === 0 && (int)$eq['total'] === (int)$eq['default_quota'])) {
                 $eqId = (int)$eq['id'];
                 $updateStmt->bind_param('ii', $correctQuota, $eqId);
                 $updateStmt->execute();
@@ -121,11 +170,13 @@ if ($method === 'GET') {
     $result = $conn->query($sql);
     $quotas = [];
     while ($row = $result->fetch_assoc()) {
-        $row['used'] = (int)$row['used'];
-        $row['total'] = (int)$row['total'];
+        $row['used'] = (float)$row['used'];
+        $row['total'] = (float)$row['total'];
         $row['remaining'] = $row['total'] - $row['used'];
-        // For "unlimited" types (total=0), remaining is always unlimited
-        if ($row['total'] === 0) {
+        // Only "unpaid" leave types are truly unlimited.
+        // total=0 on seniority/annual types means "no entitlement yet"
+        // (e.g. employee in probation, missing hire_date, or new hire <6 mo) — not unlimited.
+        if ($row['total'] == 0 && $row['leave_category'] === 'unpaid') {
             $row['remaining'] = -1; // -1 means unlimited
         }
         $quotas[] = $row;

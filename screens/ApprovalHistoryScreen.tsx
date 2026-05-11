@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useApi } from '../hooks/useApi';
 import { getLeaveRequests, getTimeRecords } from '../services/api';
+import { useToast } from '../components/Toast';
+import { formatLeaveDuration } from '../utils/leaveHelpers';
 
 type TabKey = 'leave' | 'ot' | 'time';
 
@@ -37,6 +39,7 @@ const tabs: { key: TabKey; label: string; icon: string }[] = [
 const ApprovalHistoryScreen: React.FC = () => {
     const navigate = useNavigate();
     const { user: authUser } = useAuth();
+    const { confirm, toast } = useToast();
     const empId = authUser?.id || '';
 
     const [activeTab, setActiveTab] = useState<TabKey>('leave');
@@ -127,7 +130,7 @@ const ApprovalHistoryScreen: React.FC = () => {
                             </span>
                             <span className="flex items-center gap-1">
                                 <span className="material-icons-round text-xs">schedule</span>
-                                {r.total_days} {isOT ? 'ชม.' : 'วัน'}
+                                {isOT ? `${r.total_days} ชม.` : formatLeaveDuration(r.total_days, 8, r.start_date, r.end_date)}
                             </span>
                         </div>
                         {r.reason && !isOT && (
@@ -207,6 +210,35 @@ const ApprovalHistoryScreen: React.FC = () => {
                                 ขั้น 2{r.tier2_by_name ? `: ${r.tier2_by_name}` : r.approver2_name ? `: ${r.approver2_name}` : ''}
                             </span>
                         </div>
+                        {r.status === 'pending' && (
+                            <div className="mt-3 flex justify-end border-t border-gray-100 dark:border-gray-700/50 pt-3">
+                                <button
+                                    onClick={async () => {
+                                        const confirmed = await confirm({
+                                            title: 'ยืนยันการยกเลิก',
+                                            message: 'คุณต้องการยกเลิกคำขอนี้ใช่หรือไม่?',
+                                            confirmText: 'ยกเลิกคำขอ',
+                                            cancelText: 'ปิด',
+                                            type: 'danger'
+                                        });
+                                        if (confirmed) {
+                                            try {
+                                                const { deleteTimeRecord } = await import('../services/api');
+                                                await deleteTimeRecord(r.id);
+                                                toast('คำขอถูกยกเลิกสำเร็จแล้ว', 'success');
+                                                setTimeout(() => window.location.reload(), 1500);
+                                            } catch (err: any) {
+                                                toast(err.message || 'เกิดข้อผิดพลาดในการยกเลิกคำขอ', 'error');
+                                            }
+                                        }
+                                    }}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-semibold hover:bg-red-100 transition-colors"
+                                >
+                                    <span className="material-icons-round text-sm">cancel</span>
+                                    ยกเลิกคำขอ
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>

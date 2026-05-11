@@ -41,9 +41,29 @@ function create_notification($conn, $employee_id, $title, $message, $icon = 'not
 
 // ─── GET ───
 if ($method === 'GET') {
+    $company_id = get_company_id();
+    $employee_id_header = get_employee_id();
+
+    // Check if caller is superadmin (cross-company access)
+    $is_superadmin = false;
+    if ($employee_id_header) {
+        $saCheck = $conn->prepare("SELECT is_superadmin FROM employees WHERE id = ?");
+        $saCheck->bind_param('s', $employee_id_header);
+        $saCheck->execute();
+        $saRow = $saCheck->get_result()->fetch_assoc();
+        $is_superadmin = $saRow && $saRow['is_superadmin'];
+    }
+
     $where = [];
     $params = [];
     $types = '';
+
+    // Non-superadmin: scope to their company only
+    if (!$is_superadmin) {
+        $where[] = 'e.company_id = ?';
+        $params[] = $company_id;
+        $types .= 'i';
+    }
 
     if (isset($_GET['id'])) {
         $where[] = 'lr.id = ?';
@@ -60,19 +80,41 @@ if ($method === 'GET') {
         $params[] = $_GET['status'];
         $types .= 's';
     }
+    if (isset($_GET['approver_id'])) {
+        $approver_id = $_GET['approver_id'];
+        // Show: 1) pending items where it's this user's turn to approve
+        //        2) items this user already acted on (for history)
+        $where[] = '(
+            (lr.expected_approver1_id = ? AND lr.tier1_status = "pending" AND lr.status = "pending")
+            OR (lr.expected_approver2_id = ? AND lr.tier1_status = "approved" AND lr.tier2_status = "pending" AND lr.status = "pending")
+            OR (lr.tier1_by = ?)
+            OR (lr.tier2_by = ?)
+        )';
+        $params[] = $approver_id;
+        $params[] = $approver_id;
+        $params[] = $approver_id;
+        $params[] = $approver_id;
+        $types .= 'ssss';
+    }
 
     $whereClause = count($where) > 0 ? 'WHERE ' . implode(' AND ', $where) : '';
 
-    $sql = "SELECT lr.*, e.name AS employee_name, e.avatar AS employee_avatar,
+    $sql = "SELECT lr.*, 
+                   CONCAT(e.name, IF(IFNULL(e.nickname, '') != '', CONCAT(' (', e.nickname, ')'), '')) AS employee_name, 
+                   e.avatar AS employee_avatar,
                    e.approver_id, e.approver2_id,
-                   lt.name AS leave_type_name, lt.color AS leave_type_color,
+                   IFNULL(lt.name, IF(lr.leave_type_id = 0 OR lr.leave_type_id IS NULL, 'ล่วงเวลา (OT)', 'ไม่ระบุ')) AS leave_type_name, 
+                   IFNULL(lt.color, IF(lr.leave_type_id = 0 OR lr.leave_type_id IS NULL, 'violet', 'gray')) AS leave_type_color,
                    d.name AS department,
-                   a1.name AS approver1_name, a1.avatar AS approver1_avatar,
-                   a2.name AS approver2_name, a2.avatar AS approver2_avatar,
-                   t1.name AS tier1_by_name, t2.name AS tier2_by_name
+                   CONCAT(a1.name, IF(IFNULL(a1.nickname, '') != '', CONCAT(' (', a1.nickname, ')'), '')) AS approver1_name, a1.avatar AS approver1_avatar,
+                   CONCAT(a2.name, IF(IFNULL(a2.nickname, '') != '', CONCAT(' (', a2.nickname, ')'), '')) AS approver2_name, a2.avatar AS approver2_avatar,
+                   CONCAT(t1.name, IF(IFNULL(t1.nickname, '') != '', CONCAT(' (', t1.nickname, ')'), '')) AS tier1_by_name, 
+                   CONCAT(t2.name, IF(IFNULL(t2.nickname, '') != '', CONCAT(' (', t2.nickname, ')'), '')) AS tier2_by_name,
+                   c.name AS company_name, c.code AS company_code
             FROM leave_requests lr
             JOIN employees e ON lr.employee_id = e.id
-            JOIN leave_types lt ON lr.leave_type_id = lt.id
+            LEFT JOIN companies c ON e.company_id = c.id
+            LEFT JOIN leave_types lt ON lr.leave_type_id = lt.id
             LEFT JOIN departments d ON e.department_id = d.id
             LEFT JOIN employees a1 ON lr.expected_approver1_id = a1.id
             LEFT JOIN employees a2 ON lr.expected_approver2_id = a2.id
@@ -102,8 +144,23 @@ if ($method === 'POST') {
     $body = get_json_body();
     $employee_id = $body['employee_id'];
 
+    // ─── Admin-create mode: HR records leave on behalf of an employee ───
+    // Bypasses approval flow → status='approved', is_bypass=1, approved_by=admin
+    $admin_create = !empty($body['admin_create']);
+    $admin_actor_id = null;
+    if ($admin_create) {
+        $admin_actor_id = require_admin($conn);
+        if ($admin_actor_id === $employee_id) {
+            json_response(['error' => 'ไม่สามารถบันทึกการลาให้ตัวเองได้'], 403);
+        }
+    }
+
+    // Detect OT request (frontend sends leave_type_id = 0)
+    $isOT = (isset($body['leave_type_id']) && intval($body['leave_type_id']) === 0)
+         || (isset($body['reason']) && strpos($body['reason'], '[OT]') === 0);
+
     // Look up approvers from employee record
-    $empStmt = $conn->prepare("SELECT e.name, e.approver_id, e.approver2_id, a1.name AS approver1_name FROM employees e LEFT JOIN employees a1 ON e.approver_id = a1.id WHERE e.id = ?");
+    $empStmt = $conn->prepare("SELECT CONCAT(e.name, IF(IFNULL(e.nickname, '') != '', CONCAT(' (', e.nickname, ')'), '')) AS name, e.approver_id, e.approver2_id, CONCAT(a1.name, IF(IFNULL(a1.nickname, '') != '', CONCAT(' (', a1.nickname, ')'), '')) AS approver1_name FROM employees e LEFT JOIN employees a1 ON e.approver_id = a1.id WHERE e.id = ?");
     $empStmt->bind_param('s', $employee_id);
     $empStmt->execute();
     $emp = $empStmt->get_result()->fetch_assoc();
@@ -111,28 +168,75 @@ if ($method === 'POST') {
     $approver1_id = $emp['approver_id'] ?? null;
     $approver2_id = $emp['approver2_id'] ?? null;
 
-    $stmt = $conn->prepare("INSERT INTO leave_requests (employee_id, leave_type_id, start_date, end_date, total_days, reason, expected_approver1_id, expected_approver2_id, tier1_status, tier2_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'pending')");
-    $stmt->bind_param('sissssss',
-        $body['employee_id'], $body['leave_type_id'],
-        $body['start_date'], $body['end_date'],
-        $body['total_days'], $body['reason'],
-        $approver1_id, $approver2_id
-    );
-    $stmt->execute();
+    // Promote Tier 2 to Tier 1 if Tier 1 is missing
+    if (!$approver1_id && $approver2_id) {
+        $approver1_id = $approver2_id;
+        $approver2_id = null;
+    }
+
+    // For OT requests, leave_type_id must be NULL (FK constraint doesn't allow 0)
+    $leaveTypeId = $isOT ? null : $body['leave_type_id'];
+
+    if ($admin_create) {
+        // HR-recorded leave: insert as already-approved with is_bypass=1
+        $stmt = $conn->prepare(
+            "INSERT INTO leave_requests
+             (employee_id, leave_type_id, start_date, end_date, total_days, reason,
+              expected_approver1_id, expected_approver2_id,
+              status, tier1_status, tier2_status, is_bypass, approved_by, approved_at,
+              tier1_by, tier1_at, tier2_by, tier2_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'approved', 'skipped', 'skipped', 1, ?, NOW(), ?, NOW(), ?, NOW())"
+        );
+        // Types: s i s s s s s s s s s = 11 params (1 int leave_type_id, rest strings)
+        $stmt->bind_param('sisssssssss',
+            $body['employee_id'], $leaveTypeId,
+            $body['start_date'], $body['end_date'],
+            $body['total_days'], $body['reason'],
+            $approver1_id, $approver2_id,
+            $admin_actor_id, $admin_actor_id, $admin_actor_id
+        );
+        $stmt->execute();
+    } else {
+        $stmt = $conn->prepare("INSERT INTO leave_requests (employee_id, leave_type_id, start_date, end_date, total_days, reason, expected_approver1_id, expected_approver2_id, tier1_status, tier2_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'pending')");
+        $stmt->bind_param('sissssss',
+            $body['employee_id'], $leaveTypeId,
+            $body['start_date'], $body['end_date'],
+            $body['total_days'], $body['reason'],
+            $approver1_id, $approver2_id
+        );
+        $stmt->execute();
+    }
     $newId = $conn->insert_id;
 
     // Look up leave type name for notification
-    $ltStmt = $conn->prepare("SELECT name FROM leave_types WHERE id = ?");
-    $ltStmt->bind_param('i', $body['leave_type_id']);
-    $ltStmt->execute();
-    $lt = $ltStmt->get_result()->fetch_assoc();
-    $leaveTypeName = $lt['name'] ?? 'ลา';
-
-    $isOT = isset($body['reason']) && strpos($body['reason'], '[OT]') === 0;
+    $leaveTypeName = 'ลา';
+    if (!$isOT && $leaveTypeId) {
+        $ltStmt = $conn->prepare("SELECT name FROM leave_types WHERE id = ?");
+        $ltStmt->bind_param('i', $leaveTypeId);
+        $ltStmt->execute();
+        $lt = $ltStmt->get_result()->fetch_assoc();
+        $leaveTypeName = $lt['name'] ?? 'ลา';
+    }
     $requestType = $isOT ? 'ขอ OT' : $leaveTypeName;
 
-    // Notify tier-1 approver (or all HR if no approver set)
-    if ($approver1_id) {
+    if ($admin_create) {
+        // ── Notify the EMPLOYEE that HR recorded leave for them ──
+        $actorStmt = $conn->prepare("SELECT name FROM employees WHERE id = ?");
+        $actorStmt->bind_param('s', $admin_actor_id);
+        $actorStmt->execute();
+        $actorRow = $actorStmt->get_result()->fetch_assoc();
+        $actorName = $actorRow['name'] ?? $admin_actor_id;
+        create_notification($conn, $employee_id,
+            'HR บันทึกการลาให้คุณ',
+            "{$actorName} บันทึก{$requestType} ให้คุณ ({$body['total_days']} วัน)",
+            'event_available',
+            'bg-blue-100 dark:bg-blue-900/30',
+            'leave',
+            'text-blue-600'
+        );
+        safe_send_push($conn, $employee_id, 'HR บันทึกการลาให้คุณ', "{$actorName} บันทึก{$requestType} ({$body['total_days']} วัน)");
+    } elseif ($approver1_id) {
+        // Notify tier-1 approver
         create_notification($conn, $approver1_id,
             'คำขอรออนุมัติ',
             ($emp['name'] ?? $employee_id) . " ส่งคำขอ{$requestType} รอการอนุมัติของคุณ",
@@ -167,10 +271,9 @@ if ($method === 'PUT' && isset($_GET['id'])) {
     $body = get_json_body();
     $action = $body['status']; // 'approved' or 'rejected'
     $actorId = $body['approved_by'] ?? null;
-    $isBypass = isset($body['is_bypass']) ? (int)$body['is_bypass'] : 0;
 
     // Fetch current request state
-    $reqStmt = $conn->prepare("SELECT lr.*, e.name AS employee_name, e.approver_id, e.approver2_id FROM leave_requests lr JOIN employees e ON lr.employee_id = e.id WHERE lr.id = ?");
+    $reqStmt = $conn->prepare("SELECT lr.*, CONCAT(e.name, IF(IFNULL(e.nickname, '') != '', CONCAT(' (', e.nickname, ')'), '')) AS employee_name, e.approver_id, e.approver2_id FROM leave_requests lr JOIN employees e ON lr.employee_id = e.id WHERE lr.id = ?");
     $reqStmt->bind_param('i', $id);
     $reqStmt->execute();
     $req = $reqStmt->get_result()->fetch_assoc();
@@ -179,12 +282,13 @@ if ($method === 'PUT' && isset($_GET['id'])) {
         json_response(['error' => 'Request not found'], 404);
     }
 
-    // Check if actor is HR/admin
-    $actorStmt = $conn->prepare("SELECT is_admin, name FROM employees WHERE id = ?");
+    // Check if actor is HR/admin/superadmin
+    $actorStmt = $conn->prepare("SELECT is_admin, is_superadmin, name FROM employees WHERE id = ?");
     $actorStmt->bind_param('s', $actorId);
     $actorStmt->execute();
     $actor = $actorStmt->get_result()->fetch_assoc();
     $isHR = $actor && $actor['is_admin'];
+    $isSuperAdmin = $actor && $actor['is_superadmin'];
     $isSelfRequest = ($actorId === $req['employee_id']); // Prevent self-approval
     $actorName = $actor['name'] ?? $actorId;
 
@@ -203,14 +307,11 @@ if ($method === 'PUT' && isset($_GET['id'])) {
                 tier1_status='rejected', tier1_by='$actorId', tier1_at=NOW(),
                 status='rejected', approved_by='$actorId', approved_at=NOW()
                 WHERE id=$id");
-        } elseif ($isHR || $actorId === $tier2Approver) {
-            // HR or tier2 rejecting
-            $tier1Update = ($req['tier1_status'] === 'pending' && $isBypass) ? "tier1_status='skipped'," : '';
+        } elseif ($actorId === $tier2Approver && $req['tier1_status'] === 'approved') {
+            // Tier 2 rejecting (only after tier 1 approved)
             $conn->query("UPDATE leave_requests SET 
-                $tier1Update
                 tier2_status='rejected', tier2_by='$actorId', tier2_at=NOW(),
-                status='rejected', approved_by='$actorId', approved_at=NOW(),
-                is_bypass=$isBypass
+                status='rejected', approved_by='$actorId', approved_at=NOW()
                 WHERE id=$id");
         } else {
             // Fallback
@@ -238,28 +339,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
             json_response(['error' => 'ไม่สามารถอนุมัติคำขอของตัวเองได้'], 403);
         }
 
-        // --- HR BYPASS: HR approves while tier1 is still pending ---
-        if ($isBypass && $isHR && $req['tier1_status'] === 'pending') {
-            $conn->query("UPDATE leave_requests SET 
-                tier1_status='skipped', 
-                tier2_status='approved', tier2_by='$actorId', tier2_at=NOW(),
-                status='approved', approved_by='$actorId', approved_at=NOW(),
-                is_bypass=1
-                WHERE id=$id");
 
-            // Notify employee
-            create_notification($conn, $req['employee_id'],
-                'คำขออนุมัติแล้ว (Bypass)',
-                "คำขอของคุณได้รับการอนุมัติโดย {$actorName} (ข้ามขั้นตอนที่ 1)",
-                'verified',
-                'bg-green-100 dark:bg-green-900/30',
-                'leave',
-                'text-green-600'
-            );
-            safe_send_push($conn, $req['employee_id'], 'คำขออนุมัติแล้ว', "คำขอของคุณได้รับการอนุมัติโดย {$actorName} (Bypass)");
-
-            json_response(['message' => 'Approved (bypass)']);
-        }
 
         // --- TIER 1 APPROVAL ---
         if ($actorId === $tier1Approver && $req['tier1_status'] === 'pending') {
@@ -312,8 +392,8 @@ if ($method === 'PUT' && isset($_GET['id'])) {
             }
         }
 
-        // --- TIER 2 APPROVAL (or HR after tier1 approved) ---
-        if (($actorId === $tier2Approver || $isHR) && ($req['tier1_status'] === 'approved' || $req['tier1_status'] === 'skipped')) {
+        // --- TIER 2 APPROVAL (after tier1 approved) ---
+        if (($actorId === $tier2Approver) && $req['tier1_status'] === 'approved') {
             $conn->query("UPDATE leave_requests SET 
                 tier2_status='approved', tier2_by='$actorId', tier2_at=NOW(),
                 status='approved', approved_by='$actorId', approved_at=NOW()
@@ -332,37 +412,48 @@ if ($method === 'PUT' && isset($_GET['id'])) {
             json_response(['message' => 'Approved']);
         }
 
-        // --- HR approving directly (no tier structure or as fallback) ---
-        if ($isHR) {
-            $bypassVal = ($req['tier1_status'] === 'pending' && $tier1Approver) ? 1 : 0;
-            $tier1Upd = ($req['tier1_status'] === 'pending') ? "tier1_status='skipped'," : '';
-            $conn->query("UPDATE leave_requests SET 
-                $tier1Upd
-                tier2_status='approved', tier2_by='$actorId', tier2_at=NOW(),
-                status='approved', approved_by='$actorId', approved_at=NOW(),
-                is_bypass=$bypassVal
-                WHERE id=$id");
-
-            $bypassLabel = $bypassVal ? ' (ข้ามขั้นตอนที่ 1)' : '';
-            create_notification($conn, $req['employee_id'],
-                'คำขออนุมัติแล้ว',
-                "คำขอของคุณได้รับการอนุมัติโดย {$actorName}{$bypassLabel}",
-                'check_circle',
-                'bg-green-100 dark:bg-green-900/30',
-                'leave',
-                'text-green-600'
-            );
-            send_push_to_employee($conn, $req['employee_id'], 'คำขออนุมัติแล้ว', "คำขอของคุณได้รับการอนุมัติโดย {$actorName}{$bypassLabel}");
-
-            json_response(['message' => 'Approved by HR']);
-        }
-
         // Fallback: simple approve
         $conn->query("UPDATE leave_requests SET status='approved', approved_by='$actorId', approved_at=NOW() WHERE id=$id");
         json_response(['message' => 'Updated']);
     }
 
     json_response(['error' => 'Invalid action'], 400);
+}
+
+// ─── DELETE (Cancel Pending Request) ───
+if ($method === 'DELETE' && isset($_GET['id'])) {
+    $id = (int)$_GET['id'];
+    $employee_id_header = get_employee_id();
+    
+    if (!$employee_id_header) {
+        json_response(['error' => 'Unauthorized'], 401);
+    }
+
+    // Check if the record exists and belongs to the user + is pending
+    $stmt = $conn->prepare("SELECT id, status, employee_id FROM leave_requests WHERE id = ?");
+    $stmt->bind_param('i', $id);
+    $stmt->execute();
+    $req = $stmt->get_result()->fetch_assoc();
+
+    if (!$req) {
+        json_response(['error' => 'Record not found'], 404);
+    }
+
+    if ($req['employee_id'] !== $employee_id_header) {
+        json_response(['error' => 'Permission denied: Cannot delete others requests'], 403);
+    }
+
+    if ($req['status'] !== 'pending') {
+        json_response(['error' => 'Cannot delete: Request is already processed'], 400);
+    }
+
+    $delStmt = $conn->prepare("DELETE FROM leave_requests WHERE id = ?");
+    $delStmt->bind_param('i', $id);
+    if ($delStmt->execute()) {
+        json_response(['message' => 'Request deleted successfully']);
+    } else {
+        json_response(['error' => 'Failed to delete request'], 500);
+    }
 }
 
 json_response(['error' => 'Method not allowed'], 405);

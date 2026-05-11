@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { getLeaveTypes, getLeaveQuotas, getWorkLocations, getEmployee, createLeaveRequest, createTimeRecord, uploadFile, getAllowanceTypes, createAllowanceRequest } from '../services/api';
@@ -7,7 +7,10 @@ import { useAuth } from '../contexts/AuthContext';
 import DatePickerModal from '../components/DatePickerModal';
 import LocationPickerModal, { LocationData } from '../components/LocationPickerModal';
 
-// Calculate leave days based on department work hours
+// Calculate leave days based on department work hours.
+// Same-day partial leaves are snapped UP to the nearest 0.5 day —
+// HR rule: no hourly leave, minimum half-day. This makes 0.5 day mean
+// the same effective time-off regardless of dept hours (7 vs 8 vs 9 hrs).
 function calcLeaveDays(start: string, end: string, workHoursPerDay: number): number {
     if (!start || !end) return 0;
     const s = new Date(start);
@@ -16,12 +19,29 @@ function calcLeaveDays(start: string, end: string, workHoursPerDay: number): num
     const diffMs = e.getTime() - s.getTime();
     if (diffMs <= 0) return 0;
 
-    const diffHours = diffMs / (1000 * 60 * 60);
     const hpd = workHoursPerDay || 8;
 
-    // If same calendar day → partial day based on hours
+    // If same calendar day → partial day based on hours, snapped to 0.5
     if (s.toDateString() === e.toDateString()) {
-        return Math.round((diffHours / hpd) * 100) / 100; // e.g. 4/8 = 0.5 day
+        const startHour = s.getHours() + s.getMinutes() / 60;
+        const endHour = e.getHours() + e.getMinutes() / 60;
+
+        let workHours = endHour - startHour;
+
+        // Deduct lunch break (12:00 - 13:00)
+        const lunchStart = 12;
+        const lunchEnd = 13;
+        const overlapStart = Math.max(startHour, lunchStart);
+        const overlapEnd = Math.min(endHour, lunchEnd);
+
+        if (overlapEnd > overlapStart) {
+            workHours -= (overlapEnd - overlapStart);
+        }
+
+        if (workHours <= 0) return 0;
+        const fraction = workHours / hpd;
+        // Snap UP to nearest 0.5: any partial day = ≥0.5, more than half = 1.0
+        return Math.ceil(fraction * 2) / 2;
     }
 
     // Multi-day: count calendar days
@@ -61,12 +81,12 @@ const CreateRequestScreen: React.FC = () => {
     const [requestType, setRequestType] = useState<'leave' | 'ot' | 'timerecord' | 'allowance'>('leave');
 
     // --- LEAVE FORM ---
-    const [leaveTypeId, setLeaveTypeId] = useState('1');
+    const [leaveTypeId, setLeaveTypeId] = useState('');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
     const [leaveReason, setLeaveReason] = useState('');
     const [leaveSubmitting, setLeaveSubmitting] = useState(false);
-    const [leaveFile, setLeaveFile] = useState<File | null>(null);
+    const [leaveFiles, setLeaveFiles] = useState<File[]>([]);
     const leaveFileRef = useRef<HTMLInputElement>(null);
     const [leaveTypeOpen, setLeaveTypeOpen] = useState(false);
     const leaveTypeDropdownRef = useRef<HTMLDivElement>(null);
@@ -80,6 +100,15 @@ const CreateRequestScreen: React.FC = () => {
     const quotaTotal = selectedQuota ? Number(selectedQuota.total) : 0;
     const quotaUsed = selectedQuota ? Number(selectedQuota.used) : 0;
     const leaveDays = useMemo(() => calcLeaveDays(startDate, endDate, workHoursPerDay), [startDate, endDate, workHoursPerDay]);
+
+    // Auto-select first available leave type based on actual quotas
+    useEffect(() => {
+        if (!leaveTypeId && leaveQuotasRaw?.length) {
+            setLeaveTypeId(String(leaveQuotasRaw[0].leave_type_id));
+        } else if (!leaveTypeId && leaveTypeOptions.length) {
+            setLeaveTypeId(leaveTypeOptions[0].value);
+        }
+    }, [leaveQuotasRaw, leaveTypeOptions]);
 
     // Leave hours info
     const leaveHours = useMemo(() => {
@@ -96,7 +125,7 @@ const CreateRequestScreen: React.FC = () => {
     const [otEndTime, setOtEndTime] = useState('');     // HH:mm
     const [otReason, setOtReason] = useState('');
     const [otSubmitting, setOtSubmitting] = useState(false);
-    const [otFile, setOtFile] = useState<File | null>(null);
+    const [otFiles, setOtFiles] = useState<File[]>([]);
     const otFileRef = useRef<HTMLInputElement>(null);
     const [otCalendarOpen, setOtCalendarOpen] = useState(false);
 
@@ -127,8 +156,23 @@ const CreateRequestScreen: React.FC = () => {
         if (!otDate || !otStartTime || !otEndTime) return 0;
         const s = new Date(`${otDate}T${otStartTime}`);
         const e = new Date(`${otDate}T${otEndTime}`);
-        const diffH = (e.getTime() - s.getTime()) / (1000 * 60 * 60);
-        return diffH > 0 ? Math.round(diffH * 10) / 10 : 0;
+        
+        const startHour = s.getHours() + s.getMinutes() / 60;
+        const endHour = e.getHours() + e.getMinutes() / 60;
+        
+        let workHours = endHour - startHour;
+
+        // Deduct lunch break (12:00 - 13:00)
+        const lunchStart = 12;
+        const lunchEnd = 13;
+        const overlapStart = Math.max(startHour, lunchStart);
+        const overlapEnd = Math.min(endHour, lunchEnd);
+
+        if (overlapEnd > overlapStart) {
+            workHours -= (overlapEnd - overlapStart);
+        }
+
+        return workHours > 0 ? Math.round(workHours * 10) / 10 : 0;
     }, [otDate, otStartTime, otEndTime]);
 
     // Full datetime strings for submit
@@ -136,6 +180,7 @@ const CreateRequestScreen: React.FC = () => {
     const otEnd = otDate && otEndTime ? `${otDate}T${otEndTime}` : '';
 
     // --- TIME RECORD FORM ---
+    const [trCorrectionType, setTrCorrectionType] = useState<'clock_in' | 'clock_out' | 'both' | 'offsite'>('both');
     const [trForm, setTrForm] = useState({
         record_date: '', clock_in_time: '', clock_out_time: '', location_id: '', reason: '',
     });
@@ -164,7 +209,7 @@ const CreateRequestScreen: React.FC = () => {
     const [alAmount, setAlAmount] = useState('');
     const [alReason, setAlReason] = useState('');
     const [alSubmitting, setAlSubmitting] = useState(false);
-    const [alFile, setAlFile] = useState<File | null>(null);
+    const [alFiles, setAlFiles] = useState<File[]>([]);
     const alFileRef = useRef<HTMLInputElement>(null);
     const [alCalendarOpen, setAlCalendarOpen] = useState<'start' | 'end' | null>(null);
     const allowanceTypeOptions = (allowanceTypesRaw || []).map((t: any) => ({ value: t.name, label: t.name }));
@@ -173,8 +218,8 @@ const CreateRequestScreen: React.FC = () => {
         setTrForm(prev => ({
             ...prev,
             record_date: dateStr,
-            clock_in_time: workStart,
-            clock_out_time: workEnd,
+            clock_in_time: trCorrectionType !== 'clock_out' ? workStart : '',
+            clock_out_time: trCorrectionType !== 'clock_in' ? workEnd : '',
         }));
     };
 
@@ -223,6 +268,14 @@ const CreateRequestScreen: React.FC = () => {
         if (!startDate || !endDate) return toast('กรุณาเลือกวันที่เริ่ม-สิ้นสุด', 'warning');
         if (leaveDays <= 0) return toast('วันที่สิ้นสุดต้องมากกว่าวันเริ่ม', 'warning');
         if (!leaveReason.trim()) return toast('กรุณาระบุเหตุผลการลา', 'warning');
+
+        // ── Min 0.5 day for พักร้อน / ลากิจ (HR rule: no hourly leave) ──
+        const typeName: string = selectedQuota?.leave_type_name || '';
+        const requiresHalfDayMin = /พักร้อน|พักผ่อน|กิจ/.test(typeName);
+        if (requiresHalfDayMin && leaveDays < 0.5) {
+            return toast(`${typeName} ลาขั้นต่ำ 0.5 วัน (ครึ่งวัน) — ไม่อนุญาตให้ลาเป็นชั่วโมง`, 'warning');
+        }
+
         if (!isUnlimited && quotaRemaining < leaveDays) {
             return toast(`วันลาคงเหลือไม่เพียงพอ (เหลือ ${quotaRemaining}, ขอ ${leaveDays} วัน)`, 'warning');
         }
@@ -236,8 +289,10 @@ const CreateRequestScreen: React.FC = () => {
                 total_days: leaveDays,
                 reason: leaveReason.trim(),
             });
-            if (leaveFile) {
-                try { await uploadFile(leaveFile, 'leave_attachment', String(result.id)); } catch { }
+            if (leaveFiles.length > 0) {
+                try {
+                    await Promise.all(leaveFiles.map(f => uploadFile(f, 'leave_attachment', String(result.id))));
+                } catch { }
             }
             toast('ส่งใบลาเรียบร้อย', 'success');
             navigate(-1);
@@ -263,8 +318,10 @@ const CreateRequestScreen: React.FC = () => {
                 total_days: otHours,
                 reason: `[OT] ${otProject.trim()} — ${otReason.trim()}`,
             });
-            if (otFile) {
-                try { await uploadFile(otFile, 'ot_attachment', String(result.id)); } catch { }
+            if (otFiles.length > 0) {
+                try {
+                    await Promise.all(otFiles.map(f => uploadFile(f, 'ot_attachment', String(result.id))));
+                } catch { }
             }
             toast('ส่งคำขอ OT เรียบร้อย', 'success');
             navigate(-1);
@@ -276,7 +333,9 @@ const CreateRequestScreen: React.FC = () => {
     };
 
     const handleTimeRecordSubmit = async () => {
-        if (!trForm.record_date || !trForm.clock_in_time) return toast('กรุณาระบุวันที่และเวลาเข้า', 'warning');
+        if (!trForm.record_date) return toast('กรุณาเลือกวันที่', 'warning');
+        if (trCorrectionType !== 'clock_out' && !trForm.clock_in_time) return toast('กรุณาระบุเวลาเข้า', 'warning');
+        if (trCorrectionType !== 'clock_in' && !trForm.clock_out_time) return toast('กรุณาระบุเวลาออก', 'warning');
         setTrSubmitting(true);
         try {
             const selectedLoc = activeLocations.find((wl: any) => String(wl.id) === trForm.location_id);
@@ -284,8 +343,9 @@ const CreateRequestScreen: React.FC = () => {
             await createTimeRecord({
                 employee_id: empId,
                 record_date: trForm.record_date,
-                clock_in_time: trForm.clock_in_time,
-                clock_out_time: trForm.clock_out_time || null,
+                clock_in_time: trCorrectionType !== 'clock_out' ? trForm.clock_in_time : null,
+                clock_out_time: trCorrectionType !== 'clock_in' ? trForm.clock_out_time : null,
+                correction_type: trCorrectionType,
                 location_id: trUseCustom ? null : (trForm.location_id ? Number(trForm.location_id) : null),
                 location_name: locationName,
                 reason: trForm.reason,
@@ -323,8 +383,10 @@ const CreateRequestScreen: React.FC = () => {
                 amount: parseFloat(alAmount),
                 reason: alReason.trim(),
             });
-            if (alFile) {
-                try { await uploadFile(alFile, 'allowance_attachment', String(result.id)); } catch { }
+            if (alFiles.length > 0) {
+                try {
+                    await Promise.all(alFiles.map(f => uploadFile(f, 'allowance_attachment', String(result.id))));
+                } catch { }
             }
             toast('ส่งคำขอเบี้ยเลี้ยงเรียบร้อย', 'success');
             navigate(-1);
@@ -344,11 +406,25 @@ const CreateRequestScreen: React.FC = () => {
 
     const isSubmitting = leaveSubmitting || otSubmitting || trSubmitting || alSubmitting;
 
-    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        if (file.size > 5 * 1024 * 1024) { toast('ไฟล์ต้องไม่เกิน 5MB', 'warning'); return; }
-        setLeaveFile(file);
+    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>, setter: React.Dispatch<React.SetStateAction<File[]>>) => {
+        const files = Array.from(e.target.files || []) as File[];
+        if (!files.length) return;
+        
+        let validFiles: File[] = [];
+        for (const file of files) {
+            if (file.size > 20 * 1024 * 1024) { 
+                toast(`ไฟล์ ${file.name} เกิน 20MB และถูกข้าม`, 'warning'); 
+            } else {
+                validFiles.push(file);
+            }
+        }
+        
+        if (validFiles.length) {
+            setter(prev => [...prev, ...validFiles]);
+        }
+        
+        // Reset input
+        e.target.value = '';
     };
 
     const inputCls = "w-full bg-white dark:bg-[#15202b] md:bg-gray-50 md:dark:bg-gray-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary shadow-sm transition-shadow";
@@ -511,23 +587,26 @@ const CreateRequestScreen: React.FC = () => {
                                 {/* File Attachment */}
                                 <div className="space-y-2">
                                     <label className={labelCls}>เอกสารแนบ</label>
-                                    <input ref={leaveFileRef} type="file" accept="image/*,.pdf,.doc,.docx" className="hidden" onChange={handleFileSelect} />
-                                    {leaveFile ? (
-                                        <div className="flex items-center gap-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-3.5">
-                                            <span className="material-icons-round text-green-600 text-lg">description</span>
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-sm font-medium text-green-800 dark:text-green-300 truncate">{leaveFile.name}</p>
-                                                <p className="text-xs text-green-600 dark:text-green-400">{(leaveFile.size / 1024).toFixed(0)} KB</p>
-                                            </div>
-                                            <button onClick={() => { setLeaveFile(null); if (leaveFileRef.current) leaveFileRef.current.value = ''; }} className="text-red-400 hover:text-red-600">
-                                                <span className="material-icons-round text-lg">close</span>
-                                            </button>
+                                    <input ref={leaveFileRef} type="file" multiple accept="image/*,.pdf,.doc,.docx" className="hidden" onChange={(e) => handleFileSelect(e, setLeaveFiles)} />
+                                    {leaveFiles.length > 0 && (
+                                        <div className="space-y-2">
+                                            {leaveFiles.map((f, i) => (
+                                                <div key={i} className="flex items-center gap-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-3.5">
+                                                    <span className="material-icons-round text-green-600 text-lg">description</span>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-sm font-medium text-green-800 dark:text-green-300 truncate">{f.name}</p>
+                                                        <p className="text-xs text-green-600 dark:text-green-400">{(f.size / 1024).toFixed(0)} KB</p>
+                                                    </div>
+                                                    <button onClick={() => setLeaveFiles(prev => prev.filter((_, index) => index !== i))} className="text-red-400 hover:text-red-600">
+                                                        <span className="material-icons-round text-lg">close</span>
+                                                    </button>
+                                                </div>
+                                            ))}
                                         </div>
-                                    ) : (
-                                        <button onClick={() => leaveFileRef.current?.click()} className="w-full border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl py-3 px-4 flex items-center justify-center hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors group active:scale-[0.98]">
-                                            <span className="text-sm font-medium text-slate-500 dark:text-slate-400 group-hover:text-primary transition-colors">ใบรับรองแพทย์ / หลักฐาน (ไม่เกิน 5MB)</span>
-                                        </button>
                                     )}
+                                    <button onClick={() => leaveFileRef.current?.click()} className="w-full mt-2 border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl py-3 px-4 flex items-center justify-center hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors group active:scale-[0.98]">
+                                        <span className="text-sm font-medium text-slate-500 dark:text-slate-400 group-hover:text-primary transition-colors">แนบรับรองแพทย์ / หลักฐาน (หลายไฟล์ได้ ไม่เกินไฟล์ละ 20MB)</span>
+                                    </button>
                                 </div>
                             </>
                         )}
@@ -607,27 +686,26 @@ const CreateRequestScreen: React.FC = () => {
                                 {/* File Attachment */}
                                 <div className="space-y-2">
                                     <label className={labelCls}>แนบหลักฐาน (ถ้ามี)</label>
-                                    <input ref={otFileRef} type="file" accept="image/*,.pdf,.doc,.docx" className="hidden" onChange={(e) => {
-                                        const f = e.target.files?.[0];
-                                        if (f && f.size > 5 * 1024 * 1024) { toast('ไฟล์ต้องไม่เกิน 5MB', 'warning'); return; }
-                                        setOtFile(f || null);
-                                    }} />
-                                    {otFile ? (
-                                        <div className="flex items-center gap-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl py-2.5 px-4 border border-blue-100 dark:border-blue-900/30">
-                                            <span className="material-icons-round text-blue-500 text-lg">description</span>
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">{otFile.name}</p>
-                                                <p className="text-xs text-slate-400">{(otFile.size / 1024).toFixed(0)} KB</p>
-                                            </div>
-                                            <button onClick={() => { setOtFile(null); if (otFileRef.current) otFileRef.current.value = ''; }} className="text-red-400 hover:text-red-600">
-                                                <span className="material-icons-round text-lg">close</span>
-                                            </button>
+                                    <input ref={otFileRef} type="file" multiple accept="image/*,.pdf,.doc,.docx" className="hidden" onChange={(e) => handleFileSelect(e, setOtFiles)} />
+                                    {otFiles.length > 0 && (
+                                        <div className="space-y-2">
+                                            {otFiles.map((f, i) => (
+                                                <div key={i} className="flex items-center gap-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl py-2.5 px-4 border border-blue-100 dark:border-blue-900/30">
+                                                    <span className="material-icons-round text-blue-500 text-lg">description</span>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">{f.name}</p>
+                                                        <p className="text-xs text-slate-400">{(f.size / 1024).toFixed(0)} KB</p>
+                                                    </div>
+                                                    <button onClick={() => setOtFiles(prev => prev.filter((_, index) => index !== i))} className="text-red-400 hover:text-red-600">
+                                                        <span className="material-icons-round text-lg">close</span>
+                                                    </button>
+                                                </div>
+                                            ))}
                                         </div>
-                                    ) : (
-                                        <button onClick={() => otFileRef.current?.click()} className="w-full border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl py-3 px-4 flex items-center justify-center hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors group active:scale-[0.98]">
-                                            <span className="text-sm font-medium text-slate-500 dark:text-slate-400 group-hover:text-primary transition-colors">แนบไฟล์หลักฐาน (ไม่เกิน 5MB)</span>
-                                        </button>
                                     )}
+                                    <button onClick={() => otFileRef.current?.click()} className="w-full mt-2 border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl py-3 px-4 flex items-center justify-center hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors group active:scale-[0.98]">
+                                        <span className="text-sm font-medium text-slate-500 dark:text-slate-400 group-hover:text-primary transition-colors">แนบไฟล์หลักฐาน (หลายไฟล์ได้ ไม่เกินไฟล์ละ 20MB)</span>
+                                    </button>
                                 </div>
                             </>
                         )}
@@ -638,8 +716,42 @@ const CreateRequestScreen: React.FC = () => {
                                 <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3 border border-purple-100 dark:border-purple-900/30">
                                     <p className="text-xs text-purple-600 dark:text-purple-300 flex gap-2">
                                         <span className="material-icons-round text-sm">info</span>
-                                        <span>ใช้กรณีลืมลงเวลา หรือทำงานต่างสถานที่ เวลาเข้า-ออกจะเซ็ตตามแผนกอัตโนมัติ</span>
+                                        <span>ใช้กรณีลืมลงเวลา หรือทำงานต่างสถานที่ เลือกประเภทที่ต้องการแก้ไข</span>
                                     </p>
+                                </div>
+
+                                {/* Correction Type Selector */}
+                                <div className="space-y-1.5">
+                                    <label className={labelCls}>ประเภทการแก้ไข</label>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {[
+                                            { value: 'clock_in' as const, label: 'ลืมลงเข้า', icon: 'login', color: 'red' },
+                                            { value: 'clock_out' as const, label: 'ลืมลงออก', icon: 'logout', color: 'blue' },
+                                            { value: 'both' as const, label: 'ลืมทั้งคู่', icon: 'swap_horiz', color: 'amber' },
+                                            { value: 'offsite' as const, label: 'นอกสถานที่', icon: 'location_on', color: 'green' },
+                                        ].map(opt => (
+                                            <button key={opt.value} type="button"
+                                                onClick={() => {
+                                                    setTrCorrectionType(opt.value);
+                                                    setTrForm(prev => ({
+                                                        ...prev,
+                                                        clock_in_time: opt.value !== 'clock_out' && prev.record_date ? workStart : '',
+                                                        clock_out_time: opt.value !== 'clock_in' && prev.record_date ? workEnd : '',
+                                                    }));
+                                                }}
+                                                className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border-2 transition-all text-xs font-medium ${
+                                                    trCorrectionType === opt.value
+                                                        ? `border-${opt.color}-500 bg-${opt.color}-50 dark:bg-${opt.color}-900/30 text-${opt.color}-700 dark:text-${opt.color}-300 shadow-sm`
+                                                        : 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-slate-300'
+                                                }`}
+                                            >
+                                                <span className={`material-icons-round text-lg ${
+                                                    trCorrectionType === opt.value ? `text-${opt.color}-500` : 'text-slate-400'
+                                                }`}>{opt.icon}</span>
+                                                {opt.label}
+                                            </button>
+                                        ))}
+                                    </div>
                                 </div>
 
                                 {/* Date Picker */}
@@ -661,16 +773,20 @@ const CreateRequestScreen: React.FC = () => {
                                     />
                                 )}
 
-                                {/* Time */}
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div className="space-y-1.5">
-                                        <label className={labelCls}>เวลาเข้า</label>
-                                        <input type="time" value={trForm.clock_in_time} onChange={(e) => setTrForm({ ...trForm, clock_in_time: e.target.value })} className={inputCls} disabled={!trForm.record_date} />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <label className={labelCls}>เวลาออก</label>
-                                        <input type="time" value={trForm.clock_out_time} onChange={(e) => setTrForm({ ...trForm, clock_out_time: e.target.value })} className={inputCls} disabled={!trForm.record_date} />
-                                    </div>
+                                {/* Time Fields — conditional */}
+                                <div className={`grid gap-3 ${trCorrectionType === 'both' || trCorrectionType === 'offsite' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                                    {(trCorrectionType !== 'clock_out') && (
+                                        <div className="space-y-1.5">
+                                            <label className={labelCls}>เวลาเข้า</label>
+                                            <input type="time" value={trForm.clock_in_time} onChange={(e) => setTrForm({ ...trForm, clock_in_time: e.target.value })} className={inputCls} disabled={!trForm.record_date} />
+                                        </div>
+                                    )}
+                                    {trCorrectionType !== 'clock_in' && (
+                                        <div className="space-y-1.5">
+                                            <label className={labelCls}>เวลาออก</label>
+                                            <input type="time" value={trForm.clock_out_time} onChange={(e) => setTrForm({ ...trForm, clock_out_time: e.target.value })} className={inputCls} disabled={!trForm.record_date} />
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* Location — Custom Dropdown */}
@@ -952,27 +1068,26 @@ const CreateRequestScreen: React.FC = () => {
                                 {/* File Attachment */}
                                 <div className="space-y-2">
                                     <label className={labelCls}>แนบใบเสร็จ / หลักฐาน (ถ้ามี)</label>
-                                    <input ref={alFileRef} type="file" accept="image/*" className="hidden" onChange={(e) => {
-                                        const f = e.target.files?.[0];
-                                        if (f && f.size > 5 * 1024 * 1024) { toast('ไฟล์ต้องไม่เกิน 5MB', 'warning'); return; }
-                                        setAlFile(f || null);
-                                    }} />
-                                    {alFile ? (
-                                        <div className="flex items-center gap-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl py-2.5 px-4 border border-emerald-100 dark:border-emerald-900/30">
-                                            <span className="material-icons-round text-emerald-500 text-lg">image</span>
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">{alFile.name}</p>
-                                                <p className="text-xs text-slate-400">{(alFile.size / 1024).toFixed(0)} KB</p>
-                                            </div>
-                                            <button onClick={() => { setAlFile(null); if (alFileRef.current) alFileRef.current.value = ''; }} className="text-red-400 hover:text-red-600">
-                                                <span className="material-icons-round text-lg">close</span>
-                                            </button>
+                                    <input ref={alFileRef} type="file" multiple accept="image/*,.pdf,.doc,.docx" className="hidden" onChange={(e) => handleFileSelect(e, setAlFiles)} />
+                                    {alFiles.length > 0 && (
+                                        <div className="space-y-2">
+                                            {alFiles.map((f, i) => (
+                                                <div key={i} className="flex items-center gap-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl py-2.5 px-4 border border-emerald-100 dark:border-emerald-900/30">
+                                                    <span className="material-icons-round text-emerald-500 text-lg">image</span>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">{f.name}</p>
+                                                        <p className="text-xs text-slate-400">{(f.size / 1024).toFixed(0)} KB</p>
+                                                    </div>
+                                                    <button onClick={() => setAlFiles(prev => prev.filter((_, index) => index !== i))} className="text-red-400 hover:text-red-600">
+                                                        <span className="material-icons-round text-lg">close</span>
+                                                    </button>
+                                                </div>
+                                            ))}
                                         </div>
-                                    ) : (
-                                        <button onClick={() => alFileRef.current?.click()} className="w-full border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl py-3 px-4 flex items-center justify-center hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors group active:scale-[0.98]">
-                                            <span className="text-sm font-medium text-slate-500 dark:text-slate-400 group-hover:text-primary transition-colors">📸 แนบรูปใบเสร็จ (ไม่เกิน 5MB)</span>
-                                        </button>
                                     )}
+                                    <button onClick={() => alFileRef.current?.click()} className="w-full border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl py-3 px-4 flex items-center justify-center hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors group active:scale-[0.98]">
+                                        <span className="text-sm font-medium text-slate-500 dark:text-slate-400 group-hover:text-primary transition-colors">📸 แนบรูปใบเสร็จ (หลายรูปได้ รูปละไม่เกิน 20MB)</span>
+                                    </button>
                                 </div>
                             </>
                         )}

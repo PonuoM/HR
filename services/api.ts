@@ -32,7 +32,11 @@ export function getAuthHeaders(extra?: Record<string, string>): Record<string, s
 
 // --- Generic fetch wrapper ---
 async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
-    const url = `${API_BASE}/${endpoint}`;
+    // Prevent mobile browser (especially iOS Safari) caching for GET requests
+    const isGet = !options?.method || options.method === 'GET';
+    const separator = endpoint.includes('?') ? '&' : '?';
+    const finalEndpoint = isGet ? `${endpoint}${separator}_t=${Date.now()}` : endpoint;
+    const url = `${API_BASE}/${finalEndpoint}`;
 
     const headers: Record<string, string> = {
         ...getAuthHeaders(),
@@ -52,8 +56,12 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
 }
 
 // --- Employees ---
-export async function getEmployees(showInactive = false) {
-    return fetchApi<any[]>(`employees.php${showInactive ? '?show_inactive=1' : ''}`);
+export async function getEmployees(showInactive = false, allCompanies = false) {
+    const params = new URLSearchParams();
+    if (showInactive) params.set('show_inactive', '1');
+    if (allCompanies) params.set('all_companies', '1');
+    const qs = params.toString();
+    return fetchApi<any[]>(`employees.php${qs ? '?' + qs : ''}`);
 }
 
 export async function createEmployee(data: { id: string; name: string; email?: string; password?: string; department_id?: number; position_id?: number; base_salary?: number | null; hire_date?: string | null; approver_id?: string | null; approver2_id?: string | null; company_id?: number; is_admin?: number }) {
@@ -115,10 +123,11 @@ export async function updateLeaveQuota(data: { employee_id: string; leave_type_i
 }
 
 // --- Leave Requests ---
-export async function getLeaveRequests(filters?: { employee_id?: string; status?: string }) {
+export async function getLeaveRequests(filters?: { employee_id?: string; status?: string; approver_id?: string }) {
     const params = new URLSearchParams();
     if (filters?.employee_id) params.set('employee_id', filters.employee_id);
     if (filters?.status) params.set('status', filters.status);
+    if (filters?.approver_id) params.set('approver_id', filters.approver_id);
     const qs = params.toString();
     return fetchApi<any[]>(`leave_requests.php${qs ? '?' + qs : ''}`);
 }
@@ -127,8 +136,27 @@ export async function createLeaveRequest(data: any) {
     return fetchApi<any>('leave_requests.php', { method: 'POST', body: JSON.stringify(data) });
 }
 
+// HR records leave on behalf of an employee — bypasses approval, auto-approved
+export async function createLeaveRequestAsAdmin(data: {
+    employee_id: string;
+    leave_type_id: number;
+    start_date: string;
+    end_date: string;
+    total_days: number;
+    reason: string;
+}) {
+    return fetchApi<any>('leave_requests.php', {
+        method: 'POST',
+        body: JSON.stringify({ ...data, admin_create: true }),
+    });
+}
+
 export async function updateLeaveRequest(id: number, data: { status: string; approved_by?: string; is_bypass?: number }) {
     return fetchApi<any>(`leave_requests.php?id=${id}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export async function deleteLeaveRequest(id: number) {
+    return fetchApi<any>(`leave_requests.php?id=${id}`, { method: 'DELETE' });
 }
 
 // --- Time Records ---
@@ -143,6 +171,10 @@ export async function getTimeRecords(filters?: { employee_id?: string; status?: 
 
 export async function updateTimeRecord(id: number, data: { status: string; approved_by?: string; is_bypass?: number }) {
     return fetchApi<any>(`time_records.php?id=${id}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export async function deleteTimeRecord(id: number) {
+    return fetchApi<any>(`time_records.php?id=${id}`, { method: 'DELETE' });
 }
 
 // --- Notifications ---

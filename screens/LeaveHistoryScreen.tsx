@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useApi } from '../hooks/useApi';
 import { API_BASE, getLeaveRequests } from '../services/api';
+import { formatLeaveDuration } from '../utils/leaveHelpers';
 
 function formatThaiDate(dateStr: string): string {
     const d = new Date(dateStr);
@@ -128,7 +129,7 @@ const LeaveHistoryScreen: React.FC = () => {
                                                     </span>
                                                     <span className="flex items-center gap-1">
                                                         <span className="material-icons-round text-xs">schedule</span>
-                                                        {r.total_days} {isOT ? 'ชม.' : 'วัน'}
+                                                        {isOT ? `${r.total_days} ชม.` : formatLeaveDuration(r.total_days, 8, r.start_date, r.end_date)}
                                                     </span>
                                                 </div>
                                                 {r.reason && !isOT && (

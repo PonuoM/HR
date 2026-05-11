@@ -78,9 +78,27 @@ if ($method === 'GET' && isset($_GET['action']) && $_GET['action'] === 'types') 
 
 // ─── GET: List requests ───
 if ($method === 'GET') {
-    $where = ['e.company_id = ?'];
-    $params = [$company_id];
-    $types = 'i';
+    // Check if caller is superadmin (cross-company access)
+    $employee_id_header = get_employee_id();
+    $is_superadmin = false;
+    if ($employee_id_header) {
+        $saCheck = $conn->prepare("SELECT is_superadmin FROM employees WHERE id = ?");
+        $saCheck->bind_param('s', $employee_id_header);
+        $saCheck->execute();
+        $saRow = $saCheck->get_result()->fetch_assoc();
+        $is_superadmin = $saRow && $saRow['is_superadmin'];
+    }
+
+    $where = [];
+    $params = [];
+    $types = '';
+
+    // Non-superadmin: scope to their company only
+    if (!$is_superadmin) {
+        $where[] = 'e.company_id = ?';
+        $params[] = $company_id;
+        $types .= 'i';
+    }
 
     if (isset($_GET['employee_id'])) {
         $where[] = 'ar.employee_id = ?';
@@ -95,24 +113,28 @@ if ($method === 'GET') {
     if (isset($_GET['approver_id'])) {
         $appId = $_GET['approver_id'];
         $where[] = "(
-            (ar.expected_approver1_id = ? AND ar.tier1_status = 'pending')
-            OR (ar.expected_approver2_id = ? AND ar.tier1_status IN ('approved','skipped') AND ar.tier2_status = 'pending')
+            (ar.expected_approver1_id = ? AND ar.tier1_status = 'pending' AND ar.status = 'pending')
+            OR (ar.expected_approver2_id = ? AND ar.tier1_status = 'approved' AND ar.tier2_status = 'pending' AND ar.status = 'pending')
+            OR (ar.tier1_by = ?)
+            OR (ar.tier2_by = ?)
         )";
         $params[] = $appId;
         $params[] = $appId;
-        $types .= 'ss';
-        // Only pending
-        $where[] = "ar.status = 'pending'";
+        $params[] = $appId;
+        $params[] = $appId;
+        $types .= 'ssss';
     }
 
-    $whereSQL = implode(' AND ', $where);
+    $whereSQL = count($where) > 0 ? implode(' AND ', $where) : '1=1';
     $sql = "SELECT ar.*,
-                e.name AS employee_name, e.avatar AS employee_avatar,
+                CONCAT(e.name, IF(IFNULL(e.nickname, '') != '', CONCAT(' (', e.nickname, ')'), '')) AS employee_name, e.avatar AS employee_avatar,
                 e.approver_id, e.approver2_id,
-                a1.name AS approver1_name,
-                a2.name AS approver2_name
+                CONCAT(a1.name, IF(IFNULL(a1.nickname, '') != '', CONCAT(' (', a1.nickname, ')'), '')) AS approver1_name,
+                CONCAT(a2.name, IF(IFNULL(a2.nickname, '') != '', CONCAT(' (', a2.nickname, ')'), '')) AS approver2_name,
+                c.name AS company_name, c.code AS company_code
             FROM allowance_requests ar
             JOIN employees e ON ar.employee_id COLLATE utf8mb4_unicode_ci = e.id COLLATE utf8mb4_unicode_ci
+            LEFT JOIN companies c ON e.company_id = c.id
             LEFT JOIN employees a1 ON ar.expected_approver1_id COLLATE utf8mb4_unicode_ci = a1.id COLLATE utf8mb4_unicode_ci
             LEFT JOIN employees a2 ON ar.expected_approver2_id COLLATE utf8mb4_unicode_ci = a2.id COLLATE utf8mb4_unicode_ci
             WHERE $whereSQL
@@ -120,10 +142,14 @@ if ($method === 'GET') {
             LIMIT 200";
 
     try {
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param($types, ...$params);
-        $stmt->execute();
-        $result = $stmt->get_result();
+        if (count($params) > 0) {
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param($types, ...$params);
+            $stmt->execute();
+            $result = $stmt->get_result();
+        } else {
+            $result = $conn->query($sql);
+        }
 
         $rows = [];
         while ($row = $result->fetch_assoc()) $rows[] = $row;
@@ -166,7 +192,7 @@ if ($method === 'POST') {
     }
 
     // Look up approvers from employee record
-    $empStmt = $conn->prepare("SELECT e.name, e.approver_id, e.approver2_id FROM employees e WHERE e.id = ?");
+    $empStmt = $conn->prepare("SELECT CONCAT(e.name, IF(IFNULL(e.nickname, '') != '', CONCAT(' (', e.nickname, ')'), '')) AS name, e.approver_id, e.approver2_id FROM employees e WHERE e.id = ?");
     $empStmt->bind_param('s', $employee_id);
     $empStmt->execute();
     $emp = $empStmt->get_result()->fetch_assoc();
@@ -238,7 +264,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
     }
 
     // Get actor name
-    $actorRow = $conn->query("SELECT name, is_admin FROM employees WHERE id = '$actorId'")->fetch_assoc();
+    $actorRow = $conn->query("SELECT CONCAT(name, IF(IFNULL(nickname, '') != '', CONCAT(' (', nickname, ')'), '')) AS name, is_admin FROM employees WHERE id = '$actorId'")->fetch_assoc();
     $actorName = $actorRow['name'] ?? $actorId;
     $isHR = (int)($actorRow['is_admin'] ?? 0) === 1;
 
@@ -260,30 +286,15 @@ if ($method === 'PUT' && isset($_GET['id'])) {
     // ── APPROVAL ──
     if ($action === 'approved') {
 
-        // HR BYPASS: skip tier1 if pending
-        if ($isHR && $req['tier1_status'] === 'pending' && $tier1Approver && $actorId !== $tier1Approver) {
-            $conn->query("UPDATE allowance_requests SET
-                tier1_status='skipped',
-                tier2_status='approved', tier2_by='$actorId', tier2_at=NOW(),
-                status='approved', approved_by='$actorId', approved_at=NOW(), is_bypass=1
-                WHERE id=$id");
-            create_notification_al($conn, $req['employee_id'],
-                'เบี้ยเลี้ยงอนุมัติแล้ว',
-                "คำขอเบี้ยเลี้ยงของคุณได้รับการอนุมัติโดย {$actorName} (Bypass)",
-                'check_circle', 'bg-green-100 dark:bg-green-900/30', 'allowance', 'text-green-600'
-            );
-            safe_send_push_al($conn, $req['employee_id'], 'เบี้ยเลี้ยงอนุมัติแล้ว', "คำขอเบี้ยเลี้ยงอนุมัติโดย {$actorName} (Bypass)");
-            json_response(['message' => 'Approved (bypass)']);
-        }
 
         // TIER 1 APPROVAL
-        if (($actorId === $tier1Approver || $isHR) && $req['tier1_status'] === 'pending') {
+        if ($actorId === $tier1Approver && $req['tier1_status'] === 'pending') {
             $conn->query("UPDATE allowance_requests SET tier1_status='approved', tier1_by='$actorId', tier1_at=NOW() WHERE id=$id");
 
             // If no tier2 approver → auto-approve
             if (!$tier2Approver) {
                 $conn->query("UPDATE allowance_requests SET
-                    tier2_status='skipped',
+                    tier2_status='approved',
                     status='approved', approved_by='$actorId', approved_at=NOW()
                     WHERE id=$id");
                 create_notification_al($conn, $req['employee_id'],
@@ -305,8 +316,8 @@ if ($method === 'PUT' && isset($_GET['id'])) {
             json_response(['message' => 'Tier 1 approved']);
         }
 
-        // TIER 2 APPROVAL
-        if (($actorId === $tier2Approver || $isHR) && ($req['tier1_status'] === 'approved' || $req['tier1_status'] === 'skipped')) {
+        // TIER 2 APPROVAL (after tier1 approved)
+        if ($actorId === $tier2Approver && $req['tier1_status'] === 'approved') {
             $conn->query("UPDATE allowance_requests SET
                 tier2_status='approved', tier2_by='$actorId', tier2_at=NOW(),
                 status='approved', approved_by='$actorId', approved_at=NOW()
@@ -318,26 +329,6 @@ if ($method === 'PUT' && isset($_GET['id'])) {
             );
             safe_send_push_al($conn, $req['employee_id'], 'เบี้ยเลี้ยงอนุมัติแล้ว', "คำขอเบี้ยเลี้ยงอนุมัติโดย {$actorName}");
             json_response(['message' => 'Approved']);
-        }
-
-        // HR direct approval
-        if ($isHR) {
-            $bypassVal = ($req['tier1_status'] === 'pending' && $tier1Approver) ? 1 : 0;
-            $tier1Upd = ($req['tier1_status'] === 'pending') ? "tier1_status='skipped'," : '';
-            $conn->query("UPDATE allowance_requests SET
-                $tier1Upd
-                tier2_status='approved', tier2_by='$actorId', tier2_at=NOW(),
-                status='approved', approved_by='$actorId', approved_at=NOW(),
-                is_bypass=$bypassVal
-                WHERE id=$id");
-            $bypassLabel = $bypassVal ? ' (ข้ามขั้นตอนที่ 1)' : '';
-            create_notification_al($conn, $req['employee_id'],
-                'เบี้ยเลี้ยงอนุมัติแล้ว',
-                "คำขอเบี้ยเลี้ยงของคุณได้รับการอนุมัติโดย {$actorName}{$bypassLabel}",
-                'check_circle', 'bg-green-100 dark:bg-green-900/30', 'allowance', 'text-green-600'
-            );
-            safe_send_push_al($conn, $req['employee_id'], 'เบี้ยเลี้ยงอนุมัติแล้ว', "คำขอเบี้ยเลี้ยงอนุมัติโดย {$actorName}{$bypassLabel}");
-            json_response(['message' => 'Approved by HR']);
         }
 
         // Fallback
