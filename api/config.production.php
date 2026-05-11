@@ -8,7 +8,13 @@
 date_default_timezone_set('Asia/Bangkok');
 
 // --- CORS ---
-header('Access-Control-Allow-Origin: *');
+$allowed_origins = ['https://hr.prima49.com', 'http://hr.prima49.com'];
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if (in_array($origin, $allowed_origins)) {
+    header('Access-Control-Allow-Origin: ' . $origin);
+} else {
+    header('Access-Control-Allow-Origin: https://hr.prima49.com');
+}
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Company-Id, X-Employee-Id, X-Session-Token');
 header('Content-Type: application/json; charset=utf-8');
@@ -30,8 +36,9 @@ $conn->query("SET time_zone = '+07:00'");
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 
 if ($conn->connect_error) {
+    error_log('DB connection failed: ' . $conn->connect_error);
     http_response_code(500);
-    echo json_encode(['error' => 'Database connection failed: ' . $conn->connect_error]);
+    echo json_encode(['error' => 'ระบบขัดข้อง กรุณาลองใหม่ภายหลัง']);
     exit;
 }
 
@@ -61,4 +68,29 @@ function get_company_id() {
     if ($companyId) return (int)$companyId;
     if (isset($_GET['company_id'])) return (int)$_GET['company_id'];
     return 1;
+}
+
+/**
+ * Get the employee_id from the X-Employee-Id header.
+ */
+function get_employee_id() {
+    $headers = getallheaders();
+    return $headers['X-Employee-Id'] ?? $headers['x-employee-id'] ?? '';
+}
+
+/**
+ * Require that the caller is an admin (is_admin = 1).
+ * Returns a 403 error if not an admin.
+ */
+function require_admin($conn) {
+    $empId = get_employee_id();
+    if (!$empId) json_response(['error' => 'Unauthorized: missing employee ID'], 403);
+    $stmt = $conn->prepare("SELECT is_admin FROM employees WHERE id = ? AND is_active = 1");
+    $stmt->bind_param('s', $empId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    if (!$row || !$row['is_admin']) {
+        json_response(['error' => 'Forbidden: admin access required'], 403);
+    }
+    return $empId;
 }

@@ -36,9 +36,9 @@ if ($method === 'GET') {
 
     try {
         $sql = "SELECT sa.*, 
-                e1.name AS employee_name, 
-                e2.name AS original_employee_name,
-                e3.name AS resolved_by_name
+                CONCAT(e1.name, IF(IFNULL(e1.nickname, '') != '', CONCAT(' (', e1.nickname, ')'), '')) AS employee_name, 
+                CONCAT(e2.name, IF(IFNULL(e2.nickname, '') != '', CONCAT(' (', e2.nickname, ')'), '')) AS original_employee_name,
+                CONCAT(e3.name, IF(IFNULL(e3.nickname, '') != '', CONCAT(' (', e3.nickname, ')'), '')) AS resolved_by_name
                 FROM security_alerts sa
                 LEFT JOIN employees e1 ON sa.employee_id = e1.id
                 LEFT JOIN employees e2 ON sa.original_employee_id = e2.id

@@ -86,7 +86,7 @@ if ($action === 'like' && $method === 'POST' && isset($_GET['id'])) {
 // ---- COMMENTS: GET ----
 if ($action === 'comments' && $method === 'GET' && isset($_GET['id'])) {
     $articleId = (int)$_GET['id'];
-    $stmt = $conn->prepare("SELECT c.id, c.content, c.employee_id, e.name AS employee_name, e.avatar, c.created_at
+    $stmt = $conn->prepare("SELECT c.id, c.content, c.employee_id, CONCAT(e.name, IF(IFNULL(e.nickname, '') != '', CONCAT(' (', e.nickname, ')'), '')) AS employee_name, e.avatar, c.created_at
         FROM news_comments c
         LEFT JOIN employees e ON e.id = c.employee_id
         WHERE c.article_id = ?

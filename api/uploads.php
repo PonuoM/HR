@@ -20,6 +20,9 @@ if (!is_dir($uploadDir)) {
 $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
 $host = $_SERVER['HTTP_HOST'];
 $basePath = dirname(dirname($_SERVER['SCRIPT_NAME']));
+if ($basePath === '/' || $basePath === '\\') {
+    $basePath = '';
+}
 $baseUrl = $protocol . '://' . $host . $basePath . '/uploads/';
 
 if ($method === 'POST') {
@@ -33,14 +36,14 @@ if ($method === 'POST') {
     $uploaded_by = $_POST['uploaded_by'] ?? null;
 
     // Validate file type
-    $allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'application/pdf'];
+    $allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf'];
     if (!in_array($file['type'], $allowedTypes)) {
         json_response(['error' => 'File type not allowed: ' . $file['type']], 400);
     }
 
-    // Max 5MB
-    if ($file['size'] > 5 * 1024 * 1024) {
-        json_response(['error' => 'File too large (max 5MB)'], 400);
+    // Max 20MB
+    if ($file['size'] > 20 * 1024 * 1024) {
+        json_response(['error' => 'File too large (max 20MB)'], 400);
     }
 
     // Generate unique filename
@@ -110,6 +113,19 @@ if ($method === 'GET') {
 }
 
 if ($method === 'DELETE' && isset($_GET['id'])) {
+    // Only admin can delete uploads
+    $caller_id = get_employee_id();
+    if ($caller_id) {
+        $adminCheck = $conn->prepare("SELECT is_admin, is_superadmin FROM employees WHERE id = ?");
+        $adminCheck->bind_param('s', $caller_id);
+        $adminCheck->execute();
+        $adminRow = $adminCheck->get_result()->fetch_assoc();
+        if (!$adminRow || (!$adminRow['is_admin'] && !$adminRow['is_superadmin'])) {
+            json_response(['error' => 'ไม่มีสิทธิ์ลบไฟล์'], 403);
+        }
+    } else {
+        json_response(['error' => 'Unauthorized'], 401);
+    }
     $id = (int)$_GET['id'];
 
     // Get filename first

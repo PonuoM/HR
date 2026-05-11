@@ -36,10 +36,10 @@ const AdminQuotaScreen: React.FC = () => {
     }));
 
     // Form state
-    const emptyForm: Partial<AdminLeaveType> = {
-        name: '', defaultQuota: 0, unit: 'days', type: 'annual', color: 'blue', icon: 'star', iconUrl: null,
-        isActive: true, requiresDoc: false, probationMonths: 0, grantTiming: 'next_year',
-        prorateFirstYear: true, advanceNoticeDays: 0, seniorityTiers: [],
+    const emptyForm: Partial<AdminLeaveType | any> = {
+        name: '', defaultQuota: '', unit: 'days', type: 'annual', color: 'blue', icon: 'star', iconUrl: null,
+        isActive: true, requiresDoc: false, probationMonths: '', grantTiming: 'next_year',
+        prorateFirstYear: true, advanceNoticeDays: '', seniorityTiers: [],
     };
     const [formData, setFormData] = useState<Partial<AdminLeaveType>>(emptyForm);
 
@@ -78,7 +78,7 @@ const AdminQuotaScreen: React.FC = () => {
     const handleSave = async () => {
         const payload: any = {
             name: formData.name,
-            default_quota: formData.defaultQuota,
+            default_quota: Number(formData.defaultQuota) || 0,
             unit: formData.unit,
             type: formData.type,
             color: formData.color,
@@ -86,15 +86,15 @@ const AdminQuotaScreen: React.FC = () => {
             icon_url: formData.iconUrl || null,
             is_active: formData.isActive ? 1 : 0,
             requires_doc: formData.requiresDoc ? 1 : 0,
-            probation_months: formData.probationMonths || 0,
+            probation_months: Number(formData.probationMonths) || 0,
             grant_timing: formData.grantTiming || 'next_year',
             prorate_first_year: formData.prorateFirstYear ? 1 : 0,
-            advance_notice_days: formData.advanceNoticeDays || 0,
+            advance_notice_days: Number(formData.advanceNoticeDays) || 0,
         };
         if (formData.type === 'seniority') {
-            payload.seniority_tiers = (formData.seniorityTiers || []).map(t => ({
-                min_years: t.minYears,
-                days: t.days,
+            payload.seniority_tiers = (formData.seniorityTiers || []).map((t: any) => ({
+                min_years: Number(t.minYears) || 0,
+                days: Number(t.days) || 0,
             }));
         }
         try {
@@ -143,9 +143,9 @@ const AdminQuotaScreen: React.FC = () => {
         tiers.splice(idx, 1);
         setFormData({ ...formData, seniorityTiers: tiers });
     };
-    const updateTier = (idx: number, field: 'minYears' | 'days', value: number) => {
+    const updateTier = (idx: number, field: 'minYears' | 'days', value: string) => {
         const tiers = [...(formData.seniorityTiers || [])];
-        tiers[idx] = { ...tiers[idx], [field]: value };
+        tiers[idx] = { ...tiers[idx], [field]: value === '' ? '' : Number(value) };
         setFormData({ ...formData, seniorityTiers: tiers });
     };
 
@@ -358,7 +358,7 @@ const AdminQuotaScreen: React.FC = () => {
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">จำนวนมาตรฐาน (ต่อปี)</label>
-                                    <input type="number" value={formData.defaultQuota} onChange={(e) => setFormData({ ...formData, defaultQuota: Number(e.target.value) })} className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 outline-none dark:text-white" />
+                                    <input type="number" value={formData.defaultQuota ?? ''} onChange={(e) => setFormData({ ...formData, defaultQuota: e.target.value === '' ? '' : Number(e.target.value) })} className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 outline-none dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">หน่วยนับ</label>
@@ -411,11 +411,11 @@ const AdminQuotaScreen: React.FC = () => {
                                         <div key={idx} className="flex items-center gap-2">
                                             <div className="flex-1 grid grid-cols-2 gap-2">
                                                 <div className="relative">
-                                                    <input type="number" min={0} value={tier.minYears} onChange={(e) => updateTier(idx, 'minYears', Number(e.target.value))} className="w-full bg-white dark:bg-gray-800 border border-orange-200 dark:border-orange-800 rounded-lg px-3 py-2 text-sm outline-none dark:text-white pr-10" />
+                                                    <input type="number" min={0} value={tier.minYears ?? ''} onChange={(e) => updateTier(idx, 'minYears', e.target.value)} className="w-full bg-white dark:bg-gray-800 border border-orange-200 dark:border-orange-800 rounded-lg px-3 py-2 text-sm outline-none dark:text-white pr-10 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
                                                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">ปี+</span>
                                                 </div>
                                                 <div className="relative">
-                                                    <input type="number" min={0} value={tier.days} onChange={(e) => updateTier(idx, 'days', Number(e.target.value))} className="w-full bg-white dark:bg-gray-800 border border-orange-200 dark:border-orange-800 rounded-lg px-3 py-2 text-sm outline-none dark:text-white pr-8" />
+                                                    <input type="number" min={0} value={tier.days ?? ''} onChange={(e) => updateTier(idx, 'days', e.target.value)} className="w-full bg-white dark:bg-gray-800 border border-orange-200 dark:border-orange-800 rounded-lg px-3 py-2 text-sm outline-none dark:text-white pr-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
                                                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">วัน</span>
                                                 </div>
                                             </div>
@@ -430,7 +430,7 @@ const AdminQuotaScreen: React.FC = () => {
                                         <div className="grid grid-cols-2 gap-3">
                                             <div>
                                                 <label className="block text-xs font-medium text-orange-700 dark:text-orange-400 mb-1">ทดลองงาน (เดือน)</label>
-                                                <input type="number" min={0} value={formData.probationMonths || 0} onChange={(e) => setFormData({ ...formData, probationMonths: Number(e.target.value) })} className="w-full bg-white dark:bg-gray-800 border border-orange-200 dark:border-orange-800 rounded-lg px-3 py-2 text-sm outline-none dark:text-white" placeholder="0 = ไม่มี" />
+                                                <input type="number" min={0} value={formData.probationMonths ?? ''} onChange={(e) => setFormData({ ...formData, probationMonths: e.target.value === '' ? '' : Number(e.target.value) })} className="w-full bg-white dark:bg-gray-800 border border-orange-200 dark:border-orange-800 rounded-lg px-3 py-2 text-sm outline-none dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" placeholder="0 = ไม่มี" />
                                             </div>
                                             <div>
                                                 <label className="block text-xs font-medium text-orange-700 dark:text-orange-400 mb-1">ได้สิทธิ์เมื่อ</label>
@@ -466,7 +466,7 @@ const AdminQuotaScreen: React.FC = () => {
                             {/* Advance Notice */}
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">ต้องลาล่วงหน้า (วัน)</label>
-                                <input type="number" min={0} value={formData.advanceNoticeDays || 0} onChange={(e) => setFormData({ ...formData, advanceNoticeDays: Number(e.target.value) })} placeholder="0 = ไม่ต้อง" className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 outline-none dark:text-white" />
+                                <input type="number" min={0} value={formData.advanceNoticeDays ?? ''} onChange={(e) => setFormData({ ...formData, advanceNoticeDays: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="0 = ไม่ต้อง" className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 outline-none dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
                                 <p className="text-[10px] text-gray-400 mt-1">0 = ไม่ต้องลาล่วงหน้า</p>
                             </div>
 

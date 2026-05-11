@@ -218,11 +218,29 @@ const PostCard: React.FC<{
         </div>
 
         {/* ── Post Image ── */}
-        {article.image && (
-          <div className="w-full bg-gray-100 dark:bg-gray-900">
-            <img alt={article.title} className="w-full max-h-[500px] object-cover cursor-pointer hover:opacity-95 transition-opacity" src={article.image} loading="lazy" />
-          </div>
-        )}
+        {article.image && (() => {
+          let urls: string[] = [];
+          try {
+              const parsed = JSON.parse(article.image);
+              urls = Array.isArray(parsed) ? parsed : [article.image];
+          } catch { urls = [article.image]; }
+          
+          if (urls.length === 0) return null;
+          
+          return (
+            <div className={`w-full bg-gray-100 dark:bg-gray-900 ${urls.length > 1 ? 'grid grid-cols-2 gap-1' : ''}`}>
+              {urls.map((u, i) => (
+                <img 
+                  key={i}
+                  alt={`${article.title} - ${i+1}`} 
+                  className={`w-full max-h-[500px] object-cover cursor-pointer hover:opacity-95 transition-opacity ${urls.length > 1 && i === 0 && urls.length % 2 !== 0 ? 'col-span-2' : ''}`} 
+                  src={u} 
+                  loading="lazy" 
+                />
+              ))}
+            </div>
+          );
+        })()}
 
         {/* ── Reaction / Comment counts ── */}
         {(likes > 0 || commentCount > 0) && (

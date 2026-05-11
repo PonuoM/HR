@@ -37,15 +37,34 @@ const AdminContentScreen: React.FC = () => {
     const [editingId, setEditingId] = useState<number | null>(null);
     const [form, setForm] = useState<NewsForm>(emptyForm);
     const [saving, setSaving] = useState(false);
-    const [imageFile, setImageFile] = useState<File | null>(null);
+    const [imageFiles, setImageFiles] = useState<File[]>([]);
     const imageRef = React.useRef<HTMLInputElement>(null);
+
+    const getCoverImage = (img: any, id: any) => {
+        if (!img) return `https://picsum.photos/600/400?random=${id}`;
+        try {
+            const parsed = JSON.parse(img);
+            if (Array.isArray(parsed) && parsed.length > 0) return parsed[0];
+        } catch { }
+        return img;
+    };
+    
+    const getAllImages = (img: any) => {
+        if (!img) return [];
+        try {
+            const parsed = JSON.parse(img);
+            if (Array.isArray(parsed)) return parsed;
+        } catch { }
+        return [img];
+    };
 
     // Map news articles from DB
     const contentPosts = (rawNews || []).map((post: any) => ({
         id: post.id,
         title: post.title,
         content: post.content || '',
-        image: post.image || `https://picsum.photos/600/400?random=${post.id}`,
+        image: post.image || '',
+        coverImage: getCoverImage(post.image, post.id),
         department: post.department || '',
         department_code: post.department_code || '',
         isPinned: !!post.is_pinned,
@@ -66,7 +85,7 @@ const AdminContentScreen: React.FC = () => {
     const handleCreate = () => {
         setEditingId(null);
         setForm(emptyForm);
-        setImageFile(null);
+        setImageFiles([]);
         setShowModal(true);
     };
 
@@ -82,7 +101,7 @@ const AdminContentScreen: React.FC = () => {
             is_pinned: post.isPinned,
             is_urgent: post.isUrgent,
         });
-        setImageFile(null);
+        setImageFiles([]);
         setShowModal(true);
     };
 
@@ -111,10 +130,18 @@ const AdminContentScreen: React.FC = () => {
         setSaving(true);
         try {
             let imageUrl = form.image;
-            // Upload image if a new file was selected
-            if (imageFile) {
-                const result = await uploadFile(imageFile, 'news_image');
-                imageUrl = result.url;
+            // Upload image if new files were selected
+            if (imageFiles.length > 0) {
+                const results = await Promise.all(imageFiles.map(f => uploadFile(f, 'news_image')));
+                
+                // Merge with existing images if edit, or just replace entirely?
+                // For simplicity, if adding new images via file picker, we APPEND to the existing array
+                const existingUrls = getAllImages(form.image);
+                const newUrls = results.map(r => r.url);
+                imageUrl = JSON.stringify([...existingUrls, ...newUrls]);
+            } else if (imageUrl && !imageUrl.startsWith('[')) {
+                // Formatting migration if it's a single string and we didn't add new images
+                imageUrl = JSON.stringify([imageUrl]);
             }
 
             const payload = {
@@ -155,15 +182,25 @@ const AdminContentScreen: React.FC = () => {
 
     // Image file handler
     const handleImageFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            if (file.size > 5 * 1024 * 1024) {
-                toast('ไฟล์ต้องไม่เกิน 5MB', 'warning');
-                return;
+        const files = Array.from(e.target.files || []) as File[];
+        if (!files.length) return;
+        
+        let validFiles: File[] = [];
+        for (const file of files) {
+            if (file.size > 20 * 1024 * 1024) { 
+                toast(`ไฟล์ ${file.name} เกิน 20MB และถูกข้าม`, 'warning'); 
+            } else {
+                validFiles.push(file);
             }
-            setImageFile(file);
-            setForm(f => ({ ...f, image: URL.createObjectURL(file) }));
         }
+        
+        if (validFiles.length) {
+            setImageFiles(prev => [...prev, ...validFiles]);
+            // We append temporary blob URLs to form.image (only for preview context)
+            // But form.image is string. We should just let imageFiles be previewed below.
+        }
+        
+        e.target.value = '';
     };
 
     const inputCls = "w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary shadow-sm transition-shadow";
@@ -210,7 +247,7 @@ const AdminContentScreen: React.FC = () => {
                     {contentPosts.map((post: any) => (
                         <div key={post.id} className={`bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border ${post.isPinned ? 'border-l-4 border-l-primary border-y-gray-100 border-r-gray-100 dark:border-y-gray-700 dark:border-r-gray-700' : 'border-gray-100 dark:border-gray-700'} flex flex-col md:flex-row gap-4`}>
                             <div className={`w-full ${post.isPinned ? 'md:w-48 h-32' : 'md:w-32 h-32 md:h-24'} bg-gray-200 rounded-lg overflow-hidden shrink-0`}>
-                                <img src={post.image} className="w-full h-full object-cover" alt="news" />
+                                <img src={post.coverImage} className="w-full h-full object-cover" alt="news" />
                             </div>
                             <div className="flex-1 py-1 flex flex-col justify-between">
                                 <div>
@@ -342,41 +379,63 @@ const AdminContentScreen: React.FC = () => {
 
                             {/* Image */}
                             <div>
-                                <label className={labelCls}>รูปภาพปก</label>
+                                <label className={labelCls}>รูปภาพ (หลายรูปได้)</label>
                                 <input
                                     ref={imageRef}
                                     type="file"
+                                    multiple
                                     accept="image/*"
                                     className="hidden"
                                     onChange={handleImageFile}
                                 />
-                                {form.image ? (
-                                    <div className="relative rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700">
-                                        <img src={form.image} alt="Preview" className="w-full h-40 object-cover" />
-                                        <div className="absolute top-2 right-2 flex gap-1">
-                                            <button
-                                                onClick={() => imageRef.current?.click()}
-                                                className="bg-white/90 dark:bg-black/70 rounded-full p-1.5 shadow-sm hover:bg-white"
-                                            >
-                                                <span className="material-icons-round text-sm text-gray-600">edit</span>
-                                            </button>
-                                            <button
-                                                onClick={() => { setForm(f => ({ ...f, image: '' })); setImageFile(null); }}
-                                                className="bg-white/90 dark:bg-black/70 rounded-full p-1.5 shadow-sm hover:bg-white"
-                                            >
-                                                <span className="material-icons-round text-sm text-red-500">close</span>
-                                            </button>
-                                        </div>
+                                
+                                {/* Existing Images Preview */}
+                                {getAllImages(form.image).length > 0 && (
+                                    <div className="grid grid-cols-2 gap-2 mb-2">
+                                        {getAllImages(form.image).map((imgUrl, i) => (
+                                            <div key={i} className="relative rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 h-24">
+                                                <img src={imgUrl} alt="Preview" className="w-full h-full object-cover" />
+                                                <button
+                                                    onClick={() => {
+                                                        const urls = getAllImages(form.image);
+                                                        urls.splice(i, 1);
+                                                        setForm(f => ({ ...f, image: JSON.stringify(urls) }));
+                                                    }}
+                                                    className="absolute top-1 right-1 bg-white/90 dark:bg-black/70 rounded-full p-1 shadow-sm hover:bg-white text-red-500"
+                                                >
+                                                    <span className="material-icons-round text-sm">close</span>
+                                                </button>
+                                            </div>
+                                        ))}
                                     </div>
-                                ) : (
-                                    <button
-                                        onClick={() => imageRef.current?.click()}
-                                        className="w-full border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl py-6 flex flex-col items-center justify-center gap-2 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group"
-                                    >
-                                        <span className="material-icons-round text-2xl text-gray-400 group-hover:text-primary">add_photo_alternate</span>
-                                        <span className="text-sm text-gray-500 group-hover:text-primary">เลือกรูปภาพ (ไม่เกิน 5MB)</span>
-                                    </button>
                                 )}
+                                
+                                {/* New Image Files Preview */}
+                                {imageFiles.length > 0 && (
+                                    <div className="grid grid-cols-2 gap-2 mb-2">
+                                        {imageFiles.map((file, i) => (
+                                            <div key={`new-${i}`} className="relative rounded-xl overflow-hidden border-2 border-primary border-dashed h-24">
+                                                <img src={URL.createObjectURL(file)} alt="New Preview" className="w-full h-full object-cover opacity-80" />
+                                                <button
+                                                    onClick={() => {
+                                                        setImageFiles(prev => prev.filter((_, idx) => idx !== i));
+                                                    }}
+                                                    className="absolute top-1 right-1 bg-white/90 dark:bg-black/70 rounded-full p-1 shadow-sm hover:bg-white text-red-500"
+                                                >
+                                                    <span className="material-icons-round text-sm">close</span>
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                
+                                <button
+                                    onClick={() => imageRef.current?.click()}
+                                    className="w-full border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl py-4 flex flex-col items-center justify-center gap-1 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group"
+                                >
+                                    <span className="material-icons-round text-2xl text-gray-400 group-hover:text-primary">add_photo_alternate</span>
+                                    <span className="text-sm text-gray-500 group-hover:text-primary">เพิ่มรูปภาพ (ไม่เกินรูปละ 20MB)</span>
+                                </button>
                             </div>
 
                             {/* Options */}

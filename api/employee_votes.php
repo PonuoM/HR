@@ -62,7 +62,7 @@ if ($method === 'GET' && $action === 'candidates') {
     $headers = getallheaders();
     $myId = $headers['X-Employee-Id'] ?? $headers['x-employee-id'] ?? '';
     $stmt = $conn->prepare(
-        "SELECT e.id, e.name, e.avatar, d.name AS department, p.name AS position
+        "SELECT e.id, CONCAT(e.name, IF(IFNULL(e.nickname, '') != '', CONCAT(' (', e.nickname, ')'), '')) AS name, e.avatar, d.name AS department, p.name AS position
          FROM employees e
          LEFT JOIN departments d ON e.department_id = d.id
          LEFT JOIN positions p ON e.position_id = p.id
@@ -87,7 +87,7 @@ if ($method === 'GET' && $action === 'my_votes') {
     $year = get_current_year();
 
     $stmt = $conn->prepare(
-        "SELECT v.id, v.voted_for_id, e.name, e.avatar, d.name AS department
+        "SELECT v.id, v.voted_for_id, CONCAT(e.name, IF(IFNULL(e.nickname, '') != '', CONCAT(' (', e.nickname, ')'), '')) AS name, e.avatar, d.name AS department
          FROM employee_votes v
          JOIN employees e ON v.voted_for_id = e.id
          LEFT JOIN departments d ON e.department_id = d.id
@@ -223,7 +223,7 @@ if ($method === 'GET' && $action === 'leaderboard') {
 
     // Score-based leaderboard
     $stmt = $conn->prepare(
-        "SELECT s.employee_id, e.name, e.avatar, d.name AS department,
+        "SELECT s.employee_id, CONCAT(e.name, IF(IFNULL(e.nickname, '') != '', CONCAT(' (', e.nickname, ')'), '')) AS name, e.avatar, d.name AS department,
                 s.received_score, s.participation_score, s.total_score
          FROM employee_vote_scores s
          JOIN employees e ON s.employee_id = e.id
@@ -286,7 +286,7 @@ if ($method === 'GET' && $action === 'my_score') {
 if ($method === 'GET' && $action === 'yearly_ranking') {
     $year = get_current_year();
     $stmt = $conn->prepare(
-        "SELECT s.employee_id, e.name, e.avatar, d.name AS department,
+        "SELECT s.employee_id, CONCAT(e.name, IF(IFNULL(e.nickname, '') != '', CONCAT(' (', e.nickname, ')'), '')) AS name, e.avatar, d.name AS department,
                 SUM(s.total_score) AS yearly_score
          FROM employee_vote_scores s
          JOIN employees e ON s.employee_id = e.id

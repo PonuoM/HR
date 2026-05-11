@@ -5,6 +5,7 @@ import { useApi } from '../../hooks/useApi';
 import { getDashboardStats, getLeaveRequests, updateLeaveRequest, getClockInStatus } from '../../services/api';
 import { useToast } from '../../components/Toast';
 import { useAuth } from '../../contexts/AuthContext';
+import { formatLeaveDuration } from '../../utils/leaveHelpers';
 
 const AdminDashboardScreen: React.FC = () => {
   const navigate = useNavigate();
@@ -41,16 +42,37 @@ const AdminDashboardScreen: React.FC = () => {
   }, [fetchClockStatus]);
 
   // Map pending requests from DB
-  const pendingRequests = (rawPendingRequests || []).map((req: any) => ({
-    id: req.id,
-    name: req.employee_name || 'Unknown',
-    role: req.department || '',
-    avatar: req.avatar || `https://picsum.photos/id/${(req.id % 50) + 10}/40/40`,
-    type: req.leave_type_name || req.type || '',
-    date: req.start_date && req.end_date ? `${new Date(req.start_date).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' })} - ${new Date(req.end_date).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' })}` : '',
-    duration: req.total_days ? `${req.total_days} วัน` : '',
-    reason: req.reason || '',
-  }));
+  const pendingRequests = (rawPendingRequests || []).map((req: any) => {
+    let tText = '';
+    if (req.start_date && req.end_date && typeof req.start_date === 'string') {
+      const stTime = req.start_date.includes(' ') ? req.start_date.split(' ')[1].substring(0, 5) : '';
+      const enTime = req.end_date.includes(' ') ? req.end_date.split(' ')[1].substring(0, 5) : '';
+      if (stTime && enTime && stTime !== '00:00') {
+        tText = `${stTime} - ${enTime} น.`;
+      }
+    }
+    return {
+      id: req.id,
+      name: req.employee_name || 'Unknown',
+      role: req.department || '',
+      company: req.company_name || '',
+      avatar: req.employee_avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(req.employee_name || 'U')}&background=random&size=40`,
+      type: req.leave_type_name || req.type || '',
+      date: req.start_date && req.end_date ? `${new Date(req.start_date).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' })} - ${new Date(req.end_date).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' })}` : '',
+      timeText: tText,
+      duration: req.total_days ? ((req.leave_type_id == 0 || req.leave_type_id == null) ? `${req.total_days} ชม.` : formatLeaveDuration(req.total_days, 8, req.start_date, req.end_date)) : '',
+      reason: req.reason || '',
+      status: req.status || 'pending',
+      tier1_status: req.tier1_status,
+      tier2_status: req.tier2_status,
+      expected_approver1_id: req.expected_approver1_id,
+      expected_approver2_id: req.expected_approver2_id,
+      approver1_name: req.approver1_name,
+      approver2_name: req.approver2_name,
+      tier1_by_name: req.tier1_by_name,
+      tier2_by_name: req.tier2_by_name,
+    };
+  });
 
   const handleQuickAction = (action: string) => {
     switch (action) {
@@ -231,7 +253,7 @@ const AdminDashboardScreen: React.FC = () => {
                   />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                      {emp.name}{emp.nickname ? ` (${emp.nickname})` : ''}
+                      {emp.name}
                       {emp.is_late && <span className="ml-1.5 text-[10px] text-purple-500 font-bold">สาย</span>}
                     </p>
                     <p className="text-[11px] text-gray-400 dark:text-gray-500 truncate">{emp.department}</p>
@@ -275,7 +297,7 @@ const AdminDashboardScreen: React.FC = () => {
                         <img src={req.avatar} className="w-8 h-8 rounded-full" alt="avatar" />
                         <div>
                           <p className="font-medium text-gray-900 dark:text-white text-sm">{req.name}</p>
-                          <p className="text-xs text-gray-500">{req.role}</p>
+                          <p className="text-xs text-gray-500">{req.role}{req.company ? ` • ${req.company}` : ''}</p>
                         </div>
                       </div>
                     </td>
@@ -307,7 +329,7 @@ const AdminDashboardScreen: React.FC = () => {
                     <img src={req.avatar} className="w-10 h-10 rounded-full object-cover" alt="avatar" />
                     <div>
                       <h4 className="font-bold text-gray-900 dark:text-white text-sm">{req.name}</h4>
-                      <p className="text-xs text-gray-500">{req.role} • {req.type}</p>
+                      <p className="text-xs text-gray-500">{req.role}{req.company ? ` • ${req.company}` : ''} • {req.type}</p>
                     </div>
                   </div>
                   <span className="px-2 py-1 rounded-full bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 text-[10px] font-bold">
@@ -370,7 +392,7 @@ const AdminDashboardScreen: React.FC = () => {
                 <img src={selectedRequest.avatar} className="w-16 h-16 rounded-full object-cover border-2 border-white dark:border-gray-700 shadow-sm" alt="avatar" />
                 <div>
                   <h3 className="font-bold text-xl text-gray-900 dark:text-white">{selectedRequest.name}</h3>
-                  <p className="text-gray-500 dark:text-gray-400">{selectedRequest.role}</p>
+                  <p className="text-gray-500 dark:text-gray-400">{selectedRequest.role}{selectedRequest.company ? ` • ${selectedRequest.company}` : ''}</p>
                 </div>
               </div>
 
@@ -386,38 +408,121 @@ const AdminDashboardScreen: React.FC = () => {
                       <p className="text-gray-900 dark:text-white font-medium">{selectedRequest.duration}</p>
                     </div>
                     <div className="col-span-2">
-                      <p className="text-xs text-gray-400 uppercase font-bold mb-1">วันที่</p>
-                      <p className="text-gray-900 dark:text-white font-medium flex items-center gap-2">
-                        <span className="material-icons-round text-gray-400 text-sm">event</span>
-                        {selectedRequest.date}
-                      </p>
+                      <p className="text-xs text-gray-400 uppercase font-bold mb-1">วันที่ / เวลา</p>
+                      <div className="text-gray-900 dark:text-white font-medium flex items-center gap-4 flex-wrap">
+                        <span className="flex items-center gap-2">
+                          <span className="material-icons-round text-gray-400 text-sm">event</span>
+                          {selectedRequest.date}
+                        </span>
+                        {selectedRequest.timeText && (
+                          <span className="flex items-center gap-1.5 text-primary bg-primary/10 px-2 py-0.5 rounded-md text-sm">
+                            <span className="material-icons-round text-sm">schedule</span>
+                            {selectedRequest.timeText}
+                          </span>
+                        )}
+                      </div>
                     </div>
+                  </div>
+                </div>
+
+                {/* สายการอนุมัติ */}
+                <div>
+                  <p className="text-sm font-bold text-gray-900 dark:text-white mb-3">สายการอนุมัติ</p>
+                  <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4 space-y-4">
+                    {/* Tier 1 */}
+                    <div className="flex items-start gap-3">
+                       <div className="mt-1 flex flex-col items-center">
+                         {selectedRequest.tier1_status === 'approved' ? (
+                           <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center shrink-0">
+                             <span className="material-icons-round text-white text-[12px]">check</span>
+                           </div>
+                         ) : selectedRequest.tier1_status === 'rejected' ? (
+                           <div className="w-5 h-5 rounded-full bg-red-500 flex items-center justify-center shrink-0">
+                             <span className="material-icons-round text-white text-[12px]">close</span>
+                           </div>
+                         ) : (
+                           <div className="w-4 h-4 rounded-full border-2 border-orange-400 mt-0.5 shrink-0" />
+                         )}
+                         {selectedRequest.expected_approver2_id && <div className="w-0.5 h-6 bg-gray-200 dark:bg-gray-700 my-1" />}
+                       </div>
+                       <div>
+                         <p className="text-sm font-medium text-gray-900 dark:text-white">
+                           ระดับที่ 1: {selectedRequest.tier1_by_name || selectedRequest.approver1_name || '...'}
+                         </p>
+                         <p className="text-xs text-gray-500 dark:text-gray-400">
+                           {selectedRequest.tier1_status === 'approved' ? '✅ อนุมัติแล้ว' : selectedRequest.tier1_status === 'rejected' ? '❌ ปฏิเสธ' : '⏳ รอตรวจสอบ'}
+                         </p>
+                       </div>
+                    </div>
+                    {/* Tier 2 */}
+                    {selectedRequest.expected_approver2_id && (
+                    <div className="flex items-start gap-3">
+                       <div className="mt-1 flex flex-col items-center">
+                         {selectedRequest.tier2_status === 'approved' ? (
+                           <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center shrink-0">
+                             <span className="material-icons-round text-white text-[12px]">check</span>
+                           </div>
+                         ) : selectedRequest.tier2_status === 'rejected' ? (
+                           <div className="w-5 h-5 rounded-full bg-red-500 flex items-center justify-center shrink-0">
+                             <span className="material-icons-round text-white text-[12px]">close</span>
+                           </div>
+                         ) : (
+                           <div className={`w-4 h-4 rounded-full border-2 ${selectedRequest.tier1_status === 'approved' ? 'border-orange-400' : 'border-gray-300 dark:border-gray-600'} shrink-0`} />
+                         )}
+                       </div>
+                       <div>
+                         <p className="text-sm font-medium text-gray-900 dark:text-white">
+                           ระดับที่ 2: {selectedRequest.tier2_by_name || selectedRequest.approver2_name || '...'}
+                         </p>
+                         <p className="text-xs text-gray-500 dark:text-gray-400">
+                           {selectedRequest.tier2_status === 'approved' ? '✅ อนุมัติแล้ว' : selectedRequest.tier2_status === 'rejected' ? '❌ ปฏิเสธ' : '⏳ รอตรวจสอบ'}
+                         </p>
+                       </div>
+                    </div>
+                    )}
                   </div>
                 </div>
 
                 <div>
                   <p className="text-sm font-bold text-gray-900 dark:text-white mb-2">เหตุผลการลา</p>
-                  <p className="text-gray-600 dark:text-gray-300 text-sm bg-gray-50 dark:bg-gray-800/50 p-3 rounded-lg border border-gray-100 dark:border-gray-700">
+                  <p className="text-gray-600 dark:text-gray-300 text-sm bg-gray-50 dark:bg-gray-800/50 p-3 rounded-lg border border-gray-100 dark:border-gray-700 text-wrap break-words">
                     {selectedRequest.reason}
                   </p>
                 </div>
               </div>
             </div>
 
-            <div className="p-4 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-100 dark:border-gray-800 flex gap-3">
-              <button
-                onClick={handleReject}
-                className="flex-1 py-3 rounded-xl border border-red-200 dark:border-red-900/30 text-red-600 dark:text-red-400 font-semibold bg-red-50 dark:bg-red-900/10 hover:bg-red-100 dark:hover:bg-red-900/20 transition-colors"
-              >
-                ปฏิเสธ
-              </button>
-              <button
-                onClick={handleApprove}
-                className="flex-1 py-3 rounded-xl bg-green-600 hover:bg-green-700 text-white font-semibold shadow-lg shadow-green-500/30 transition-colors"
-              >
-                อนุมัติคำขอ
-              </button>
-            </div>
+            {(() => {
+              const strAuthId = String(authUser?.id);
+              const isTier1Turn = selectedRequest.tier1_status === 'pending' && String(selectedRequest.expected_approver1_id) === strAuthId;
+              const isTier2Turn = selectedRequest.tier1_status === 'approved' && selectedRequest.tier2_status === 'pending' && String(selectedRequest.expected_approver2_id) === strAuthId;
+              const isMyTurn = isTier1Turn || isTier2Turn;
+
+              if (!isMyTurn) {
+                return (
+                  <div className="p-4 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-100 dark:border-gray-800 flex justify-center">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">คุณมีสิทธิ์เพียงแค่เข้าชมสถานะตั๋วใบนี้เท่านั้น</p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="p-4 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-100 dark:border-gray-800 flex gap-3">
+                  <button
+                    onClick={handleReject}
+                    className="flex-1 py-3 rounded-xl border border-red-200 dark:border-red-900/30 text-red-600 dark:text-red-400 font-semibold bg-red-50 dark:bg-red-900/10 hover:bg-red-100 dark:hover:bg-red-900/20 transition-colors"
+                  >
+                    ปฏิเสธ
+                  </button>
+                  <button
+                    onClick={handleApprove}
+                    className="flex-1 py-3 rounded-xl bg-green-600 hover:bg-green-700 text-white font-semibold shadow-lg shadow-green-500/30 transition-colors"
+                  >
+                    อนุมัติคำขอ
+                  </button>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

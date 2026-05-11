@@ -11,8 +11,22 @@ $method = get_method();
 
 if ($method === 'GET') {
     $employee_id = $conn->real_escape_string($_GET['employee_id'] ?? '');
+    $caller_id = get_employee_id();
+    
+    // Non-admin users can only see their own payslips
+    if ($employee_id && $caller_id && $employee_id !== $caller_id) {
+        // Check if caller is admin
+        $adminCheck = $conn->prepare("SELECT is_admin, is_superadmin FROM employees WHERE id = ?");
+        $adminCheck->bind_param('s', $caller_id);
+        $adminCheck->execute();
+        $adminRow = $adminCheck->get_result()->fetch_assoc();
+        if (!$adminRow || (!$adminRow['is_admin'] && !$adminRow['is_superadmin'])) {
+            json_response(['error' => 'ไม่มีสิทธิ์ดูข้อมูลเงินเดือนของผู้อื่น'], 403);
+        }
+    }
+    
     $where = $employee_id ? "WHERE p.employee_id = '$employee_id'" : '';
-    $sql = "SELECT p.*, e.name AS employee_name
+    $sql = "SELECT p.*, CONCAT(e.name, IF(IFNULL(e.nickname, '') != '', CONCAT(' (', e.nickname, ')'), '')) AS employee_name
             FROM payslips p
             JOIN employees e ON p.employee_id = e.id
             $where
@@ -26,6 +40,7 @@ if ($method === 'GET') {
 }
 
 if ($method === 'POST') {
+    require_admin($conn);
     $body = get_json_body();
     $stmt = $conn->prepare("INSERT INTO payslips (employee_id, month, year, amount, image_url) VALUES (?, ?, ?, ?, ?)");
     $stmt->bind_param('sssss',
@@ -43,3 +58,4 @@ if ($method === 'PUT' && isset($_GET['id'])) {
 }
 
 json_response(['error' => 'Method not allowed'], 405);
+

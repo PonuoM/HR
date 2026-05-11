@@ -20,7 +20,7 @@ const AdminEmployeeScreen: React.FC = () => {
     // Dynamic Data from API
     const { data: rawDepts, refetch: refetchDepts } = useApi(() => getDepartments(), []);
     const { data: rawPositions, refetch: refetchPositions } = useApi(() => getPositions(), []);
-    const { data: employees, loading: loadingEmployees } = useApi(() => getEmployees(true), []);
+    const { data: employees, loading: loadingEmployees } = useApi(() => getEmployees(true, true), []);
 
     const departments = (rawDepts || []).map((d: any) => d.name || d);
     const positions = (rawPositions || []).map((p: any) => p.name || p);
@@ -29,8 +29,13 @@ const AdminEmployeeScreen: React.FC = () => {
 
     // Filter states
     const [filterDept, setFilterDept] = useState('');
+    const [filterPosition, setFilterPosition] = useState('');
     const [filterStatus, setFilterStatus] = useState('');
+    const [filterCompany, setFilterCompany] = useState('');
     const [searchText, setSearchText] = useState('');
+
+    // Detect if cross-company data is present
+    const isMultiCompany = (employees || []).some((emp: any) => emp.company_name);
 
     // Nickname states
     const [addNickname, setAddNickname] = useState('');
@@ -82,11 +87,20 @@ const AdminEmployeeScreen: React.FC = () => {
         }
         // Department filter
         if (filterDept && String(emp.department_id) !== filterDept) return false;
+        // Position filter
+        if (filterPosition && String(emp.position_id) !== filterPosition) return false;
         // Status filter
         if (filterStatus === 'active' && (emp.is_active === 0 || emp.is_active === '0')) return false;
         if (filterStatus === 'inactive' && emp.is_active !== 0 && emp.is_active !== '0') return false;
+        // Company filter (cross-company mode)
+        if (filterCompany && String(emp.company_id) !== filterCompany) return false;
         return true;
     });
+
+    // Unique companies for filter dropdown
+    const companyOptions = isMultiCompany
+        ? Array.from(new Map((employees || []).filter((e: any) => e.company_name).map((e: any) => [String(e.company_id), { value: String(e.company_id), label: `${e.company_name} (${e.company_code || ''})` }])).values())
+        : [];
 
     // Handle Navigation State from Dashboard
     useEffect(() => {
@@ -129,26 +143,33 @@ const AdminEmployeeScreen: React.FC = () => {
 
             {/* Filter Bar */}
             <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 mb-6 flex flex-col md:flex-row gap-3 md:gap-4 items-stretch md:items-center">
-                <div className="relative flex-1">
+                <div className="relative flex-1 md:max-w-xs">
                     <span className="material-icons-round absolute left-3 top-2.5 text-gray-400">search</span>
                     <input
                         type="text"
-                        placeholder="ค้นหาชื่อ, ชื่อเล่น, รหัสพนักงาน..."
+                        placeholder="ค้นหาชื่อ, รหัส..."
                         value={searchText}
                         onChange={(e) => setSearchText(e.target.value)}
                         className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/50 text-sm dark:text-white"
                     />
                 </div>
-                <div className="flex gap-2 md:gap-4">
+                <div className="flex flex-wrap gap-2 md:gap-3 flex-1">
                     <CustomSelect
-                        className="flex-1"
+                        className="flex-1 min-w-[120px]"
+                        value={filterPosition}
+                        onChange={setFilterPosition}
+                        placeholder="ทุกตำแหน่ง"
+                        options={(rawPositions || []).map((p: any) => ({ value: String(p.id), label: p.name }))}
+                    />
+                    <CustomSelect
+                        className="flex-1 min-w-[120px]"
                         value={filterDept}
                         onChange={setFilterDept}
                         placeholder="ทุกแผนก"
                         options={(rawDepts || []).map((d: any) => ({ value: String(d.id), label: d.name }))}
                     />
                     <CustomSelect
-                        className="flex-1"
+                        className="flex-1 min-w-[120px]"
                         value={filterStatus}
                         onChange={setFilterStatus}
                         placeholder="สถานะ: ทั้งหมด"
@@ -157,6 +178,15 @@ const AdminEmployeeScreen: React.FC = () => {
                             { value: 'inactive', label: 'ลาออก' },
                         ]}
                     />
+                    {isMultiCompany && companyOptions.length > 1 && (
+                        <CustomSelect
+                            className="flex-1 min-w-[120px]"
+                            value={filterCompany}
+                            onChange={setFilterCompany}
+                            placeholder="ทุกบริษัท"
+                            options={companyOptions}
+                        />
+                    )}
                 </div>
             </div>
 
@@ -171,6 +201,7 @@ const AdminEmployeeScreen: React.FC = () => {
                                 <th className="p-4 font-medium">ชื่อเล่น</th>
                                 <th className="p-4 font-medium">ตำแหน่ง</th>
                                 <th className="p-4 font-medium">แผนก</th>
+                                {isMultiCompany && <th className="p-4 font-medium">บริษัท</th>}
                                 <th className="p-4 font-medium">วันที่เริ่มงาน</th>
                                 <th className="p-4 font-medium">สถานะ</th>
                                 <th className="p-4 font-medium text-right">จัดการ</th>
@@ -192,6 +223,16 @@ const AdminEmployeeScreen: React.FC = () => {
                                     <td className="p-4 text-sm text-gray-600 dark:text-gray-300">{emp.nickname || <span className="text-gray-300 dark:text-gray-600">-</span>}</td>
                                     <td className="p-4 text-sm text-gray-600 dark:text-gray-300">{emp.position}</td>
                                     <td className="p-4 text-sm text-gray-600 dark:text-gray-300">{emp.department}</td>
+                                    {isMultiCompany && (
+                                        <td className="p-4">
+                                            {emp.company_name ? (
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 text-xs font-medium">
+                                                    <span className="material-icons-round text-xs">domain</span>
+                                                    {emp.company_name}
+                                                </span>
+                                            ) : '-'}
+                                        </td>
+                                    )}
                                     <td className="p-4 text-sm text-gray-600 dark:text-gray-300">{emp.hire_date ? new Date(emp.hire_date).toLocaleDateString('th-TH') : ''}</td>
                                     <td className="p-4">
                                         {emp.is_active === '0' || emp.is_active === 0 ? (
@@ -275,6 +316,15 @@ const AdminEmployeeScreen: React.FC = () => {
                                 <p className="text-[10px] text-gray-400 uppercase">แผนก</p>
                                 <p className="font-medium text-gray-700 dark:text-gray-300">{emp.department}</p>
                             </div>
+                            {isMultiCompany && emp.company_name && (
+                                <div className="col-span-2">
+                                    <p className="text-[10px] text-gray-400 uppercase">บริษัท</p>
+                                    <p className="font-medium text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+                                        <span className="material-icons-round text-xs">domain</span>
+                                        {emp.company_name}
+                                    </p>
+                                </div>
+                            )}
                             <div className="col-span-2">
                                 <p className="text-[10px] text-gray-400 uppercase">อีเมล</p>
                                 <p className="font-medium text-gray-700 dark:text-gray-300 truncate">{emp.email || ''}</p>
@@ -316,9 +366,7 @@ const AdminEmployeeScreen: React.FC = () => {
                         </div>
                     </div>
                 ))}
-                <div className="flex justify-center pt-2">
-                    <button className="text-sm text-gray-500">แสดงเพิ่มเติม...</button>
-                </div>
+
             </div>
 
             {/* --- MODAL 1: ADD EMPLOYEE --- */}
@@ -595,6 +643,7 @@ const AdminEmployeeScreen: React.FC = () => {
                                         onChange={setAddApprover2}
                                         placeholder="-- ไม่มี --"
                                         options={(employees || []).filter((emp: any) =>
+                                            (String(emp.can_have_subordinates) === '1' || String(emp.is_admin) === '1') &&
                                             (String(emp.is_active) !== '0')
                                         ).map((emp: any) => ({
                                             value: emp.id,
@@ -753,6 +802,7 @@ const AdminEmployeeScreen: React.FC = () => {
                                         placeholder="-- ไม่มี --"
                                         options={(employees || []).filter((emp: any) =>
                                             emp.id !== editingEmployee.id &&
+                                            (String(emp.can_have_subordinates) === '1' || String(emp.is_admin) === '1') &&
                                             (String(emp.is_active) !== '0')
                                         ).map((emp: any) => ({
                                             value: emp.id,
@@ -764,26 +814,28 @@ const AdminEmployeeScreen: React.FC = () => {
                                 </div>
 
                                 {/* Admin Toggle */}
-                                <div className="border-t border-gray-100 dark:border-gray-800 pt-4 mt-2">
-                                    <label className="flex items-center gap-3 cursor-pointer group">
-                                        <div
-                                            className={`relative w-11 h-6 rounded-full transition-colors ${editIsAdmin ? 'bg-primary' : 'bg-gray-300 dark:bg-gray-600'}`}
-                                            onClick={() => setEditIsAdmin(!editIsAdmin)}
-                                        >
-                                            <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${editIsAdmin ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
-                                        </div>
-                                        <div className="flex-1">
-                                            <div className="flex items-center gap-2">
-                                                <span className="material-icons-round text-base text-amber-500">admin_panel_settings</span>
-                                                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">สิทธิ์ Admin</span>
-                                                {editIsAdmin && (
-                                                    <span className="px-1.5 py-0.5 rounded-md bg-primary/10 text-primary text-[10px] font-bold">เปิด</span>
-                                                )}
+                                {isSuperAdmin && (
+                                    <div className="border-t border-gray-100 dark:border-gray-800 pt-4 mt-2">
+                                        <label className="flex items-center gap-3 cursor-pointer group">
+                                            <div
+                                                className={`relative w-11 h-6 rounded-full transition-colors ${editIsAdmin ? 'bg-primary' : 'bg-gray-300 dark:bg-gray-600'}`}
+                                                onClick={() => setEditIsAdmin(!editIsAdmin)}
+                                            >
+                                                <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${editIsAdmin ? 'translate-x-[22px]' : 'translate-x-0.5'}`} />
                                             </div>
-                                            <p className="text-[10px] text-gray-400 mt-0.5">เปิดให้พนักงานสามารถเข้า Admin Panel ได้</p>
-                                        </div>
-                                    </label>
-                                </div>
+                                            <div className="flex-1">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="material-icons-round text-base text-amber-500">admin_panel_settings</span>
+                                                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">สิทธิ์ Admin</span>
+                                                    {editIsAdmin && (
+                                                        <span className="px-1.5 py-0.5 rounded-md bg-primary/10 text-primary text-[10px] font-bold">เปิด</span>
+                                                    )}
+                                                </div>
+                                                <p className="text-[10px] text-gray-400 mt-0.5">เปิดให้พนักงานสามารถเข้า Admin Panel ได้</p>
+                                            </div>
+                                        </label>
+                                    </div>
+                                )}
 
                                 <div className="flex gap-3 pt-2">
                                     <button type="button" onClick={() => setEditingEmployee(null)} className="flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">

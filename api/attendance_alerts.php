@@ -34,7 +34,19 @@ if (!$actRow || !$actRow['enabled'] || !$actRow['start_date']) {
     json_response(['alerts' => [], 'message' => 'Attendance check is not active']);
 }
 
-$startDate = $actRow['start_date']; // System start date
+$systemStartDate = $actRow['start_date']; // Company-wide attendance check start
+
+// ── Respect employee hire_date: never alert for days before they were hired ──
+$hireStmt = $conn->prepare("SELECT hire_date FROM employees WHERE id = ?");
+$hireStmt->bind_param('s', $employee_id);
+$hireStmt->execute();
+$hireRow = $hireStmt->get_result()->fetch_assoc();
+$hireDate = $hireRow['hire_date'] ?? null;
+
+// Effective start = MAX(system start, hire_date) so new hires don't see
+// "missing clock-in" alerts for dates before their first day.
+$startDate = ($hireDate && $hireDate > $systemStartDate) ? $hireDate : $systemStartDate;
+
 $today = date('Y-m-d');
 
 // Don't check today (still working), start from yesterday

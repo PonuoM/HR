@@ -14,7 +14,7 @@ if ($method === 'GET' && isset($_GET['action']) && $_GET['action'] === 'clock_st
     $departmentId = isset($_GET['department_id']) ? (int)$_GET['department_id'] : null;
 
     // Build employee query with optional department filter
-    $empSql = "SELECT e.id, e.name, e.nickname, e.avatar, d.name AS department, d.id AS department_id,
+    $empSql = "SELECT e.id, CONCAT(e.name, IF(IFNULL(e.nickname, '') != '', CONCAT(' (', e.nickname, ')'), '')) AS name, e.nickname, e.avatar, d.name AS department, d.id AS department_id,
                       d.work_start_time
                FROM employees e
                LEFT JOIN departments d ON e.department_id = d.id
@@ -164,7 +164,7 @@ if ($method === 'GET') {
     ];
 
     // Pending requests detail (only from company employees)
-    $stmt = $conn->prepare("SELECT lr.*, e.name, e.avatar, d.name AS department, lt.name AS leave_type_name
+    $stmt = $conn->prepare("SELECT lr.*, CONCAT(e.name, IF(IFNULL(e.nickname, '') != '', CONCAT(' (', e.nickname, ')'), '')) AS name, e.avatar, d.name AS department, lt.name AS leave_type_name
                    FROM leave_requests lr
                    JOIN employees e ON lr.employee_id = e.id
                    LEFT JOIN departments d ON e.department_id = d.id

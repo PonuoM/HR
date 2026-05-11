@@ -50,6 +50,14 @@ const PageTransition: React.FC<{ children: React.ReactNode }> = ({ children }) =
 const RequireAuth: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
 
+  React.useEffect(() => {
+    if (isAuthenticated) {
+      import('./services/faceModelLoader').then(({ preloadFaceModels }) => {
+        preloadFaceModels();
+      }).catch(console.error);
+    }
+  }, [isAuthenticated]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen bg-background-light dark:bg-background-dark">

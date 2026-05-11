@@ -20,7 +20,7 @@ if ($method === 'POST') {
     }
 
     // Look up user
-    $stmt = $conn->prepare("SELECT e.*, d.name AS department, p.name AS position, c.id AS company_id, c.code AS company_code, c.name AS company_name, c.logo_url AS company_logo FROM employees e LEFT JOIN departments d ON e.department_id = d.id LEFT JOIN positions p ON e.position_id = p.id LEFT JOIN companies c ON e.company_id = c.id WHERE e.id = ?");
+    $stmt = $conn->prepare("SELECT e.*, CONCAT(e.name, IF(IFNULL(e.nickname, '') != '', CONCAT(' (', e.nickname, ')'), '')) AS name, d.name AS department, p.name AS position, c.id AS company_id, c.code AS company_code, c.name AS company_name, c.logo_url AS company_logo FROM employees e LEFT JOIN departments d ON e.department_id = d.id LEFT JOIN positions p ON e.position_id = p.id LEFT JOIN companies c ON e.company_id = c.id WHERE e.id = ?");
     $stmt->bind_param('s', $employee_id);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -127,7 +127,7 @@ if ($method === 'GET' && isset($_GET['action']) && $_GET['action'] === 'validate
     }
 
     try {
-        $stmt = $conn->prepare("SELECT s.*, e.name AS employee_name FROM active_sessions s JOIN employees e ON s.employee_id = e.id WHERE s.session_token = ?");
+        $stmt = $conn->prepare("SELECT s.*, CONCAT(e.name, IF(IFNULL(e.nickname, '') != '', CONCAT(' (', e.nickname, ')'), '')) AS employee_name FROM active_sessions s JOIN employees e ON s.employee_id = e.id WHERE s.session_token = ?");
         $stmt->bind_param('s', $token);
         $stmt->execute();
         $result = $stmt->get_result();

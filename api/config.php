@@ -18,11 +18,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-// --- Database ---
-$DB_HOST = 'localhost';
-$DB_USER = 'root';
-$DB_PASS = '12345678';
-$DB_NAME = 'hr_mobile_connect';
+// --- Database (pointing to production for testing) ---
+$DB_HOST = '***DB_HOST***';
+$DB_USER = '***DB_USER***';
+$DB_PASS = '***REMOVED***';
+$DB_NAME = 'primacom_hr_mobile_connect';
 
 $conn = new mysqli($DB_HOST, $DB_USER, $DB_PASS, $DB_NAME);
 $conn->set_charset('utf8mb4');

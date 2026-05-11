@@ -20,11 +20,14 @@ if ($method === 'GET') {
     // Single employee
     if (isset($_GET['id'])) {
         $id = $_GET['id'];
-        $stmt = $conn->prepare("SELECT e.*, d.name AS department, p.name AS position, p.can_have_subordinates
+        // Superadmins are visible from any company context (cross-company role).
+        // The caller's company_id still scopes regular employees as a defense
+        // against cross-company peeking.
+        $stmt = $conn->prepare("SELECT e.*, d.name AS department, d.work_start_time, d.work_end_time, d.work_hours_per_day, p.name AS position, p.can_have_subordinates
             FROM employees e
             LEFT JOIN departments d ON e.department_id = d.id
             LEFT JOIN positions p ON e.position_id = p.id
-            WHERE e.id = ? AND e.company_id = ?");
+            WHERE e.id = ? AND (e.company_id = ? OR e.is_superadmin = 1)");
         $stmt->bind_param('si', $id, $company_id);
         $stmt->execute();
         $result = $stmt->get_result();
@@ -34,8 +37,8 @@ if ($method === 'GET') {
         }
         $employee['is_admin'] = (int)$employee['is_admin'];
         $employee['is_active'] = (int)$employee['is_active'];
-        // Get subordinates
-        $subStmt = $conn->prepare("SELECT id, name, avatar FROM employees WHERE approver_id = ? AND is_active = 1 AND company_id = ?");
+        // Get subordinates — same superadmin-aware scoping
+        $subStmt = $conn->prepare("SELECT id, name, avatar FROM employees WHERE approver_id = ? AND is_active = 1 AND (company_id = ? OR is_superadmin = 1)");
         $subStmt->bind_param('si', $id, $company_id);
         $subStmt->execute();
         $subResult = $subStmt->get_result();
@@ -49,29 +52,66 @@ if ($method === 'GET') {
 
     // List all employees
     $show_inactive = isset($_GET['show_inactive']) && $_GET['show_inactive'] === '1';
-    $where = $show_inactive ? "e.company_id = ?" : "e.is_active = 1 AND e.company_id = ?";
 
-    // Auto-add birth_date column if missing
-    $bdCheck = $conn->query("SHOW COLUMNS FROM employees LIKE 'birth_date'");
-    if ($bdCheck->num_rows === 0) {
-        $conn->query("ALTER TABLE employees ADD COLUMN birth_date DATE DEFAULT NULL AFTER hire_date");
+    // Check if caller is superadmin (can see all companies)
+    $caller_id = get_employee_id();
+    $is_system_admin = false;
+    if ($caller_id) {
+        try {
+            $sysCheck = $conn->prepare("SELECT is_superadmin FROM employees WHERE id = ?");
+            $sysCheck->bind_param('s', $caller_id);
+            $sysCheck->execute();
+            $sysRow = $sysCheck->get_result()->fetch_assoc();
+            $is_system_admin = $sysRow && $sysRow['is_superadmin'];
+        } catch (\Throwable $e) {
+            $is_system_admin = false;
+        }
     }
 
-    $stmt = $conn->prepare("SELECT e.id, e.name, e.nickname, e.email, e.avatar, e.is_admin, e.is_active, e.employment_type,
-                   e.approver_id, e.approver2_id, e.base_salary, e.hire_date, e.birth_date, e.terminated_at,
-                   d.name AS department, d.id AS department_id,
-                   p.name AS position, p.id AS position_id, p.can_have_subordinates,
-                   a.name AS approver_name, a2.name AS approver2_name
-            FROM employees e
-            LEFT JOIN departments d ON e.department_id = d.id
-            LEFT JOIN positions p ON e.position_id = p.id
-            LEFT JOIN employees a ON e.approver_id = a.id
-            LEFT JOIN employees a2 ON e.approver2_id = a2.id
-            WHERE $where
-            ORDER BY e.name");
-    $stmt->bind_param('i', $company_id);
-    $stmt->execute();
-    $result = $stmt->get_result();
+    $all_companies = isset($_GET['all_companies']) && $_GET['all_companies'] === '1' && $is_system_admin;
+
+    try {
+
+    if ($all_companies) {
+        // Cross-company view: no company_id filter, include company name
+        $where = $show_inactive ? "1=1" : "e.is_active = 1";
+        $sql = "SELECT e.id, e.name, e.nickname, e.email, e.avatar, e.is_admin, e.is_active, e.employment_type,
+                       e.approver_id, e.approver2_id, e.base_salary, e.hire_date, e.birth_date, e.terminated_at,
+                       e.company_id, e.is_superadmin AS is_admin_system,
+                       d.name AS department, d.id AS department_id, d.work_start_time, d.work_end_time, d.work_hours_per_day,
+                       p.name AS position, p.id AS position_id, p.can_have_subordinates,
+                       a.name AS approver_name, a2.name AS approver2_name,
+                       c.name AS company_name, c.code AS company_code
+                FROM employees e
+                LEFT JOIN departments d ON e.department_id = d.id
+                LEFT JOIN positions p ON e.position_id = p.id
+                LEFT JOIN employees a ON e.approver_id = a.id
+                LEFT JOIN employees a2 ON e.approver2_id = a2.id
+                LEFT JOIN companies c ON e.company_id = c.id
+                WHERE $where
+                ORDER BY c.name, e.name";
+        $result = $conn->query($sql);
+    } else {
+        // Normal view: filter by company_id, but ALWAYS INCLUDE superadmins globally
+        $where = $show_inactive ? "(e.company_id = ? OR e.is_superadmin = 1)" : "e.is_active = 1 AND (e.company_id = ? OR e.is_superadmin = 1)";
+        $sql = "SELECT e.id, e.name, e.nickname, e.email, e.avatar, e.is_admin, e.is_active, e.employment_type,
+                       e.approver_id, e.approver2_id, e.base_salary, e.hire_date, e.birth_date, e.terminated_at, e.is_superadmin AS is_admin_system,
+                       d.name AS department, d.id AS department_id, d.work_start_time, d.work_end_time, d.work_hours_per_day,
+                       p.name AS position, p.id AS position_id, p.can_have_subordinates,
+                       a.name AS approver_name, a2.name AS approver2_name
+                FROM employees e
+                LEFT JOIN departments d ON e.department_id = d.id
+                LEFT JOIN positions p ON e.position_id = p.id
+                LEFT JOIN employees a ON e.approver_id = a.id
+                LEFT JOIN employees a2 ON e.approver2_id = a2.id
+                WHERE $where
+                ORDER BY e.name";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param('i', $company_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+    }
+
     $employees = [];
     while ($row = $result->fetch_assoc()) {
         $row['is_admin'] = (int)$row['is_admin'];
@@ -79,10 +119,16 @@ if ($method === 'GET') {
         $employees[] = $row;
     }
     json_response($employees);
+
+    } catch (\Throwable $e) {
+        error_log('Employee query failed: ' . $e->getMessage());
+        json_response(['error' => 'เกิดข้อผิดพลาดในการดึงข้อมูล'], 500);
+    }
 }
 
 // ======================== POST (Create) ========================
 if ($method === 'POST') {
+    require_admin($conn);
     $body = get_json_body();
     $id = $conn->real_escape_string($body['id'] ?? '');
     $name = $conn->real_escape_string($body['name'] ?? '');
@@ -144,10 +190,26 @@ if ($method === 'POST') {
 // ======================== PUT (Update) ========================
 if ($method === 'PUT' && isset($_GET['id'])) {
     $id = $_GET['id'];
+    $empId = get_employee_id();
+    if (!$empId) json_response(['error' => 'Unauthorized: missing employee ID'], 403);
+    
+    $stmtAdmin = $conn->prepare("SELECT is_admin, is_superadmin FROM employees WHERE id = ? AND is_active = 1");
+    $stmtAdmin->bind_param('s', $empId);
+    $stmtAdmin->execute();
+    $adminRow = $stmtAdmin->get_result()->fetch_assoc();
+    $is_admin = $adminRow && $adminRow['is_admin'];
+    $is_caller_superadmin = $adminRow && $adminRow['is_superadmin'];
+
+    // Require admin if not updating self
+    if ($empId !== $id && !$is_admin) {
+        json_response(['error' => 'Forbidden: admin access required'], 403);
+    }
+
     $action = $_GET['action'] ?? null;
 
     // Reset password
     if ($action === 'reset_password') {
+        if (!$is_admin) json_response(['error' => 'Forbidden: admin access required'], 403);
         $newHash = password_hash('1234', PASSWORD_BCRYPT);
         $stmt = $conn->prepare("UPDATE employees SET password = ? WHERE id = ? AND company_id = ?");
         $stmt->bind_param('ssi', $newHash, $id, $company_id);
@@ -157,6 +219,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
 
     // Suspend
     if ($action === 'suspend') {
+        if (!$is_admin) json_response(['error' => 'Forbidden: admin access required'], 403);
         $body = get_json_body();
         $terminated_at = $body['terminated_at'] ?? date('Y-m-d');
         $stmt = $conn->prepare("UPDATE employees SET is_active = 0, terminated_at = ? WHERE id = ? AND company_id = ?");
@@ -167,6 +230,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
 
     // Unsuspend
     if ($action === 'unsuspend') {
+        if (!$is_admin) json_response(['error' => 'Forbidden: admin access required'], 403);
         $stmt = $conn->prepare("UPDATE employees SET is_active = 1, terminated_at = NULL WHERE id = ? AND company_id = ?");
         $stmt->bind_param('si', $id, $company_id);
         $stmt->execute();
@@ -193,8 +257,19 @@ if ($method === 'PUT' && isset($_GET['id'])) {
         'approver2_id'  => 's',
         'avatar'        => 's',
         'employment_type' => 's',
-        'is_admin'      => 'i',
     ];
+
+    if ($is_caller_superadmin) {
+        $allowed['is_admin'] = 'i';
+    }
+
+    if (!$is_admin) {
+        // Non-admins can only update specific profile fields
+        $allowed = [
+            'nickname'      => 's',
+            'avatar'        => 's',
+        ];
+    }
 
     $setClauses = [];
     $types = '';
@@ -230,6 +305,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
 
 // ======================== DELETE ========================
 if ($method === 'DELETE' && isset($_GET['id'])) {
+    require_admin($conn);
     $id = $_GET['id'];
     $stmt = $conn->prepare("DELETE FROM employees WHERE id = ? AND company_id = ?");
     $stmt->bind_param('si', $id, $company_id);

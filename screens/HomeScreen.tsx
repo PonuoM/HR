@@ -7,6 +7,7 @@ import { API_BASE, getNotifications, getLeaveQuotas, getAttendance, getNews, get
 import { subscribeToPush } from '../services/pushNotifications';
 import LocationCheckModal from '../components/LocationCheckModal';
 import FaceCapture from '../components/FaceCapture';
+import { formatLeaveDuration } from '../utils/leaveHelpers';
 import { useToast } from '../components/Toast';
 import BirthdayCakeAnimation from '../components/BirthdayCakeAnimation';
 import { useAuth } from '../contexts/AuthContext';
@@ -15,7 +16,7 @@ import BannerBackgroundAnimation from '../components/BannerBackgroundAnimation';
 const HomeScreen: React.FC = () => {
     const navigate = useNavigate();
     const { toast } = useToast();
-    const { user: authUser, isAdmin } = useAuth();
+    const { user: authUser, isAdmin, isSuperAdmin } = useAuth();
     const empId = authUser?.id || '';
     const [showNotifications, setShowNotifications] = useState(false);
     const [notifTab, setNotifTab] = useState<'unread' | 'read'>('unread');
@@ -121,9 +122,17 @@ const HomeScreen: React.FC = () => {
         const filterFn = (r: any) => {
             // Never show your own requests for self-approval
             if (r.employee_id === empId) return false;
-            if (isAdmin) return true;
+            // I am the designated tier-1 approver and tier-1 is still pending
             if (r.expected_approver1_id === empId && r.tier1_status === 'pending') return true;
+            // I am the designated tier-2 approver and tier-1 approved, tier-2 pending
             if (r.expected_approver2_id === empId && r.tier1_status === 'approved' && r.tier2_status === 'pending') return true;
+            // Admin/HR: show requests that have no designated approver for the current pending tier
+            // (catch-all so orphaned requests don't get stuck)
+            if (isAdmin) {
+                const noApprover1 = !r.expected_approver1_id && r.tier1_status === 'pending';
+                const noApprover2 = !r.expected_approver2_id && r.tier1_status === 'approved' && r.tier2_status === 'pending';
+                if (noApprover1 || noApprover2) return true;
+            }
             return false;
         };
         const leaveItems = (pendingRequests || []).filter(filterFn).map((r: any) => ({ ...r, _type: 'leave' }));
@@ -153,39 +162,24 @@ const HomeScreen: React.FC = () => {
         } catch { }
     };
 
-    // Approve / Reject handler (multi-tier)
+    // Approve / Reject handler (multi-tier — strict sequential, no bypass)
     const handleApproval = async (id: number, action: 'approved' | 'rejected') => {
         // Find the request (could be _type 'leave' or 'time')
         const req = myPendingRequests.find((r: any) => r.id === id && (approvalDetail?._type === r._type));
-        const tier1Pending = req?.tier1_status === 'pending';
-        const hasExpectedApprover1 = !!req?.expected_approver1_id;
-        const iAmTier1 = req?.expected_approver1_id === empId;
-
-        // HR bypass detection: HR is approving but tier1 hasn't approved yet
-        let isBypass = 0;
-        if (action === 'approved' && isAdmin && tier1Pending && hasExpectedApprover1 && !iAmTier1) {
-            const confirmed = window.confirm(
-                `⚠️ ขั้นที่ 1 (${req.approver1_name || 'หัวหน้างาน'}) ยังไม่อนุมัติ\n\nต้องการอนุมัติข้ามขั้นตอน (Bypass) หรือไม่?`
-            );
-            if (!confirmed) return;
-            isBypass = 1;
-        }
 
         setApprovalLoading(`${id}-${action}`);
         try {
             const isTimeRecord = req?._type === 'time';
             const isAllowance = req?._type === 'allowance';
             if (isTimeRecord) {
-                await updateTimeRecord(id, { status: action, approved_by: empId, is_bypass: isBypass });
+                await updateTimeRecord(id, { status: action, approved_by: empId });
             } else if (isAllowance) {
-                await updateAllowanceRequest(id, { status: action, approved_by: empId, is_bypass: isBypass });
+                await updateAllowanceRequest(id, { status: action, approved_by: empId });
             } else {
-                await updateLeaveRequest(id, { status: action, approved_by: empId, is_bypass: isBypass });
+                await updateLeaveRequest(id, { status: action, approved_by: empId });
             }
             toast(
-                action === 'approved'
-                    ? (isBypass ? 'อนุมัติ (Bypass) เรียบร้อย' : 'อนุมัติเรียบร้อย')
-                    : 'ไม่อนุมัติเรียบร้อย',
+                action === 'approved' ? 'อนุมัติเรียบร้อย' : 'ไม่อนุมัติเรียบร้อย',
                 action === 'approved' ? 'success' : 'error'
             );
             setApprovalDetail(null);
@@ -257,7 +251,12 @@ const HomeScreen: React.FC = () => {
 
     // Face verification state
     const [showFaceVerify, setShowFaceVerify] = useState(false);
+    const [showFaceVerifyForClockOut, setShowFaceVerifyForClockOut] = useState(false);
     const [faceDescriptor, setFaceDescriptor] = useState<number[] | null>(null);
+
+    // ─── Guard: Early clock-out warning (< 1 hour) ───
+    const [showEarlyClockOutWarning, setShowEarlyClockOutWarning] = useState(false);
+    const [earlyMinutes, setEarlyMinutes] = useState(0);
 
     const getCurrentPosition = (): Promise<{ latitude: number; longitude: number }> => {
         return new Promise((resolve, reject) => {
@@ -312,41 +311,66 @@ const HomeScreen: React.FC = () => {
         }
     };
 
+    // ─── Guard: Minimum work duration check ───
+    const getWorkedMinutes = (): number => {
+        if (!todayRecord?.clock_in) return 0;
+        const [h, m, s] = todayRecord.clock_in.split(':').map(Number);
+        const clockInMs = new Date().setHours(h, m, s || 0, 0);
+        return Math.floor((Date.now() - clockInMs) / 60000);
+    };
+
     // Clock action: face check → GPS → location modal
     const handleClockAction = async () => {
         if (clockStatus === 'completed' || clockLoading) return;
 
         const action: 'clock_in' | 'clock_out' = clockStatus === 'not_clocked_in' ? 'clock_in' : 'clock_out';
 
-        // ─── Face Verification Layer (clock-in only) ───
-        if (action === 'clock_in') {
-            try {
-                const faceData = await getFaceDescriptor(empId);
-                if (faceData.has_face && faceData.descriptor) {
-                    // Employee has face registered → require verification
-                    setFaceDescriptor(faceData.descriptor);
+        // ─── Face Verification Layer (both clock-in AND clock-out) ───
+        try {
+            const faceData = await getFaceDescriptor(empId);
+            if (faceData.has_face && faceData.descriptor) {
+                setFaceDescriptor(faceData.descriptor);
+
+                if (action === 'clock_in') {
                     setShowFaceVerify(true);
-                    return; // Wait for face verification → handleFaceVerified → proceedToLocationCheck
+                } else {
+                    // ─── Guard 2: Early clock-out warning (< 60 min) ───
+                    const worked = getWorkedMinutes();
+                    if (worked < 60) {
+                        setEarlyMinutes(worked);
+                        setShowEarlyClockOutWarning(true);
+                        return; // Wait for user confirmation → then face verify
+                    }
+                    setShowFaceVerifyForClockOut(true);
                 }
-                // No face registered → block clock-in and redirect to profile
-                toast('กรุณาลงทะเบียนใบหน้าก่อนลงเวลา', 'warning');
-                navigate('/profile');
-                return;
-            } catch {
-                // Face API error → block clock-in to be safe
-                toast('ไม่สามารถตรวจสอบข้อมูลใบหน้าได้ กรุณาลองใหม่', 'error');
                 return;
             }
+            // No face registered → block and redirect to profile
+            toast('กรุณาลงทะเบียนใบหน้าก่อนลงเวลา', 'warning');
+            navigate('/profile');
+            return;
+        } catch {
+            toast('ไม่สามารถตรวจสอบข้อมูลใบหน้าได้ กรุณาลองใหม่', 'error');
+            return;
         }
+    };
 
-        // ─── No face check needed (clock-out) → go straight to GPS ───
-        await proceedToLocationCheck(action);
+    // ─── Guard 2 confirm: user acknowledged early clock-out ───
+    const handleEarlyClockOutConfirm = () => {
+        setShowEarlyClockOutWarning(false);
+        setShowFaceVerifyForClockOut(true);
     };
 
     // Face verification success with inline clock-in
     const handleFaceVerified = (_descriptor: number[]) => {
         setShowFaceVerify(false);
         refetchAttendance();
+    };
+
+    // Face verification success for clock-out → proceed to GPS location check
+    const handleFaceVerifiedForClockOut = (_descriptor: number[]) => {
+        setShowFaceVerifyForClockOut(false);
+        proceedToLocationCheck('clock_out');
     };
 
     // Face-inline clock-in: called from within FaceCapture when user presses the clock-in button
@@ -864,7 +888,7 @@ const HomeScreen: React.FC = () => {
                 <section className="md:col-span-5 lg:col-span-5">
                     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden h-full">
                         <div className="flex justify-between items-center px-5 pt-4 pb-2">
-                            <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                            <h3 className="text-base font-bold text-gray-900 dark:white flex items-center gap-2">
                                 <span className="material-icons-round text-primary text-lg">event_available</span>
                                 วันลาคงเหลือ
                             </h3>
@@ -889,9 +913,9 @@ const HomeScreen: React.FC = () => {
                                         )}
                                     </div>
                                     <div>
-                                        <p className="text-2xl font-bold text-gray-900 dark:text-white">{q.remaining < 0 ? '∞' : q.remaining}</p>
+                                        <p className="text-xl font-bold text-gray-900 dark:text-white">{q.remaining < 0 ? '∞' : formatLeaveDuration(q.remaining, 8)}</p>
                                         <p className="text-[11px] text-gray-500 dark:text-gray-400 font-medium leading-tight">{q.label.split(' (')[0]}</p>
-                                        <p className="text-[10px] text-gray-400 mt-0.5">ใช้ {q.used}/{q.total} {q.unit}</p>
+                                        <p className="text-[10px] text-gray-400 mt-0.5">ใช้ {formatLeaveDuration(q.used, 8)} / {q.category === 'unpaid' ? '∞' : formatLeaveDuration(q.total, 8)}</p>
                                     </div>
                                 </div>
                             ))}
@@ -923,11 +947,15 @@ const HomeScreen: React.FC = () => {
                                                     <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{q.label.split(' (')[0]}</span>
                                                 </div>
                                             </td>
-                                            <td className="text-center px-2 py-3 text-xs text-gray-600 dark:text-gray-400">{q.used}</td>
-                                            <td className="text-center px-2 py-3 text-xs text-gray-600 dark:text-gray-400">{q.total === 0 ? '∞' : q.total}</td>
+                                            <td className="text-center px-2 py-3 text-xs text-gray-600 dark:text-gray-400">{formatLeaveDuration(q.used, 8)}</td>
+                                            <td className="text-center px-2 py-3 text-xs text-gray-600 dark:text-gray-400">{q.category === 'unpaid' ? '∞' : formatLeaveDuration(q.total, 8)}</td>
                                             <td className="text-center px-5 py-3">
-                                                <span className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full ${q.remaining < 0 ? 'text-green-600 bg-green-50 dark:bg-green-900/20' : q.remaining === 0 ? 'text-red-500 bg-red-50 dark:bg-red-900/20' : 'text-primary bg-primary/10'}`}>
-                                                    {q.remaining < 0 ? '∞' : q.remaining} {q.unit}
+                                                <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${q.remaining < 0 ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' :
+                                                    q.remaining <= 1 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+                                                        q.remaining <= 3 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                                                            'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                                                    }`}>
+                                                    {q.remaining < 0 ? '∞' : formatLeaveDuration(q.remaining, 8)}
                                                 </span>
                                             </td>
                                         </tr>
@@ -1148,6 +1176,7 @@ const HomeScreen: React.FC = () => {
                                                         <div className="flex items-center gap-2.5">
                                                             <img src={req.employee_avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(req.employee_name || '')} alt="" className="w-7 h-7 rounded-full object-cover ring-2 ring-gray-100 dark:ring-gray-700" />
                                                             <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{req.employee_name}</span>
+                                                            {isSuperAdmin && req.company_code && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 whitespace-nowrap">{req.company_code}</span>}
                                                         </div>
                                                     </td>
                                                     <td className="text-center px-2 py-3">
@@ -1161,7 +1190,7 @@ const HomeScreen: React.FC = () => {
                                                         </span>
                                                     </td>
                                                     <td className="text-center px-2 py-3 text-xs text-gray-600 dark:text-gray-400">
-                                                        {isAllowanceReq ? `฿${Number(req.amount || 0).toLocaleString()}` : isTime ? (req.record_date ? new Date(req.record_date).toLocaleDateString('th-TH', { day: '2-digit', month: 'short' }) : '-') : isOT ? `${req.total_days} ชม.` : `${req.total_days} วัน`}
+                                                        {isAllowanceReq ? `฿${Number(req.amount || 0).toLocaleString()}` : isTime ? (req.record_date ? new Date(req.record_date).toLocaleDateString('th-TH', { day: '2-digit', month: 'short' }) : '-') : isOT ? `${req.total_days} ชม.` : formatLeaveDuration(req.total_days, 8, req.start_date, req.end_date)}
                                                     </td>
                                                     <td className="text-center px-2 py-3">
                                                         <div className="flex flex-col items-center gap-0.5">
@@ -1208,7 +1237,7 @@ const HomeScreen: React.FC = () => {
                                                     alt="" className="w-10 h-10 rounded-full object-cover border-2 border-white dark:border-gray-600 shrink-0" />
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-center gap-2">
-                                                        <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{req.employee_name}</p>
+                                                        <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{req.employee_name}{isSuperAdmin && req.company_code && <span className="ml-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400">{req.company_code}</span>}</p>
                                                         <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${isAllowanceReq ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600' : isTime ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600' : isOT ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : 'bg-green-100 dark:bg-green-900/30 text-green-600'}`}>
                                                             {isAllowanceReq ? 'เบี้ยเลี้ยง' : isTime ? 'บันทึกเวลา' : isOT ? 'โอที' : 'ลา'}
                                                         </span>
@@ -1217,7 +1246,7 @@ const HomeScreen: React.FC = () => {
                                                         </span>
                                                     </div>
                                                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                                                        {req.department || 'ไม่ระบุแผนก'} · {isAllowanceReq ? `฿${Number(req.amount || 0).toLocaleString()}` : isTime ? (req.record_date ? new Date(req.record_date).toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' }) : '-') : isOT ? `${req.total_days} ชม.` : `${req.total_days} วัน`}
+                                                        {req.department || 'ไม่ระบุแผนก'} · {isAllowanceReq ? `฿${Number(req.amount || 0).toLocaleString()}` : isTime ? (req.record_date ? new Date(req.record_date).toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' }) : '-') : isOT ? `${req.total_days} ชม.` : formatLeaveDuration(req.total_days, 8, req.start_date, req.end_date)}
                                                     </p>
                                                     <div className="flex items-center gap-2 mt-1">
                                                         <span className={`flex items-center gap-0.5 text-[10px] ${req.tier1_status === 'approved' ? 'text-green-600' : req.tier1_status === 'rejected' ? 'text-red-500' : 'text-yellow-500'}`}>
@@ -1252,7 +1281,14 @@ const HomeScreen: React.FC = () => {
                     <div className="bg-white dark:bg-gray-800 rounded-2xl overflow-hidden shadow-sm border border-gray-100 dark:border-gray-700 relative group cursor-pointer h-full" onClick={() => featuredNews && navigate('/news')}>
                         {/* Image */}
                         <div className="relative h-40 md:h-44 overflow-hidden">
-                            {featuredNews && <img alt="News" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" src={featuredNews.image} />}
+                            {featuredNews && (() => {
+                                let coverImg = featuredNews.image;
+                                try {
+                                    const parsed = JSON.parse(featuredNews.image);
+                                    if (Array.isArray(parsed) && parsed.length > 0) coverImg = parsed[0];
+                                } catch {}
+                                return <img alt="News" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" src={coverImg} />;
+                            })()}
                             <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent"></div>
                             <div className="absolute top-3 left-3 bg-white/90 dark:bg-black/80 backdrop-blur-sm px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider text-gray-800 dark:text-white flex items-center gap-1">
                                 <span className="material-icons-round text-primary text-xs">push_pin</span>
@@ -1289,6 +1325,7 @@ const HomeScreen: React.FC = () => {
                         onReject={() => handleApproval(approvalDetail.id, 'rejected')}
                         loading={approvalLoading}
                         isAdmin={isAdmin}
+                        isSuperAdmin={isSuperAdmin}
                         empId={empId}
                     />
                 )
@@ -1316,7 +1353,63 @@ const HomeScreen: React.FC = () => {
                 )
             }
 
-            {/* Location Check Modal */}
+            {/* ─── Guard 1: Face Verification for Clock-out ─── */}
+            {
+                showFaceVerifyForClockOut && faceDescriptor && (
+                    <FaceCapture
+                        mode="verify"
+                        referenceDescriptor={faceDescriptor}
+                        onCapture={handleFaceVerifiedForClockOut}
+                        onMatch={(distance, matched) => {
+                            if (!matched) {
+                                toast(`ใบหน้าไม่ตรงกัน (ความคล้าย: ${Math.round((1 - distance) * 100)}%)`, 'error');
+                            }
+                        }}
+                        onClose={() => setShowFaceVerifyForClockOut(false)}
+                        employeeName={authUser?.name}
+                    />
+                )
+            }
+
+            {/* ─── Guard 2: Early Clock-out Warning (< 1 hour) ─── */}
+            {showEarlyClockOutWarning && (
+                <div className="fixed inset-0 z-[9990] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setShowEarlyClockOutWarning(false)}>
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}
+                        style={{ animation: 'locModalSlideUp 0.3s ease-out' }}>
+                        {/* Warning icon */}
+                        <div className="flex items-center justify-center pt-8 pb-4">
+                            <div className="w-20 h-20 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+                                <span className="material-icons-round text-4xl text-amber-500">schedule</span>
+                            </div>
+                        </div>
+                        {/* Content */}
+                        <div className="px-6 pb-4 text-center">
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">ลงเวลาออกเร็วเกินไป?</h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                                คุณลงเวลาเข้ามาเพียง <span className="font-bold text-amber-600 dark:text-amber-400">{earlyMinutes} นาที</span>
+                            </p>
+                            <div className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 mb-4">
+                                <span className="material-icons-round text-lg">warning</span>
+                                <span className="text-sm font-semibold">คุณแน่ใจหรือไม่ว่าต้องการออก?</span>
+                            </div>
+                        </div>
+                        {/* Actions */}
+                        <div className="px-6 pb-6 flex gap-3">
+                            <button onClick={() => setShowEarlyClockOutWarning(false)}
+                                className="flex-1 py-3 text-sm font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                                ยกเลิก
+                            </button>
+                            <button onClick={handleEarlyClockOutConfirm}
+                                className="flex-1 py-3 text-sm font-bold text-white bg-amber-500 hover:bg-amber-600 rounded-xl shadow-md shadow-amber-500/30 flex items-center justify-center gap-2 transition-all">
+                                <span className="material-icons-round text-lg">logout</span>
+                                ยืนยันออก
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Location Check Modal — with 2-step confirmation for clock-out */}
             {
                 showLocationModal && locationResult && (
                     <LocationCheckModal
@@ -1325,6 +1418,7 @@ const HomeScreen: React.FC = () => {
                         loading={confirmLoading}
                         onConfirm={handleConfirmClock}
                         onClose={() => setShowLocationModal(false)}
+                        workedMinutes={pendingAction === 'clock_out' ? getWorkedMinutes() : undefined}
                     />
                 )
             }
@@ -1373,11 +1467,15 @@ const HomeScreen: React.FC = () => {
                                                         <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{q.label.split(' (')[0]}</span>
                                                     </div>
                                                 </td>
-                                                <td className="text-center px-2 py-3 text-sm text-gray-600 dark:text-gray-400">{q.used}</td>
-                                                <td className="text-center px-2 py-3 text-sm text-gray-600 dark:text-gray-400">{q.total === 0 ? '∞' : q.total}</td>
+                                                <td className="text-center px-2 py-3 text-sm text-gray-600 dark:text-gray-400">{formatLeaveDuration(q.used, 8)}</td>
+                                                <td className="text-center px-2 py-3 text-sm text-gray-600 dark:text-gray-400">{q.category === 'unpaid' ? '∞' : formatLeaveDuration(q.total, 8)}</td>
                                                 <td className="text-center px-4 py-3">
-                                                    <span className={`text-sm font-bold ${q.remaining < 0 ? 'text-green-600' : q.remaining === 0 ? 'text-red-500' : 'text-primary'}`}>
-                                                        {q.remaining < 0 ? '∞' : q.remaining} {q.unit}
+                                                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${q.remaining < 0 ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' :
+                                                        q.remaining <= 1 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+                                                            q.remaining <= 3 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                                                                'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                                                        }`}>
+                                                        {q.remaining < 0 ? '∞' : formatLeaveDuration(q.remaining, 8)}
                                                     </span>
                                                 </td>
                                             </tr>
@@ -1397,10 +1495,10 @@ const HomeScreen: React.FC = () => {
 };
 
 // === Approval Detail Modal (rendered via Portal) ===
-function ApprovalDetailModal({ req, attachments, onClose, onApprove, onReject, loading, isAdmin, empId }: {
+function ApprovalDetailModal({ req, attachments, onClose, onApprove, onReject, loading, isAdmin, isSuperAdmin, empId }: {
     req: any; attachments: any[]; onClose: () => void;
     onApprove: () => void; onReject: () => void; loading: string | null;
-    isAdmin: boolean; empId: string;
+    isAdmin: boolean; isSuperAdmin: boolean; empId: string;
 }) {
     const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
     const isTimeRecord = req._type === 'time';
@@ -1444,7 +1542,7 @@ function ApprovalDetailModal({ req, attachments, onClose, onApprove, onReject, l
                         <img src={req.employee_avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(req.employee_name || '')}
                             alt="" className="w-14 h-14 rounded-full object-cover border-2 border-gray-100 dark:border-gray-700" />
                         <div className="flex-1 min-w-0">
-                            <p className="text-base font-bold text-gray-900 dark:text-white">{req.employee_name}</p>
+                            <p className="text-base font-bold text-gray-900 dark:text-white">{req.employee_name}{isSuperAdmin && req.company_code && <span className="ml-2 text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400">{req.company_code}{req.company_name ? ` — ${req.company_name}` : ''}</span>}</p>
                             <p className="text-sm text-gray-500 dark:text-gray-400">{req.department || 'ไม่ระบุแผนก'}</p>
                         </div>
                     </div>
@@ -1563,11 +1661,15 @@ function ApprovalDetailModal({ req, attachments, onClose, onApprove, onReject, l
                         <div className="bg-gray-50 dark:bg-gray-900/50 rounded-xl p-4 space-y-3">
                             <div className="flex items-center justify-between text-sm">
                                 <span className="text-gray-500">{isOT ? 'วันที่' : 'วันเริ่ม'}</span>
-                                <span className="font-semibold text-gray-900 dark:text-white">{fmtDate(startDate)} {isOT && fmtTime(startDate)}</span>
+                                <span className="font-semibold text-gray-900 dark:text-white">
+                                    {fmtDate(startDate)}{isOT || (req.start_date?.length > 10 && !req.start_date.includes('00:00:00')) ? ` ${req.start_date.substring(11, 16)} น.` : ''}
+                                </span>
                             </div>
                             {isLeave && (<div className="flex items-center justify-between text-sm">
                                 <span className="text-gray-500">วันสิ้นสุด</span>
-                                <span className="font-semibold text-gray-900 dark:text-white">{fmtDate(endDate)}</span>
+                                <span className="font-semibold text-gray-900 dark:text-white">
+                                    {fmtDate(endDate)}{req.end_date?.length > 10 && !req.end_date.includes('00:00:00') ? ` ${req.end_date.substring(11, 16)} น.` : ''}
+                                </span>
                             </div>)}
                             {isOT && (<div className="flex items-center justify-between text-sm">
                                 <span className="text-gray-500">เวลา</span>
@@ -1640,13 +1742,11 @@ function ApprovalDetailModal({ req, attachments, onClose, onApprove, onReject, l
                                             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold
                                                 ${req.tier1_status === 'approved' ? 'bg-green-100 dark:bg-green-900/30 text-green-600'
                                                     : req.tier1_status === 'rejected' ? 'bg-red-100 dark:bg-red-900/30 text-red-600'
-                                                        : req.tier1_status === 'skipped' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600'
-                                                            : 'bg-gray-200 dark:bg-gray-700 text-gray-500'}`}>
+                                                        : 'bg-gray-200 dark:bg-gray-700 text-gray-500'}`}>
                                                 <span className="material-icons-round text-sm">
                                                     {req.tier1_status === 'approved' ? 'check_circle'
                                                         : req.tier1_status === 'rejected' ? 'cancel'
-                                                            : req.tier1_status === 'skipped' ? 'fast_forward'
-                                                                : 'hourglass_empty'}
+                                                            : 'hourglass_empty'}
                                                 </span>
                                             </div>
                                             {req.expected_approver2_id && <div className="w-0.5 h-6 bg-gray-200 dark:bg-gray-700" />}
@@ -1656,12 +1756,10 @@ function ApprovalDetailModal({ req, attachments, onClose, onApprove, onReject, l
                                             <p className={`text-xs font-medium
                                                 ${req.tier1_status === 'approved' ? 'text-green-600'
                                                     : req.tier1_status === 'rejected' ? 'text-red-600'
-                                                        : req.tier1_status === 'skipped' ? 'text-amber-600'
-                                                            : 'text-gray-400'}`}>
+                                                        : 'text-gray-400'}`}>
                                                 {req.tier1_status === 'approved' ? `✅ อนุมัติแล้ว${req.tier1_at ? ' · ' + new Date(req.tier1_at).toLocaleString('th-TH') : ''}`
                                                     : req.tier1_status === 'rejected' ? `❌ ไม่อนุมัติ${req.tier1_at ? ' · ' + new Date(req.tier1_at).toLocaleString('th-TH') : ''}`
-                                                        : req.tier1_status === 'skipped' ? '⚠️ ข้ามขั้นตอน (Bypass)'
-                                                            : '⏳ รออนุมัติ'}
+                                                        : '⏳ รออนุมัติ'}
                                             </p>
                                         </div>
                                     </div>
@@ -1697,13 +1795,7 @@ function ApprovalDetailModal({ req, attachments, onClose, onApprove, onReject, l
                                 )}
                             </div>
 
-                            {/* Bypass Warning Banner */}
-                            {req.is_bypass == 1 && (
-                                <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2.5">
-                                    <span className="material-icons-round text-amber-500 text-lg">warning</span>
-                                    <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">เอกสารนี้อนุมัติ Bypass — ขั้นที่ 1 ยังไม่ได้อนุมัติ</p>
-                                </div>
-                            )}
+
                         </div>
                     )}
 
