@@ -30,5 +30,27 @@ nul
 # Uploads (user data)
 uploads/
 
-# Agent config
+# Agent / IDE config
 .agent/
+.claude/
+
+# ─── Sensitive files (NEVER commit) ───
+# Contains production DB credentials
+MCP SQL SERVER.md
+# Production employee data dumps
+HR.csv
+HR_import.sql
+HR_*.csv
+HR_*.sql
+
+# ─── Debug / one-off scripts ───
+# Ad-hoc DB inspection scripts (regenerated as needed)
+check_*.php
+test_db.php
+test_*.php
+# One-shot data recovery / recalc scripts
+recalc_*.php
+fix_*.php
+# DB schema inspection dumps
+*cols.txt
+cols.txt
