@@ -43,9 +43,16 @@ const AdminPayslipScreen: React.FC = () => {
         imageUrl: p.file_url || '',
     })) as Payslip[];
 
+    // Year options: CE values (backend), label as พ.ศ. (display)
+    const currentCE = new Date().getFullYear();
+    const yearOptions = [currentCE, currentCE - 1, currentCE - 2].map((y) => ({
+        value: String(y),
+        label: String(y + 543),
+    }));
+
     // Global Settings State
     const [globalMonth, setGlobalMonth] = useState('ตุลาคม');
-    const [globalYear, setGlobalYear] = useState('2024');
+    const [globalYear, setGlobalYear] = useState(String(currentCE));
 
     // State for Upload Queue
     const [uploadQueue, setUploadQueue] = useState<QueueItem[]>([]);
@@ -216,10 +223,7 @@ const AdminPayslipScreen: React.FC = () => {
                                     <CustomSelect
                                         value={globalYear}
                                         onChange={(val) => handleGlobalChange('year', val)}
-                                        options={[
-                                            { value: '2024', label: '2024' },
-                                            { value: '2023', label: '2023' },
-                                        ]}
+                                        options={yearOptions}
                                     />
                                 </div>
                             </div>
@@ -331,10 +335,7 @@ const AdminPayslipScreen: React.FC = () => {
                                                     <CustomSelect
                                                         value={item.year}
                                                         onChange={(val) => updateQueueItem(item.id!, 'year', val)}
-                                                        options={[
-                                                            { value: '2024', label: '2024' },
-                                                            { value: '2023', label: '2023' },
-                                                        ]}
+                                                        options={yearOptions}
                                                     />
                                                 </div>
                                             </div>

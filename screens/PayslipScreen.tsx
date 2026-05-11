@@ -70,46 +70,59 @@ const PayslipScreen: React.FC = () => {
           </div>
         </div>
 
-        {/* List by Year */}
-        <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3 ml-1">ปี 2024</h2>
-        <div className="space-y-3">
-          {payslips.map((slip) => {
-            const slipIsNew = isNew(slip);
-            return (
-              <button
-                key={slip.id}
-                onClick={() => handleSlipClick(slip)}
-                className="w-full bg-white dark:bg-gray-800 rounded-2xl p-4 flex items-center justify-between shadow-sm border border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all group relative overflow-hidden"
-              >
-                {/* New Indicator */}
-                {slipIsNew && (
-                  <div className="absolute top-0 right-0">
-                    <div className="bg-red-500 text-white text-[9px] font-bold px-2 py-1 rounded-bl-lg shadow-sm">ใหม่</div>
-                  </div>
-                )}
+        {/* List grouped by year (Buddhist Era) */}
+        {(() => {
+          const grouped = payslips.reduce<Record<string, Payslip[]>>((acc, slip) => {
+            const y = String(slip.year);
+            if (!acc[y]) acc[y] = [];
+            acc[y].push(slip);
+            return acc;
+          }, {});
+          const years = Object.keys(grouped).sort((a, b) => Number(b) - Number(a));
+          return years.map((y) => (
+            <div key={y}>
+              <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3 ml-1">ปี {Number(y) + 543}</h2>
+              <div className="space-y-3 mb-6">
+                {grouped[y].map((slip) => {
+                  const slipIsNew = isNew(slip);
+                  return (
+                    <button
+                      key={slip.id}
+                      onClick={() => handleSlipClick(slip)}
+                      className="w-full bg-white dark:bg-gray-800 rounded-2xl p-4 flex items-center justify-between shadow-sm border border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all group relative overflow-hidden"
+                    >
+                      {/* New Indicator */}
+                      {slipIsNew && (
+                        <div className="absolute top-0 right-0">
+                          <div className="bg-red-500 text-white text-[9px] font-bold px-2 py-1 rounded-bl-lg shadow-sm">ใหม่</div>
+                        </div>
+                      )}
 
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-xl bg-gray-100 dark:bg-gray-700 flex flex-col items-center justify-center border border-gray-200 dark:border-gray-600 shrink-0">
-                    <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">{slip.month}</span>
-                    <span className="material-icons-round text-gray-400 text-lg">receipt</span>
-                  </div>
-                  <div className="text-left">
-                    <p className="font-bold text-gray-900 dark:text-white text-base">เงินเดือน {slip.month}</p>
-                    <p className="text-xs text-gray-500">ส่งเมื่อ: {new Date(slip.sentAt).toLocaleDateString('th-TH')}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  {slipIsNew ? (
-                    <span className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></span>
-                  ) : (
-                    <span className="material-icons-round text-green-500 text-lg">check_circle</span>
-                  )}
-                  <span className="material-icons-round text-gray-300 group-hover:text-primary transition-colors">chevron_right</span>
-                </div>
-              </button>
-            );
-          })}
-        </div>
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-xl bg-gray-100 dark:bg-gray-700 flex flex-col items-center justify-center border border-gray-200 dark:border-gray-600 shrink-0">
+                          <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">{slip.month}</span>
+                          <span className="material-icons-round text-gray-400 text-lg">receipt</span>
+                        </div>
+                        <div className="text-left">
+                          <p className="font-bold text-gray-900 dark:text-white text-base">เงินเดือน {slip.month}</p>
+                          <p className="text-xs text-gray-500">ส่งเมื่อ: {new Date(slip.sentAt).toLocaleDateString('th-TH')}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {slipIsNew ? (
+                          <span className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></span>
+                        ) : (
+                          <span className="material-icons-round text-green-500 text-lg">check_circle</span>
+                        )}
+                        <span className="material-icons-round text-gray-300 group-hover:text-primary transition-colors">chevron_right</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ));
+        })()}
       </main>
 
       {/* Image Modal */}
@@ -118,7 +131,7 @@ const PayslipScreen: React.FC = () => {
           <div className="relative w-full max-w-lg bg-white dark:bg-gray-900 rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
             <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800">
               <div>
-                <h3 className="font-bold text-gray-900 dark:text-white">สลิปเงินเดือน: {selectedSlip.month} {selectedSlip.year}</h3>
+                <h3 className="font-bold text-gray-900 dark:text-white">สลิปเงินเดือน: {selectedSlip.month} {Number(selectedSlip.year) + 543}</h3>
                 <p className="text-xs text-gray-500">{selectedSlip.employeeName}</p>
               </div>
               <button onClick={() => setSelectedSlip(null)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors">
