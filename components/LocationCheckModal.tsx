@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 interface LocationCheckResult {
     matched: boolean;
@@ -12,11 +12,32 @@ interface LocationCheckModalProps {
     loading: boolean;
     onConfirm: () => void;
     onClose: () => void;
+    workedMinutes?: number; // Guard 3: show worked time for clock-out
 }
 
-const LocationCheckModal: React.FC<LocationCheckModalProps> = ({ result, action, loading, onConfirm, onClose }) => {
+const LocationCheckModal: React.FC<LocationCheckModalProps> = ({ result, action, loading, onConfirm, onClose, workedMinutes }) => {
     const isAllowed = result.matched || action === 'clock_out';
     const actionLabel = action === 'clock_in' ? 'ลงเวลาเข้า' : 'ลงเวลาออก';
+
+    // ─── Guard 3: 2-step confirmation for clock-out ───
+    const [clockOutConfirmed, setClockOutConfirmed] = useState(false);
+
+    const handleConfirmClick = () => {
+        if (action === 'clock_out' && !clockOutConfirmed) {
+            // First tap → show final confirmation state
+            setClockOutConfirmed(true);
+            return;
+        }
+        // Second tap (clock-out) or first tap (clock-in) → execute
+        onConfirm();
+    };
+
+    // Format worked time
+    const workedTimeStr = workedMinutes !== undefined
+        ? workedMinutes >= 60
+            ? `${Math.floor(workedMinutes / 60)} ชม. ${workedMinutes % 60} นาที`
+            : `${workedMinutes} นาที`
+        : null;
 
     return (
         <>
@@ -52,7 +73,7 @@ const LocationCheckModal: React.FC<LocationCheckModalProps> = ({ result, action,
                         </p>
 
                         {/* Distance info */}
-                        <div className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl mb-6 ${isAllowed
+                        <div className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl mb-4 ${isAllowed
                             ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400'
                             : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400'
                             }`}>
@@ -66,6 +87,21 @@ const LocationCheckModal: React.FC<LocationCheckModalProps> = ({ result, action,
                                 }
                             </span>
                         </div>
+
+                        {/* ─── Guard 3: Worked time info for clock-out ─── */}
+                        {action === 'clock_out' && workedTimeStr && (
+                            <div className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 mb-4">
+                                <span className="material-icons-round text-lg">schedule</span>
+                                <span className="text-sm font-medium">ทำงานมาแล้ว {workedTimeStr}</span>
+                            </div>
+                        )}
+
+                        {/* 2-step confirmation hint */}
+                        {action === 'clock_out' && clockOutConfirmed && (
+                            <p className="text-xs text-orange-500 dark:text-orange-400 mb-2 font-semibold animate-pulse">
+                                กดอีกครั้งเพื่อยืนยัน
+                            </p>
+                        )}
 
                         {!isAllowed && (
                             <p className="text-xs text-red-500 dark:text-red-400 mb-4">
@@ -84,21 +120,24 @@ const LocationCheckModal: React.FC<LocationCheckModalProps> = ({ result, action,
                         </button>
                         {isAllowed && (
                             <button
-                                onClick={onConfirm}
+                                onClick={handleConfirmClick}
                                 disabled={loading}
-                                className={`flex-1 py-3 text-sm font-bold text-white rounded-xl shadow-md flex items-center justify-center gap-2 transition-all disabled:opacity-70 ${action === 'clock_in'
-                                    ? 'bg-primary hover:bg-blue-600 shadow-primary/30'
-                                    : 'bg-orange-500 hover:bg-orange-600 shadow-orange-500/30'
-                                    }`}
+                                className={`flex-1 py-3 text-sm font-bold text-white rounded-xl shadow-md flex items-center justify-center gap-2 transition-all disabled:opacity-70 ${
+                                    action === 'clock_in'
+                                        ? 'bg-primary hover:bg-blue-600 shadow-primary/30'
+                                        : clockOutConfirmed
+                                            ? 'bg-red-500 hover:bg-red-600 shadow-red-500/30 ring-2 ring-red-300 dark:ring-red-700'
+                                            : 'bg-orange-500 hover:bg-orange-600 shadow-orange-500/30'
+                                }`}
                             >
                                 {loading ? (
                                     <span className="material-icons-round animate-spin text-lg">autorenew</span>
                                 ) : (
                                     <>
                                         <span className="material-icons-round text-lg">
-                                            {action === 'clock_in' ? 'fingerprint' : 'logout'}
+                                            {action === 'clock_in' ? 'fingerprint' : clockOutConfirmed ? 'check' : 'logout'}
                                         </span>
-                                        {actionLabel}
+                                        {action === 'clock_out' && clockOutConfirmed ? 'ยืนยัน!' : actionLabel}
                                     </>
                                 )}
                             </button>

@@ -108,6 +108,53 @@ if ($method === 'GET') {
     ]);
 }
 
+// ─── POST: Admin Edit Attendance ───
+if ($method === 'POST' && isset($_GET['action']) && $_GET['action'] === 'admin_edit') {
+    $employee_id_header = get_employee_id();
+    if (!$employee_id_header) {
+        json_response(['error' => 'Unauthorized'], 401);
+    }
+    
+    // Check admin
+    $adminCheck = $conn->prepare("SELECT is_admin FROM employees WHERE id = ?");
+    $adminCheck->bind_param('s', $employee_id_header);
+    $adminCheck->execute();
+    $adminRow = $adminCheck->get_result()->fetch_assoc();
+    if (!$adminRow || !$adminRow['is_admin']) {
+        json_response(['error' => 'Permission denied'], 403);
+    }
+
+    $body = get_json_body();
+    $target_emp_id = $conn->real_escape_string($body['target_employee_id'] ?? '');
+    $date = $conn->real_escape_string($body['date'] ?? '');
+    $clock_in = !empty($body['clock_in']) ? $conn->real_escape_string($body['clock_in']) : null;
+    $clock_out = !empty($body['clock_out']) ? $conn->real_escape_string($body['clock_out']) : null;
+
+    if (!$target_emp_id || !$date) {
+        json_response(['error' => 'Missing employee_id or date'], 400);
+    }
+
+    if ($clock_in === null && $clock_out === null) {
+        $stmt = $conn->prepare("DELETE FROM attendance WHERE employee_id = ? AND date = ?");
+        $stmt->bind_param('ss', $target_emp_id, $date);
+        $stmt->execute();
+        json_response(['message' => 'Attendance record deleted']);
+    }
+
+    $stmt = $conn->prepare(
+        "INSERT INTO attendance (employee_id, date, clock_in, clock_out, source) 
+         VALUES (?, ?, ?, ?, 'admin_override')
+         ON DUPLICATE KEY UPDATE 
+            clock_in = VALUES(clock_in), 
+            clock_out = VALUES(clock_out), 
+            source = 'admin_override'"
+    );
+    $stmt->bind_param('ssss', $target_emp_id, $date, $clock_in, $clock_out);
+    $stmt->execute();
+
+    json_response(['message' => 'Attendance updated by admin']);
+}
+
 // ─── POST: Clock in with GPS ───
 if ($method === 'POST') {
     $body = get_json_body();
@@ -196,9 +243,22 @@ if ($method === 'PUT' && isset($_GET['id'])) {
     $lng = isset($body['longitude']) ? (float)$body['longitude'] : null;
     $time = date('H:i:s');
 
+    // Check GPS location — same geofence as clock-in
     if ($lat !== null && $lng !== null) {
-        $stmt = $conn->prepare("UPDATE attendance SET clock_out = ?, clock_out_latitude = ?, clock_out_longitude = ? WHERE id = ?");
-        $stmt->bind_param('sddi', $time, $lat, $lng, $id);
+        $locCheck = checkWorkLocation($conn, $lat, $lng, $company_id);
+
+        // Block offsite clock-out
+        if (!$locCheck['matched']) {
+            json_response([
+                'error' => 'ไม่สามารถลงเวลาออกได้ เนื่องจากอยู่นอกพื้นที่ทำงาน (ห่าง ' . $locCheck['distance'] . ' เมตร จาก ' . $locCheck['location_name'] . ')',
+                'distance' => $locCheck['distance'],
+                'location_name' => $locCheck['location_name'],
+            ], 403);
+        }
+
+        $stmt = $conn->prepare("UPDATE attendance SET clock_out = ?, clock_out_latitude = ?, clock_out_longitude = ?, clock_out_location_name = ? WHERE id = ?");
+        $clockOutLocation = $locCheck['location_name'];
+        $stmt->bind_param('sddsi', $time, $lat, $lng, $clockOutLocation, $id);
     } else {
         $stmt = $conn->prepare("UPDATE attendance SET clock_out = ? WHERE id = ?");
         $stmt->bind_param('si', $time, $id);

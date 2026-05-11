@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { API_BASE, getAuthHeaders } from '../services/api';
+import { API_BASE, getAuthHeaders, deleteLeaveRequest } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../components/Toast';
+import { formatLeaveDuration } from '../utils/leaveHelpers';
 
 interface LeaveRequest {
   id: number;
@@ -68,6 +70,7 @@ const StatusScreen: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const { user: authUser } = useAuth();
+  const { confirm, toast } = useToast();
   const empId = authUser?.id || '';
   const [request, setRequest] = useState<LeaveRequest | null>(null);
   const [loading, setLoading] = useState(true);
@@ -128,8 +131,8 @@ const StatusScreen: React.FC = () => {
 
   const overallStatus = getStatusLabel(request.status);
   const isOT = request.reason?.startsWith('[OT]');
-  const dateRange = `${formatThaiDate(request.start_date)} - ${formatThaiDate(request.end_date)}`;
-  const totalDaysLabel = isOT ? `${request.total_days} ชั่วโมง` : `${request.total_days} วัน`;
+  const dateRange = `${formatThaiDate(request.start_date)}${request.start_date?.length > 10 && !request.start_date.includes('00:00:00') ? ' ' + request.start_date.substring(11, 16) + ' น.' : ''} - ${formatThaiDate(request.end_date)}${request.end_date?.length > 10 && !request.end_date.includes('00:00:00') ? ' ' + request.end_date.substring(11, 16) + ' น.' : ''}`;
+  const totalDaysLabel = isOT ? `${request.total_days} ชั่วโมง` : formatLeaveDuration(request.total_days, 8, request.start_date, request.end_date);
 
   // Build approval timeline steps
   const hasTier2 = !!request.expected_approver2_id;
@@ -339,7 +342,30 @@ const StatusScreen: React.FC = () => {
       {request.status === 'pending' && (
         <div className="absolute bottom-0 w-full bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800 p-4 pb-8 backdrop-blur-lg bg-opacity-95 dark:bg-opacity-95 z-30 md:bg-transparent md:border-none md:pointer-events-none">
           <div className="grid grid-cols-1 gap-3 max-w-2xl mx-auto md:pointer-events-auto">
-            <button onClick={() => navigate(-1)} className="flex items-center justify-center gap-2 w-full py-3.5 px-4 rounded-xl text-sm font-semibold text-red-600 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/30 dark:text-red-400 transition-colors md:shadow-sm md:bg-white md:dark:bg-gray-800 md:border md:border-red-100">
+            <button 
+              type="button"
+              onClick={async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const confirmed = await confirm({
+                    title: 'ยืนยันการยกเลิก',
+                    message: 'คุณต้องการยกเลิกคำขอนี้ใช่หรือไม่?',
+                    confirmText: 'ยกเลิกคำขอ',
+                    cancelText: 'ปิด',
+                    type: 'danger'
+                });
+                if (confirmed) {
+                  try {
+                    await deleteLeaveRequest(request.id);
+                    toast('คำขอถูกยกเลิกสำเร็จแล้ว', 'success');
+                    navigate(-1);
+                  } catch (err: any) {
+                    toast(err.message || 'เกิดข้อผิดพลาดในการยกเลิกคำขอ', 'error');
+                  }
+                }
+              }} 
+              className="flex items-center justify-center gap-2 w-full py-3.5 px-4 rounded-xl text-sm font-semibold text-red-600 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/30 dark:text-red-400 transition-colors md:shadow-sm md:bg-white md:dark:bg-gray-800 md:border md:border-red-100"
+            >
               <span className="material-icons-round text-lg">cancel</span>
               ยกเลิกคำขอ
             </button>
