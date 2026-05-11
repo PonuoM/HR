@@ -24,11 +24,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-// --- Database (Production) ---
-$DB_HOST = 'localhost';
-$DB_USER = '***DB_USER***';
-$DB_PASS = '***REMOVED***';
-$DB_NAME = 'primacom_hr_mobile_connect';
+// --- Database credentials (Production) ---
+// Loaded from (in order): env vars → api/.db-secrets.php (gitignored).
+// On Apache: use SetEnv HR_DB_PASS xxx in vhost/.htaccess.
+// See api/.db-secrets.example.php for template.
+$DB_HOST = getenv('HR_DB_HOST') ?: 'localhost';
+$DB_USER = getenv('HR_DB_USER') ?: '';
+$DB_PASS = getenv('HR_DB_PASS');
+$DB_NAME = getenv('HR_DB_NAME') ?: '';
+
+if ($DB_USER === '' || $DB_PASS === false || $DB_NAME === '') {
+    $secretsFile = __DIR__ . '/.db-secrets.php';
+    if (file_exists($secretsFile)) {
+        $local = require $secretsFile;
+        if ($DB_HOST === 'localhost' && !empty($local['host'])) $DB_HOST = $local['host'];
+        if ($DB_USER === '') $DB_USER = $local['user'] ?? '';
+        if ($DB_PASS === false || $DB_PASS === '') $DB_PASS = $local['pass'] ?? '';
+        if ($DB_NAME === '') $DB_NAME = $local['name'] ?? '';
+    }
+}
+
+if ($DB_USER === '' || $DB_PASS === '' || $DB_NAME === '') {
+    error_log('DB credentials missing — set HR_DB_* env vars or create api/.db-secrets.php');
+    http_response_code(500);
+    echo json_encode(['error' => 'ระบบขัดข้อง กรุณาติดต่อผู้ดูแลระบบ']);
+    exit;
+}
 
 $conn = new mysqli($DB_HOST, $DB_USER, $DB_PASS, $DB_NAME);
 $conn->set_charset('utf8mb4');

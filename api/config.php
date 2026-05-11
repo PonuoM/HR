@@ -18,11 +18,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-// --- Database (pointing to production for testing) ---
-$DB_HOST = '***DB_HOST***';
-$DB_USER = '***DB_USER***';
-$DB_PASS = '***REMOVED***';
-$DB_NAME = 'primacom_hr_mobile_connect';
+// --- Database credentials ---
+// Loaded from (in order): env vars → api/.db-secrets.php (gitignored)
+// See api/.db-secrets.example.php for template.
+$DB_HOST = getenv('HR_DB_HOST') ?: '';
+$DB_USER = getenv('HR_DB_USER') ?: '';
+$DB_PASS = getenv('HR_DB_PASS');
+$DB_NAME = getenv('HR_DB_NAME') ?: '';
+
+if ($DB_HOST === '' || $DB_USER === '' || $DB_PASS === false || $DB_NAME === '') {
+    $secretsFile = __DIR__ . '/.db-secrets.php';
+    if (file_exists($secretsFile)) {
+        $local = require $secretsFile;
+        if ($DB_HOST === '') $DB_HOST = $local['host'] ?? '';
+        if ($DB_USER === '') $DB_USER = $local['user'] ?? '';
+        if ($DB_PASS === false || $DB_PASS === '') $DB_PASS = $local['pass'] ?? '';
+        if ($DB_NAME === '') $DB_NAME = $local['name'] ?? '';
+    }
+}
+
+if ($DB_HOST === '' || $DB_USER === '' || $DB_PASS === '' || $DB_NAME === '') {
+    http_response_code(500);
+    echo json_encode([
+        'error' => 'Database credentials not configured.',
+        'hint' => 'Set env vars HR_DB_HOST/USER/PASS/NAME or create api/.db-secrets.php (see api/.db-secrets.example.php).'
+    ]);
+    exit;
+}
 
 $conn = new mysqli($DB_HOST, $DB_USER, $DB_PASS, $DB_NAME);
 $conn->set_charset('utf8mb4');

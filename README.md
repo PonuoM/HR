@@ -189,14 +189,21 @@ https://hr.prima49.com/database/run_migration.php?key=prima49migrate
 
 > 💡 **รันซ้ำได้เสมอ** — migrations ที่อัพแล้วจะถูกข้ามอัตโนมัติ
 
-### 5. Database Production
+### 5. Database Configuration
 
-```
-Host:     localhost
-Database: primacom_hr_mobile_connect
-Username: ***DB_USER***
-Password: ***REMOVED***
-```
+DB credentials are loaded from (in order):
+1. **Environment variables** (preferred for production):
+   ```
+   HR_DB_HOST  HR_DB_USER  HR_DB_PASS  HR_DB_NAME
+   ```
+   On Apache, set via `SetEnv` in vhost or `.htaccess`.
+2. **Local file** `api/.db-secrets.php` (gitignored).
+   Copy `api/.db-secrets.example.php` → `api/.db-secrets.php` and fill in values.
+
+If both are missing, the API responds with HTTP 500 and a hint message.
+
+> Real credentials are **never** committed to this repo.
+> Contact the project maintainer to obtain DB access for setup.
 
 ---
 

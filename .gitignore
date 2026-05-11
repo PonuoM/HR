@@ -37,6 +37,8 @@ uploads/
 # ─── Sensitive files (NEVER commit) ───
 # Contains production DB credentials
 MCP SQL SERVER.md
+# Real DB credentials — use api/.db-secrets.example.php as template
+api/.db-secrets.php
 # Production employee data dumps
 HR.csv
 HR_import.sql
