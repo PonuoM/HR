@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import * as faceapi from '@vladmandic/face-api';
+import { areFaceModelsPreloaded, preloadFaceModels } from '../services/faceModelLoader';
 
 interface FaceCaptureProps {
     mode: 'register' | 'verify';
@@ -13,7 +14,9 @@ interface FaceCaptureProps {
     checkLocationFn?: (lat: number, lng: number) => Promise<{ matched: boolean; location_name: string; distance: number }>;
 }
 
-const MATCH_THRESHOLD = 0.6;
+const MATCH_THRESHOLD = 0.55;
+const MIN_FACE_SIZE = 150;
+const NO_FACE_TIMEOUT_MS = 15000;
 
 // ───── Registration steps ─────
 type RegStep = 'center' | 'left' | 'right';
@@ -57,6 +60,16 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const streamRef = useRef<MediaStream | null>(null);
     const animFrameRef = useRef<number>(0);
+    const mountedRef = useRef(false);
+    const lastDetectionAtRef = useRef<number>(Date.now());
+
+    const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
+    if (!offscreenCanvasRef.current) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 50;
+        canvas.height = 50;
+        offscreenCanvasRef.current = canvas;
+    }
 
     const [modelsLoaded, setModelsLoaded] = useState(false);
     const [status, setStatus] = useState<'loading' | 'ready' | 'detecting' | 'captured' | 'error'>('loading');
@@ -78,22 +91,28 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
     const [clockInState, setClockInState] = useState<'idle' | 'gps' | 'ready' | 'clocking' | 'done' | 'error'>('idle');
     const [locationInfo, setLocationInfo] = useState<{ name: string; matched: boolean; distance: number } | null>(null);
     const [gpsCoords, setGpsCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+    const [isLowLight, setIsLowLight] = useState(false);
+
+    // ━━━ Track mounted state (must be first effect) ━━━
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => { mountedRef.current = false; };
+    }, []);
 
     // ━━━ Load face-api models ━━━
     useEffect(() => {
         const loadModels = async () => {
             try {
-                const MODEL_URL = '/models';
-                await Promise.all([
-                    faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-                    faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-                    faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-                ]);
+                if (!areFaceModelsPreloaded()) {
+                    await preloadFaceModels();
+                }
+                if (!mountedRef.current) return;
                 setModelsLoaded(true);
                 setStatus('ready');
                 setMessage('กำลังเปิดกล้อง...');
             } catch (err) {
                 console.error('Failed to load face models:', err);
+                if (!mountedRef.current) return;
                 setStatus('error');
                 setMessage('ไม่สามารถโหลดโมเดลได้ กรุณาลองใหม่');
             }
@@ -107,24 +126,46 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
         const startCamera = async () => {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }
+                    video: { facingMode: 'user' }
                 });
+                if (!mountedRef.current) {
+                    stream.getTracks().forEach(t => t.stop());
+                    return;
+                }
                 streamRef.current = stream;
                 if (videoRef.current) {
                     videoRef.current.srcObject = stream;
-                    await videoRef.current.play();
+
+                    let played = false;
+                    for (let attempt = 0; attempt < 3; attempt++) {
+                        if (!mountedRef.current) return;
+                        try {
+                            await videoRef.current.play();
+                            played = true;
+                            break;
+                        } catch (e) {
+                            if (attempt < 2) await new Promise(r => setTimeout(r, 300));
+                        }
+                    }
+                    if (!played) throw new Error('video.play() failed after retries');
+
+                    if (!mountedRef.current) return;
                     setStatus('detecting');
                     setMessage(mode === 'register' ? REG_STEPS[0].instruction : 'กรุณาหันหน้าตรงกับกล้อง');
                 }
             } catch (err) {
                 console.error('Camera error:', err);
+                if (!mountedRef.current) return;
                 setStatus('error');
                 setMessage('ไม่สามารถเปิดกล้องได้ กรุณาอนุญาตการเข้าถึงกล้อง');
             }
         };
         startCamera();
         return () => {
-            if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+            if (streamRef.current) {
+                streamRef.current.getTracks().forEach(t => t.stop());
+                streamRef.current = null;
+            }
             if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
         };
     }, [modelsLoaded]);
@@ -169,15 +210,8 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
     }, [gpsCoords, onClockIn, locationInfo]);
 
     // ━━━ Handle register step auto-capture ━━━
-    const handleRegAutoCapture = useCallback(async () => {
-        if (!videoRef.current) return;
-        const detection = await faceapi
-            .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 }))
-            .withFaceLandmarks()
-            .withFaceDescriptor();
-        if (!detection) return;
-
-        const desc = Array.from(detection.descriptor);
+    const handleRegAutoCapture = useCallback((descriptor: Float32Array) => {
+        const desc = Array.from(descriptor);
         const newDescriptors = [...capturedDescriptors, desc];
         setCapturedDescriptors(newDescriptors);
 
@@ -200,16 +234,11 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
     }, [capturedDescriptors, regStepIdx, onCapture]);
 
     // ━━━ Handle verify auto-capture ━━━
-    const handleVerifyAutoCapture = useCallback(async () => {
-        if (!videoRef.current || !referenceDescriptor) return;
-        const detection = await faceapi
-            .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 }))
-            .withFaceLandmarks()
-            .withFaceDescriptor();
-        if (!detection) return;
+    const handleVerifyAutoCapture = useCallback((currentDescriptor: Float32Array) => {
+        if (!referenceDescriptor) return;
 
         const refDesc = new Float32Array(referenceDescriptor);
-        const distance = faceapi.euclideanDistance(detection.descriptor, refDesc);
+        const distance = faceapi.euclideanDistance(currentDescriptor, refDesc);
         const matched = distance < MATCH_THRESHOLD;
         setMatchResult({ distance, matched });
         onMatch?.(distance, matched);
@@ -222,7 +251,7 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
                 requestGPS();
             } else {
                 // No clock-in integration → just return descriptor
-                const desc = Array.from(detection.descriptor);
+                const desc = Array.from(currentDescriptor);
                 setTimeout(() => onCapture(desc), 1500);
             }
         } else {
@@ -241,90 +270,155 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
         regConsecutiveRef.current = 0;
         verifyConsecutiveRef.current = 0;
         verifyTriggerRef.current = false;
+        lastDetectionAtRef.current = Date.now();
+
+        let cancelled = false;
+
+        // Resume video if it gets paused (tab switch, notifications, OS suspend)
+        const resumeIfNeeded = () => {
+            if (video.paused || video.ended) {
+                video.play().catch(() => { /* will retry next frame */ });
+            }
+        };
+        const onVisibility = () => {
+            if (document.visibilityState === 'visible') resumeIfNeeded();
+        };
+        document.addEventListener('visibilitychange', onVisibility);
 
         const detect = async () => {
-            if (video.paused || video.ended) return;
+            if (cancelled || !mountedRef.current) return;
 
-            const detection = await faceapi
-                .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 }))
-                .withFaceLandmarks()
-                .withFaceDescriptor();
+            // If paused, try to resume rather than dying — schedule next frame either way
+            if (video.paused || video.ended) {
+                resumeIfNeeded();
+                animFrameRef.current = requestAnimationFrame(detect);
+                return;
+            }
 
-            const ctx = canvas.getContext('2d');
-            if (ctx) {
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-                if (detection) {
-                    const { x, y, width, height } = detection.detection.box;
-                    const pose = detectHeadPose(detection.landmarks, detection.detection.box);
-
-                    if (mode === 'register') {
-                        const currentStep = REG_STEPS[regStepIdx];
-                        const isCorrectPose = pose === currentStep.key;
-
-                        // Draw face box with color based on pose match
-                        const color = isCorrectPose ? '#22c55e' : '#f59e0b';
-                        ctx.strokeStyle = color;
-                        ctx.lineWidth = 3;
-                        ctx.strokeRect(x, y, width, height);
-
-                        // Draw corner brackets
-                        drawCorners(ctx, x, y, width, height, color, 20);
-
-                        if (isCorrectPose) {
-                            regConsecutiveRef.current++;
-                            const remaining = REG_CONSECUTIVE_THRESHOLD - regConsecutiveRef.current;
-                            if (remaining > 0) {
-                                setMessage(`${currentStep.instruction} — ค้างไว้...`);
-                            }
-                            if (regConsecutiveRef.current >= REG_CONSECUTIVE_THRESHOLD) {
-                                regConsecutiveRef.current = 0;
-                                handleRegAutoCapture();
-                                return;
-                            }
-                        } else {
-                            regConsecutiveRef.current = 0;
-                            setMessage(currentStep.instruction);
+            try {
+                // --- Check Low Light (use local var for gate; state for UI) ---
+                let lowLight = false;
+                if (offscreenCanvasRef.current) {
+                    const offCtx = offscreenCanvasRef.current.getContext('2d', { willReadFrequently: true });
+                    if (offCtx) {
+                        offCtx.drawImage(video, 0, 0, 50, 50);
+                        const imageData = offCtx.getImageData(0, 0, 50, 50).data;
+                        let sum = 0;
+                        for (let i = 0; i < imageData.length; i += 4) {
+                            sum += (imageData[i] + imageData[i + 1] + imageData[i + 2]) / 3;
                         }
-                    } else {
-                        // Verify mode
-                        ctx.strokeStyle = '#3b82f6';
-                        ctx.lineWidth = 3;
-                        ctx.strokeRect(x, y, width, height);
-                        drawCorners(ctx, x, y, width, height, '#3b82f6', 20);
-
-                        if (!verifyTriggerRef.current) {
-                            verifyConsecutiveRef.current++;
-                            const remaining = VERIFY_CONSECUTIVE_THRESHOLD - verifyConsecutiveRef.current;
-                            if (remaining > 0) {
-                                setMessage(`กำลังตรวจสอบใบหน้า...`);
-                            }
-                            if (verifyConsecutiveRef.current >= VERIFY_CONSECUTIVE_THRESHOLD) {
-                                verifyTriggerRef.current = true;
-                                setMessage('กำลังยืนยันตัวตน...');
-                                handleVerifyAutoCapture();
-                                return;
-                            }
-                        }
-                    }
-                } else {
-                    regConsecutiveRef.current = 0;
-                    verifyConsecutiveRef.current = 0;
-                    if (mode === 'register') {
-                        setMessage(REG_STEPS[regStepIdx].instruction);
-                    } else {
-                        setMessage('กรุณาหันหน้าตรงกับกล้อง');
+                        const avgLuminance = sum / 2500;
+                        lowLight = avgLuminance < 40;
+                        setIsLowLight(lowLight);
                     }
                 }
+
+                const detection = await faceapi
+                    .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 }))
+                    .withFaceLandmarks()
+                    .withFaceDescriptor();
+
+                if (cancelled || !mountedRef.current) return;
+
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                    if (detection) {
+                        lastDetectionAtRef.current = Date.now();
+                        const { x, y, width, height } = detection.detection.box;
+                        const pose = detectHeadPose(detection.landmarks, detection.detection.box);
+
+                        // ── Quality gates (used by both modes) ──
+                        const faceTooSmall = width < MIN_FACE_SIZE || height < MIN_FACE_SIZE;
+                        const qualityFail = faceTooSmall || lowLight;
+                        const qualityMessage = faceTooSmall
+                            ? '📏 กรุณาเข้าใกล้กล้องอีกหน่อย'
+                            : (lowLight ? '💡 แสงน้อยเกินไป — กรุณาหาที่สว่างกว่า' : '');
+
+                        if (mode === 'register') {
+                            const currentStep = REG_STEPS[regStepIdx];
+                            const isCorrectPose = pose === currentStep.key;
+
+                            // Draw face box with color based on pose match (red if quality fails)
+                            const color = qualityFail ? '#ef4444' : (isCorrectPose ? '#22c55e' : '#f59e0b');
+                            ctx.strokeStyle = color;
+                            ctx.lineWidth = 3;
+                            ctx.strokeRect(x, y, width, height);
+                            drawCorners(ctx, x, y, width, height, color, 20);
+
+                            if (qualityFail) {
+                                regConsecutiveRef.current = 0;
+                                setMessage(qualityMessage);
+                            } else if (isCorrectPose) {
+                                regConsecutiveRef.current++;
+                                const remaining = REG_CONSECUTIVE_THRESHOLD - regConsecutiveRef.current;
+                                if (remaining > 0) {
+                                    setMessage(`${currentStep.instruction} — ค้างไว้...`);
+                                }
+                                if (regConsecutiveRef.current >= REG_CONSECUTIVE_THRESHOLD) {
+                                    regConsecutiveRef.current = 0;
+                                    handleRegAutoCapture(detection.descriptor);
+                                    return;
+                                }
+                            } else {
+                                regConsecutiveRef.current = 0;
+                                setMessage(currentStep.instruction);
+                            }
+                        } else {
+                            // Verify mode
+                            const color = qualityFail ? '#ef4444' : '#3b82f6';
+                            ctx.strokeStyle = color;
+                            ctx.lineWidth = 3;
+                            ctx.strokeRect(x, y, width, height);
+                            drawCorners(ctx, x, y, width, height, color, 20);
+
+                            if (qualityFail) {
+                                verifyConsecutiveRef.current = 0;
+                                setMessage(qualityMessage);
+                            } else if (!verifyTriggerRef.current) {
+                                verifyConsecutiveRef.current++;
+                                const remaining = VERIFY_CONSECUTIVE_THRESHOLD - verifyConsecutiveRef.current;
+                                if (remaining > 0) {
+                                    setMessage(`กำลังตรวจสอบใบหน้า...`);
+                                }
+                                if (verifyConsecutiveRef.current >= VERIFY_CONSECUTIVE_THRESHOLD) {
+                                    verifyTriggerRef.current = true;
+                                    setMessage('กำลังยืนยันตัวตน...');
+                                    handleVerifyAutoCapture(detection.descriptor);
+                                    return;
+                                }
+                            }
+                        }
+                    } else {
+                        regConsecutiveRef.current = 0;
+                        verifyConsecutiveRef.current = 0;
+
+                        // Watchdog: no face detected for too long → guide user to retry
+                        if (Date.now() - lastDetectionAtRef.current > NO_FACE_TIMEOUT_MS) {
+                            setMessage('⚠️ ตรวจไม่พบใบหน้านาน — กรุณาปิดแล้วเปิดใหม่');
+                        } else if (mode === 'register') {
+                            setMessage(REG_STEPS[regStepIdx].instruction);
+                        } else {
+                            setMessage('กรุณาหันหน้าตรงกับกล้อง');
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error('[FaceCapture] detect frame error:', err);
             }
 
             animFrameRef.current = requestAnimationFrame(detect);
         };
 
         detect();
-        return () => { if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current); };
+        return () => {
+            cancelled = true;
+            document.removeEventListener('visibilitychange', onVisibility);
+            if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+        };
     }, [status, regStepIdx, mode]);
 
     // Cleanup camera on unmount
@@ -394,9 +488,15 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
 
                 {/* Oval guide + large instruction overlay */}
                 {status === 'detecting' && (
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <div className="w-56 h-72 rounded-[50%] border-2 border-dashed border-white/25" />
-
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                        <div className="w-56 h-72 rounded-[50%] border-2 border-dashed border-white/25 relative">
+                            {isLowLight && (
+                                <div className="absolute -top-12 left-1/2 -translate-x-1/2 whitespace-nowrap bg-yellow-500/90 backdrop-blur text-black px-4 py-1.5 rounded-full text-sm font-bold shadow-lg animate-pulse">
+                                    ⚠️ แสงน้อยเกินไป
+                                </div>
+                            )}
+                        </div>
+                        
                         {/* ── Large instruction banner on camera ── */}
                         {mode === 'register' && currentRegStep && (
                             <>
