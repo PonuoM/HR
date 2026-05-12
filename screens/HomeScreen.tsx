@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { QUICK_MENU_ITEMS } from '../data';
 import { useApi } from '../hooks/useApi';
-import { API_BASE, getNotifications, getLeaveQuotas, getAttendance, getNews, getEmployee, markNotificationRead, markAllNotificationsRead, deleteNotification, clockIn, clockOut, checkLocation, getLeaveRequests, updateLeaveRequest, getTimeRecords, updateTimeRecord, getAllowanceRequests, updateAllowanceRequest, getUploads, getFaceDescriptor, getActivitySettings, checkAttendanceAlerts } from '../services/api';
+import { API_BASE, getNotifications, getLeaveQuotas, getAttendance, getNews, getEmployee, markNotificationRead, markAllNotificationsRead, deleteNotification, clockIn, clockOut, clockOutOnly, checkLocation, getLeaveRequests, updateLeaveRequest, getTimeRecords, updateTimeRecord, getAllowanceRequests, updateAllowanceRequest, getUploads, getFaceDescriptor, getActivitySettings, checkAttendanceAlerts } from '../services/api';
 import { subscribeToPush } from '../services/pushNotifications';
 import LocationCheckModal from '../components/LocationCheckModal';
 import FaceCapture from '../components/FaceCapture';
@@ -244,7 +244,8 @@ const HomeScreen: React.FC = () => {
     const [showLocationModal, setShowLocationModal] = useState(false);
     const [locationResult, setLocationResult] = useState<{ matched: boolean; location_name: string; distance: number } | null>(null);
     const [pendingCoords, setPendingCoords] = useState<{ latitude: number; longitude: number } | null>(null);
-    const [pendingAction, setPendingAction] = useState<'clock_in' | 'clock_out'>('clock_in');
+    const [pendingAction, setPendingAction] = useState<'clock_in' | 'clock_out' | 'clock_out_only'>('clock_in');
+    const [showFaceVerifyForClockOutOnly, setShowFaceVerifyForClockOutOnly] = useState(false);
     const [confirmLoading, setConfirmLoading] = useState(false);
 
     const [gpsLoading, setGpsLoading] = useState(false);
@@ -286,7 +287,7 @@ const HomeScreen: React.FC = () => {
     };
 
     // ─── GPS + Location Check (standalone function) ───
-    const proceedToLocationCheck = async (action: 'clock_in' | 'clock_out') => {
+    const proceedToLocationCheck = async (action: 'clock_in' | 'clock_out' | 'clock_out_only') => {
         setClockLoading(true);
         setGpsLoading(true);
         try {
@@ -361,6 +362,29 @@ const HomeScreen: React.FC = () => {
         setShowFaceVerifyForClockOut(true);
     };
 
+    // ─── "Forgot morning, only want to clock out" flow ───
+    const handleClockOutOnlyAction = async () => {
+        if (clockLoading) return;
+        if (!confirm('คุณกำลังจะลงเฉพาะ "เวลาออก" (ไม่มีเวลาเข้า)\nหลังบันทึก กรุณายื่นคำขอ "ลืมลงเข้า" เพื่อบันทึกเวลาเข้าตามจริง\n\nต้องการดำเนินการต่อหรือไม่?')) return;
+        try {
+            const faceData = await getFaceDescriptor(empId);
+            if (faceData.has_face && faceData.descriptor) {
+                setFaceDescriptor(faceData.descriptor);
+                setShowFaceVerifyForClockOutOnly(true);
+                return;
+            }
+            toast('กรุณาลงทะเบียนใบหน้าก่อนลงเวลา', 'warning');
+            navigate('/profile');
+        } catch {
+            toast('ไม่สามารถตรวจสอบข้อมูลใบหน้าได้ กรุณาลองใหม่', 'error');
+        }
+    };
+
+    const handleFaceVerifiedForClockOutOnly = (_descriptor: number[]) => {
+        setShowFaceVerifyForClockOutOnly(false);
+        proceedToLocationCheck('clock_out_only');
+    };
+
     // Face verification success with inline clock-in
     const handleFaceVerified = (_descriptor: number[]) => {
         setShowFaceVerify(false);
@@ -396,6 +420,9 @@ const HomeScreen: React.FC = () => {
         try {
             if (pendingAction === 'clock_in') {
                 await clockIn({ employee_id: empId, latitude: pendingCoords.latitude, longitude: pendingCoords.longitude });
+            } else if (pendingAction === 'clock_out_only') {
+                await clockOutOnly({ employee_id: empId, latitude: pendingCoords.latitude, longitude: pendingCoords.longitude });
+                toast('✅ ลงเวลาออกแล้ว — อย่าลืมยื่น "ลืมลงเข้า" เพื่อให้ record ครบ', 'info');
             } else if (todayRecord?.id) {
                 await clockOut(Number(todayRecord.id), pendingCoords);
             }
@@ -834,22 +861,34 @@ const HomeScreen: React.FC = () => {
                             {/* Clock-in/out Button */}
                             <div className="relative w-full">
                                 {clockStatus === 'not_clocked_in' && (
-                                    <button
-                                        onClick={handleClockAction}
-                                        disabled={clockLoading}
-                                        className="w-full bg-primary hover:bg-blue-600 active:scale-[0.98] transition-all duration-200 text-white font-semibold py-4 rounded-xl shadow-lg shadow-primary/30 flex items-center justify-center gap-2 group disabled:opacity-70"
-                                    >
-                                        {clockLoading ? (
-                                            <span className="material-icons-round animate-spin">autorenew</span>
-                                        ) : (
-                                            <>
-                                                <div className="bg-white/20 p-1.5 rounded-lg group-hover:bg-white/30 transition-colors">
-                                                    <span className="material-icons-round">fingerprint</span>
-                                                </div>
-                                                <span className="text-lg">ลงเวลาเข้า</span>
-                                            </>
-                                        )}
-                                    </button>
+                                    <>
+                                        <button
+                                            onClick={handleClockAction}
+                                            disabled={clockLoading}
+                                            className="w-full bg-primary hover:bg-blue-600 active:scale-[0.98] transition-all duration-200 text-white font-semibold py-4 rounded-xl shadow-lg shadow-primary/30 flex items-center justify-center gap-2 group disabled:opacity-70"
+                                        >
+                                            {clockLoading ? (
+                                                <span className="material-icons-round animate-spin">autorenew</span>
+                                            ) : (
+                                                <>
+                                                    <div className="bg-white/20 p-1.5 rounded-lg group-hover:bg-white/30 transition-colors">
+                                                        <span className="material-icons-round">fingerprint</span>
+                                                    </div>
+                                                    <span className="text-lg">ลงเวลาเข้า</span>
+                                                </>
+                                            )}
+                                        </button>
+                                        {/* Fallback: forgot morning clock-in, only want to record clock-out */}
+                                        <button
+                                            type="button"
+                                            onClick={handleClockOutOnlyAction}
+                                            disabled={clockLoading}
+                                            className="w-full mt-2 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 text-xs font-medium py-2 rounded-lg flex items-center justify-center gap-1 transition-colors disabled:opacity-50"
+                                        >
+                                            <span className="material-icons-round text-sm">history_toggle_off</span>
+                                            ลืมลงเช้า — ลงเฉพาะเวลาออก
+                                        </button>
+                                    </>
                                 )}
                                 {clockStatus === 'clocked_in' && (
                                     <button
@@ -1366,6 +1405,24 @@ const HomeScreen: React.FC = () => {
                             }
                         }}
                         onClose={() => setShowFaceVerifyForClockOut(false)}
+                        employeeName={authUser?.name}
+                    />
+                )
+            }
+
+            {/* ─── Forgot-morning: Face Verification for clock-out-only ─── */}
+            {
+                showFaceVerifyForClockOutOnly && faceDescriptor && (
+                    <FaceCapture
+                        mode="verify"
+                        referenceDescriptor={faceDescriptor}
+                        onCapture={handleFaceVerifiedForClockOutOnly}
+                        onMatch={(distance, matched) => {
+                            if (!matched) {
+                                toast(`ใบหน้าไม่ตรงกัน (ความคล้าย: ${Math.round((1 - distance) * 100)}%)`, 'error');
+                            }
+                        }}
+                        onClose={() => setShowFaceVerifyForClockOutOnly(false)}
                         employeeName={authUser?.name}
                     />
                 )

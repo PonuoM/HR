@@ -6,6 +6,7 @@
  * PUT  /api/attendance.php?id=X                    - Clock out (with GPS)
  */
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/schedule_helper.php';
 
 /**
  * Calculate distance between two GPS points using Haversine formula.
@@ -232,6 +233,103 @@ if ($method === 'POST') {
         'location' => $location_text,
         'is_offsite' => (bool)$is_offsite,
         'location_name' => $location_name,
+    ]);
+}
+
+// ─── POST ?action=clock_out_only: record clock_out when user forgot morning clock-in ───
+// Use case: employee forgot to scan in the morning, arrives back in the evening.
+// Without this, the first scan would always be recorded as clock_in.
+if ($method === 'POST' && isset($_GET['action']) && $_GET['action'] === 'clock_out_only') {
+    $body = get_json_body();
+    $employee_id = $conn->real_escape_string($body['employee_id'] ?? '');
+    $lat = isset($body['latitude']) ? (float)$body['latitude'] : null;
+    $lng = isset($body['longitude']) ? (float)$body['longitude'] : null;
+    $date = date('Y-m-d');
+    $time = date('H:i:s');
+
+    if (!$employee_id) {
+        json_response(['error' => 'employee_id is required'], 400);
+    }
+
+    // Fetch employee + dept fields needed for face check + schedule resolver
+    $empStmt = $conn->prepare(
+        "SELECT e.face_registered_at,
+                e.schedule_json, e.late_grace_minutes,
+                d.work_start_time, d.work_end_time,
+                d.schedule_json AS dept_schedule_json,
+                d.late_grace_minutes AS dept_late_grace_minutes,
+                d.work_start_time AS dept_work_start_time,
+                d.work_end_time AS dept_work_end_time
+         FROM employees e LEFT JOIN departments d ON e.department_id = d.id
+         WHERE e.id = ? AND e.company_id = ?"
+    );
+    $empStmt->bind_param('si', $employee_id, $company_id);
+    $empStmt->execute();
+    $emp = $empStmt->get_result()->fetch_assoc();
+    if (!$emp || empty($emp['face_registered_at'])) {
+        json_response(['error' => 'กรุณาลงทะเบียนใบหน้าก่อนลงเวลา'], 403);
+    }
+
+    // ── Time gate: must be at least 4 hours past scheduled work-start time ──
+    // Prevents abuse (e.g. "I came in at 10am, lemme just clock-out-only at 11am to skip the 'late' record").
+    $sched = resolve_schedule_for_date($emp, $date);
+    if ($sched['active']) {
+        $workStartTs = strtotime($date . ' ' . $sched['in']);
+        $earliestAllowedTs = $workStartTs + (4 * 3600);
+        if (time() < $earliestAllowedTs) {
+            $earliestStr = date('H:i', $earliestAllowedTs);
+            json_response([
+                'error' => "ใช้ฟังก์ชันนี้ได้หลัง {$earliestStr} น. (4 ชั่วโมงนับจากเวลาเข้างาน {$sched['in']} น.)",
+                'earliest_allowed' => $earliestStr,
+            ], 403);
+        }
+    }
+    // If schedule is inactive (weekend / off-day) → allow without time gate
+    // since it's an exception case anyway
+
+    // Don't allow if already has clock_out today
+    $check = $conn->query("SELECT id, clock_in, clock_out FROM attendance WHERE employee_id = '$employee_id' AND date = '$date'");
+    $existing = $check->fetch_assoc();
+    if ($existing && $existing['clock_out']) {
+        json_response(['error' => 'ลงเวลาออกไปแล้วสำหรับวันนี้'], 409);
+    }
+
+    // GPS geofence check (same as clock-in)
+    if ($lat !== null && $lng !== null) {
+        $locCheck = checkWorkLocation($conn, $lat, $lng, $company_id);
+        if (!$locCheck['matched']) {
+            json_response([
+                'error' => 'ไม่สามารถลงเวลาได้ เนื่องจากอยู่นอกพื้นที่ทำงาน (ห่าง ' . $locCheck['distance'] . ' เมตร จาก ' . $locCheck['location_name'] . ')',
+                'distance' => $locCheck['distance'],
+                'location_name' => $locCheck['location_name'],
+            ], 403);
+        }
+        $location_name = $locCheck['location_name'];
+    } else {
+        $location_name = 'ไม่ระบุตำแหน่ง';
+    }
+
+    if ($existing) {
+        // Row exists (has clock_in but no clock_out) → just update clock_out
+        $stmt = $conn->prepare("UPDATE attendance SET clock_out = ?, clock_out_latitude = ?, clock_out_longitude = ?, clock_out_location_name = ? WHERE id = ?");
+        $rowId = (int)$existing['id'];
+        $stmt->bind_param('sddsi', $time, $lat, $lng, $location_name, $rowId);
+        $stmt->execute();
+    } else {
+        // No row at all → INSERT with clock_out only (clock_in stays NULL)
+        $stmt = $conn->prepare(
+            "INSERT INTO attendance (employee_id, date, clock_out, clock_out_latitude, clock_out_longitude, clock_out_location_name, source)
+             VALUES (?, ?, ?, ?, ?, ?, 'clock_out_only')"
+        );
+        $stmt->bind_param('sssdds', $employee_id, $date, $time, $lat, $lng, $location_name);
+        $stmt->execute();
+    }
+
+    json_response([
+        'message' => 'Clocked out (no clock-in recorded for today)',
+        'time' => $time,
+        'location_name' => $location_name,
+        'needs_time_record' => !$existing, // hint frontend to suggest filing ลืมลงเข้า
     ]);
 }
 

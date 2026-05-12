@@ -118,6 +118,37 @@ export async function getLeaveQuotas(employeeId: string, year?: number) {
     return fetchApi<any[]>(`leave_quotas.php?employee_id=${employeeId}&year=${y}`);
 }
 
+// Company-wide quota overview — all active employees + their used/remaining for each leave type.
+// Read-only (no auto-provisioning) — much faster than calling getLeaveQuotas per employee.
+export async function getQuotaOverview(year?: number, allCompanies = false) {
+    const y = year || new Date().getFullYear();
+    const params = new URLSearchParams({ action: 'summary', year: String(y) });
+    if (allCompanies) params.set('all_companies', '1');
+    return fetchApi<{
+        year: number;
+        leave_types: { id: number; name: string; color: string; icon: string; type: string; default_quota: number }[];
+        employees: {
+            employee_id: string;
+            name: string;
+            nickname: string | null;
+            department: string;
+            hire_date: string | null;
+            company_id?: number;
+            company_name?: string;
+            quotas: {
+                leave_type_id: number;
+                leave_type_name: string;
+                color: string;
+                icon: string;
+                category: string;
+                total: number | null;
+                used: number;
+                remaining: number | null;
+            }[];
+        }[];
+    }>(`leave_quotas.php?${params.toString()}`);
+}
+
 export async function updateLeaveQuota(data: { employee_id: string; leave_type_id: number; total: number; year?: number }) {
     return fetchApi<any>('leave_quotas.php', { method: 'PUT', body: JSON.stringify(data) });
 }
@@ -269,6 +300,16 @@ export async function clockOut(id: number, coords?: { latitude: number; longitud
     return fetchApi<any>(`attendance.php?id=${id}`, {
         method: 'PUT',
         body: JSON.stringify(coords || {}),
+    });
+}
+
+// Clock-out without prior clock-in (use case: forgot morning scan, arrives in evening).
+// Backend records clock_out and leaves clock_in as NULL — employee should later file
+// a "ลืมลงเข้า" time_record to add the morning clock-in retroactively.
+export async function clockOutOnly(data: { employee_id: string; latitude?: number; longitude?: number }) {
+    return fetchApi<any>('attendance.php?action=clock_out_only', {
+        method: 'POST',
+        body: JSON.stringify(data),
     });
 }
 
