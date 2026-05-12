@@ -257,6 +257,9 @@ if ($method === 'PUT' && isset($_GET['id'])) {
         'approver2_id'  => 's',
         'avatar'        => 's',
         'employment_type' => 's',
+        // Per-employee work-schedule override (null = use department's)
+        'schedule_json' => 's',
+        'late_grace_minutes' => 'i',
     ];
 
     if ($is_caller_superadmin) {
@@ -279,7 +282,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
         if (array_key_exists($field, $body)) {
             $val = $body[$field];
             // Handle empty strings for nullable fields
-            if (in_array($field, ['department_id', 'position_id', 'base_salary', 'hire_date', 'birth_date', 'approver_id', 'approver2_id', 'nickname']) && ($val === '' || $val === null)) {
+            if (in_array($field, ['department_id', 'position_id', 'base_salary', 'hire_date', 'birth_date', 'approver_id', 'approver2_id', 'nickname', 'schedule_json', 'late_grace_minutes']) && ($val === '' || $val === null)) {
                 $val = null;
             }
             $setClauses[] = "$field = ?";

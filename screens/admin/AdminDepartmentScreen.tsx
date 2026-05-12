@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
 import { getDepartments, createDepartment, updateDepartment, deleteDepartment, getPositions, createPosition, updatePosition, deletePosition } from '../../services/api';
 import { useToast } from '../../components/Toast';
+import ScheduleEditor, { ScheduleJson, parseScheduleJson, defaultWeeklySchedule } from '../../components/ScheduleEditor';
 
 interface Department {
     id: number;
@@ -11,6 +12,8 @@ interface Department {
     work_end_time: string;
     work_hours_per_day: string;
     is_admin_system: number;
+    schedule_json?: string | null;
+    late_grace_minutes?: number | null;
 }
 
 interface Position {
@@ -30,7 +33,7 @@ const AdminDepartmentScreen: React.FC = () => {
     const { data: departments, refetch: refetchDepts } = useApi(() => getDepartments(), []);
     const [deptEditId, setDeptEditId] = useState<number | null>(null);
     const [showDeptAdd, setShowDeptAdd] = useState(false);
-    const [deptForm, setDeptForm] = useState({ name: '', work_start_time: '09:00', work_end_time: '17:00', is_admin_system: 0 });
+    const [deptForm, setDeptForm] = useState({ name: '', work_start_time: '09:00', work_end_time: '17:00', is_admin_system: 0, schedule_json: null as ScheduleJson | null, late_grace_minutes: 0 });
     const [deptSaving, setDeptSaving] = useState(false);
     const [deletingDept, setDeletingDept] = useState<number | null>(null);
 
@@ -56,29 +59,34 @@ const AdminDepartmentScreen: React.FC = () => {
     const openDeptEdit = (dept: Department) => {
         setDeptEditId(dept.id);
         setShowDeptAdd(false);
+        const parsed = parseScheduleJson(dept.schedule_json);
         setDeptForm({
             name: dept.name,
             work_start_time: dept.work_start_time?.substring(0, 5) || '09:00',
             work_end_time: dept.work_end_time?.substring(0, 5) || '17:00',
             is_admin_system: dept.is_admin_system || 0,
+            schedule_json: parsed,
+            late_grace_minutes: dept.late_grace_minutes ?? 0,
         });
     };
 
     const openDeptAdd = () => {
         setDeptEditId(null);
         setShowDeptAdd(true);
-        setDeptForm({ name: '', work_start_time: '09:00', work_end_time: '17:00', is_admin_system: 0 });
+        setDeptForm({ name: '', work_start_time: '09:00', work_end_time: '17:00', is_admin_system: 0, schedule_json: null, late_grace_minutes: 0 });
     };
 
     const handleDeptSave = async () => {
         if (!deptForm.name.trim()) return;
         setDeptSaving(true);
         try {
-            const data = {
+            const data: any = {
                 name: deptForm.name.trim(),
                 work_start_time: deptForm.work_start_time + ':00',
                 work_end_time: deptForm.work_end_time + ':00',
                 is_admin_system: deptForm.is_admin_system,
+                schedule_json: deptForm.schedule_json ? JSON.stringify(deptForm.schedule_json) : null,
+                late_grace_minutes: deptForm.late_grace_minutes || 0,
             };
             if (showDeptAdd) {
                 await createDepartment(data);
@@ -181,8 +189,41 @@ const AdminDepartmentScreen: React.FC = () => {
             </div>
             <div className="bg-slate-50 dark:bg-slate-900/50 rounded-lg px-3 py-2 text-xs text-slate-500 flex items-center gap-2">
                 <span className="material-icons-round text-sm">calculate</span>
-                รวม {calcHours(deptForm.work_start_time, deptForm.work_end_time)} ชั่วโมง/วัน
+                รวม {calcHours(deptForm.work_start_time, deptForm.work_end_time)} ชั่วโมง/วัน (รวม lunch — runtime หัก 1 ชม. lunch)
             </div>
+
+            {/* Grace period */}
+            <div>
+                <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">Grace period (สาย ≤ X นาที = ไม่นับสาย)</label>
+                <input type="number" min={0} max={60} value={deptForm.late_grace_minutes}
+                    onChange={(e) => setDeptForm({ ...deptForm, late_grace_minutes: parseInt(e.target.value) || 0 })}
+                    className={inputCls} placeholder="0" />
+            </div>
+
+            {/* Advanced: weekly schedule editor */}
+            <details className="bg-slate-50 dark:bg-slate-900/40 rounded-lg border border-slate-200 dark:border-slate-700 group">
+                <summary className="cursor-pointer px-3 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/50 rounded-lg flex items-center justify-between">
+                    <span className="flex items-center gap-2">
+                        <span className="material-icons-round text-base text-slate-500">date_range</span>
+                        ตารางเวลารายวัน {deptForm.schedule_json && <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">เปิดใช้</span>}
+                    </span>
+                    <span className="material-icons-round text-base text-slate-400 transition-transform group-open:rotate-180">expand_more</span>
+                </summary>
+                <div className="px-3 py-3 border-t border-slate-200 dark:border-slate-700 space-y-2">
+                    <div className="text-[11px] text-slate-500 mb-2">
+                        ใช้สำหรับแผนกที่ทำงาน <b>เสาร์ครึ่งวัน</b>, <b>เสาร์เว้นเสาร์</b>, หรือเวลาต่างกันแต่ละวัน
+                        — ถ้าเปิด ค่าจะแทนที่ "เวลาเข้า/ออกงาน" ข้างบน
+                    </div>
+                    <ScheduleEditor
+                        value={deptForm.schedule_json}
+                        onChange={(next) => setDeptForm({ ...deptForm, schedule_json: next })}
+                        allowOverride={true}
+                        defaultIfEnabled={defaultWeeklySchedule(deptForm.work_start_time, deptForm.work_end_time)}
+                        fallbackHint="ใช้เวลาเข้า/ออก ข้างบนทั้ง 5 วัน (จันทร์-ศุกร์)"
+                    />
+                </div>
+            </details>
+
             {/* Admin system toggle */}
             <div className="flex items-center justify-between py-1">
                 <div className="flex items-center gap-2">

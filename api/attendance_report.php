@@ -9,6 +9,7 @@
  * GET /api/attendance_report.php?year=2026&export=csv              → annual CSV
  */
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/schedule_helper.php';
 
 $method = get_method();
 $company_id = get_company_id();
@@ -40,6 +41,35 @@ if (!$month && !$year && !$date && !$cutoff_month && !($date_from && $date_to)) 
     json_response(['error' => 'month, year, date, cutoff_month, or date_from+date_to parameter is required'], 400);
 }
 
+/**
+ * Effective work hours for a day: clamps clock_in/out to the scheduled work
+ * window (so early arrival or staying past close doesn't inflate totals),
+ * then subtracts any lunch-break overlap (default 12:00–13:00).
+ *
+ * Example: Telesale 09:00–18:00, employee clocks 08:29 → 18:03
+ *   raw = 9.57h, but effective = max(09:00) → min(18:00) = 9.00h - 1h lunch = 8.00h
+ */
+function calc_effective_work_hours($clockIn, $clockOut, $workStart, $workEnd, $lunchStart = '12:00:00', $lunchEnd = '13:00:00'): float {
+    $toSec = static function ($t) {
+        $parts = array_pad(explode(':', $t), 3, 0);
+        return ((int) $parts[0]) * 3600 + ((int) $parts[1]) * 60 + ((int) $parts[2]);
+    };
+    $cin = $toSec($clockIn);
+    $cout = $toSec($clockOut);
+    $sin = $toSec($workStart);
+    $sout = $toSec($workEnd);
+    $effIn = max($cin, $sin);
+    $effOut = min($cout, $sout);
+    if ($effOut <= $effIn) return 0.0;
+    $worked = $effOut - $effIn;
+    // Lunch overlap
+    $lin = $toSec($lunchStart);
+    $lout = $toSec($lunchEnd);
+    $overlap = max(0, min($effOut, $lout) - max($effIn, $lin));
+    $worked -= $overlap;
+    return max(0.0, $worked / 3600);
+}
+
 // ─── Daily detail for a single employee ───
 $action = $_GET['action'] ?? null;
 if ($action === 'daily' && $employee_id && ($month || $cutoff_month || ($date_from && $date_to))) {
@@ -56,16 +86,24 @@ if ($action === 'daily' && $employee_id && ($month || $cutoff_month || ($date_fr
         $endDate = date('Y-m-t', strtotime($startDate));
     }
 
-    // Get employee info
-    $empStmt = $conn->prepare("SELECT e.id, e.name, d.name AS department, d.work_start_time, d.work_end_time 
+    // Get employee info + dept fallback fields for schedule resolver
+    $empStmt = $conn->prepare("SELECT e.id, e.name, e.hire_date, e.schedule_json, e.late_grace_minutes,
+                                      d.name AS department,
+                                      d.work_start_time, d.work_end_time,
+                                      d.schedule_json AS dept_schedule_json,
+                                      d.late_grace_minutes AS dept_late_grace_minutes,
+                                      d.work_start_time AS dept_work_start_time,
+                                      d.work_end_time AS dept_work_end_time
                                 FROM employees e LEFT JOIN departments d ON e.department_id = d.id WHERE e.id = ?");
     $empStmt->bind_param('s', $employee_id);
     $empStmt->execute();
     $emp = $empStmt->get_result()->fetch_assoc();
     if (!$emp) json_response(['error' => 'Employee not found'], 404);
 
+    // Default fallback: still expose work_start_time/work_end_time for the modal header
     $workStart = $emp['work_start_time'] ?? '09:00:00';
     $workEnd = $emp['work_end_time'] ?? '17:00:00';
+    $empHireDate = $emp['hire_date'] ?? null;
 
     // Get attendance records indexed by date
     $attMap = [];
@@ -119,6 +157,7 @@ if ($action === 'daily' && $employee_id && ($month || $cutoff_month || ($date_fr
         $dateStr = $current->format('Y-m-d');
         $dow = (int)$current->format('N');
         $att = $attMap[$dateStr] ?? null;
+        $sched = resolve_schedule_for_date($emp, $dateStr);
 
         $status = '';
         $clockIn = $att['clock_in'] ?? null;
@@ -127,31 +166,29 @@ if ($action === 'daily' && $employee_id && ($month || $cutoff_month || ($date_fr
         $leaveType = $leaveMap[$dateStr] ?? null;
         $holidayName = $holidayMap[$dateStr] ?? null;
 
-        if ($dow > 5) {
+        if (!$sched['active']) {
+            // Per-schedule non-working day (weekend or alternating off-week)
             $status = 'weekend';
         } elseif ($holidayName) {
             $status = 'holiday';
         } elseif ($leaveType) {
             $status = 'leave';
         } elseif ($att && $clockIn) {
-            $inMin = floor(strtotime($clockIn) / 60);
-            $startMin = floor(strtotime($workStart) / 60);
-            $lateMinutes = max(0, $inMin - $startMin);
-            if ($lateMinutes > 0) {
-                $status = 'late';
-            } else {
-                $status = 'present';
-            }
+            [$lateFlag, $lateMin] = is_late($clockIn, $sched);
+            $lateMinutes = $lateMin;
+            $status = $lateFlag ? 'late' : 'present';
+        } elseif ($empHireDate && $dateStr < $empHireDate) {
+            $status = 'pre_hire';
         } elseif ($dateStr <= $today) {
             $status = 'absent';
         } else {
             $status = 'future';
         }
 
-        // Work hours for the day
+        // Work hours for the day — clamped to scheduled window + lunch deducted
         $workHours = 0;
         if ($clockIn && $clockOut) {
-            $workHours = round((strtotime($clockOut) - strtotime($clockIn)) / 3600, 2);
+            $workHours = round(calc_effective_work_hours_v2($clockIn, $clockOut, $sched), 2);
         }
 
         $days[] = [
@@ -446,7 +483,13 @@ if ($department_id) {
     $empTypes .= 'i';
 }
 
-$empSql = "SELECT e.id, e.name, e.hire_date, e.base_salary, d.name AS department, d.work_start_time, d.work_end_time
+$empSql = "SELECT e.id, e.name, e.hire_date, e.base_salary,
+                  e.schedule_json, e.late_grace_minutes,
+                  d.name AS department, d.work_start_time, d.work_end_time,
+                  d.schedule_json AS dept_schedule_json,
+                  d.late_grace_minutes AS dept_late_grace_minutes,
+                  d.work_start_time AS dept_work_start_time,
+                  d.work_end_time AS dept_work_end_time
            FROM employees e
            LEFT JOIN departments d ON e.department_id = d.id
            WHERE $empWhere
@@ -530,9 +573,33 @@ if (!empty($employees)) {
         $eid = $emp['id'];
         $workStart = $emp['work_start_time'] ?? '09:00:00';
         $workEnd = $emp['work_end_time'] ?? '17:00:00';
+        $empHireDate = $emp['hire_date'] ?? null;
         $empAttendance = $attAll[$eid] ?? [];
         $empLeaves = $leaveAll[$eid] ?? [];
         $otHours = $otAll[$eid] ?? 0;
+
+        // Per-employee expected work days — counts only days where THIS employee's
+        // resolved schedule is "active" (handles weekend variability + alternating-week).
+        // Also respects hire_date: pre-hire days never count as expected.
+        $empPeriodStart = ($empHireDate && $empHireDate > $startDate) ? $empHireDate : $startDate;
+        $empExpectedWorkDays = 0;
+        $empFullPeriodWorkDays = 0;
+        if ($empPeriodStart <= $endDate) {
+            $cur = new DateTime($empPeriodStart);
+            $endFull = new DateTime($endDate);
+            $endEff = new DateTime($effectiveEndDate);
+            while ($cur <= $endFull) {
+                $dStr = $cur->format('Y-m-d');
+                if (!in_array($dStr, $holidayDates)) {
+                    $sched = resolve_schedule_for_date($emp, $dStr);
+                    if ($sched['active']) {
+                        $empFullPeriodWorkDays++;
+                        if ($cur <= $endEff) $empExpectedWorkDays++;
+                    }
+                }
+                $cur->modify('+1 day');
+            }
+        }
 
         $actualWorkDays = 0;
         $lateDays = 0;
@@ -543,27 +610,28 @@ if (!empty($employees)) {
 
         foreach ($empAttendance as $att) {
             $actualWorkDays++;
+            $sched = resolve_schedule_for_date($emp, $att['date']);
+            if (!$sched['active']) {
+                // Clocked in on a non-working day (e.g. weekend OT) — don't count
+                // toward late/early/work hours, but actualWorkDays already incremented.
+                continue;
+            }
             if ($att['clock_in']) {
-                $inMin = floor(strtotime($att['clock_in']) / 60);
-                $startMin = floor(strtotime($workStart) / 60);
-                $diff = $inMin - $startMin;
-                if ($diff > 0) {
+                [$lateFlag, $lateMin] = is_late($att['clock_in'], $sched);
+                if ($lateFlag) {
                     $lateDays++;
-                    $lateMinutesTotal += $diff;
+                    $lateMinutesTotal += $lateMin;
                 }
             }
             if ($att['clock_out']) {
-                $outMin = floor(strtotime($att['clock_out']) / 60);
-                $endMin = floor(strtotime($workEnd) / 60);
-                $earlyDiff = $endMin - $outMin;
-                if ($earlyDiff > 0) {
+                [$earlyFlag, $earlyMin] = is_early_leave($att['clock_out'], $sched);
+                if ($earlyFlag) {
                     $earlyDays++;
-                    $earlyMinutesTotal += $earlyDiff;
+                    $earlyMinutesTotal += $earlyMin;
                 }
             }
             if ($att['clock_in'] && $att['clock_out']) {
-                $hours = (strtotime($att['clock_out']) - strtotime($att['clock_in'])) / 3600;
-                $totalWorkHours += max(0, $hours);
+                $totalWorkHours += calc_effective_work_hours_v2($att['clock_in'], $att['clock_out'], $sched);
             }
         }
 
@@ -595,7 +663,7 @@ if (!empty($employees)) {
             }
         }
 
-        $absentDays = max(0, $expectedWorkDays - $actualWorkDays - $totalLeaveDays);
+        $absentDays = max(0, $empExpectedWorkDays - $actualWorkDays - $totalLeaveDays);
         $diligenceEligible = ($lateDays == 0 && $nonAnnualLeaveDays == 0 && $absentDays == 0);
 
         $report[] = [
@@ -605,8 +673,8 @@ if (!empty($employees)) {
             'base_salary' => (float)($emp['base_salary'] ?? 0),
             'work_start_time' => $workStart,
             'work_end_time' => $workEnd,
-            'expected_work_days' => $expectedWorkDays,
-            'full_period_work_days' => $fullPeriodWorkDays,
+            'expected_work_days' => $empExpectedWorkDays,
+            'full_period_work_days' => $empFullPeriodWorkDays,
             'actual_work_days' => $actualWorkDays,
             'absent_days' => $absentDays,
             'late_count' => $lateDays,
