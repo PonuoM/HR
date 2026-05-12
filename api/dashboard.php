@@ -4,6 +4,7 @@
  * GET /api/dashboard.php  - Aggregated stats for admin dashboard
  */
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/schedule_helper.php';
 
 $method = get_method();
 $company_id = get_company_id();
@@ -13,9 +14,16 @@ if ($method === 'GET' && isset($_GET['action']) && $_GET['action'] === 'clock_st
     $today = date('Y-m-d');
     $departmentId = isset($_GET['department_id']) ? (int)$_GET['department_id'] : null;
 
-    // Build employee query with optional department filter
-    $empSql = "SELECT e.id, CONCAT(e.name, IF(IFNULL(e.nickname, '') != '', CONCAT(' (', e.nickname, ')'), '')) AS name, e.nickname, e.avatar, d.name AS department, d.id AS department_id,
-                      d.work_start_time
+    // Build employee query with optional department filter (incl. fields for schedule resolver)
+    $empSql = "SELECT e.id, CONCAT(e.name, IF(IFNULL(e.nickname, '') != '', CONCAT(' (', e.nickname, ')'), '')) AS name,
+                      e.nickname, e.avatar,
+                      e.schedule_json, e.late_grace_minutes,
+                      d.name AS department, d.id AS department_id,
+                      d.work_start_time, d.work_end_time,
+                      d.schedule_json AS dept_schedule_json,
+                      d.late_grace_minutes AS dept_late_grace_minutes,
+                      d.work_start_time AS dept_work_start_time,
+                      d.work_end_time AS dept_work_end_time
                FROM employees e
                LEFT JOIN departments d ON e.department_id = d.id
                WHERE e.is_active = 1 AND e.company_id = ?";
@@ -67,7 +75,9 @@ if ($method === 'GET' && isset($_GET['action']) && $_GET['action'] === 'clock_st
         $eid = $emp['id'];
         $att = $attMap[$eid] ?? null;
         $isOnLeave = isset($leaveMap[$eid]);
-        $workStart = $emp['work_start_time'] ?? '09:00:00';
+        // Resolve today's schedule (respects per-employee override + alternating weeks)
+        $sched = resolve_schedule_for_date($emp, $today);
+        $workStart = $sched['in'] ? $sched['in'] . ':00' : ($emp['work_start_time'] ?? '09:00:00');
 
         if ($isOnLeave && !$att) {
             $status = 'on_leave';
@@ -83,11 +93,14 @@ if ($method === 'GET' && isset($_GET['action']) && $_GET['action'] === 'clock_st
             $summary['clocked_in']++;
         }
 
-        // Check late
+        // Check late using schedule-aware grace period
         $isLate = false;
-        if ($att && $att['clock_in'] && $att['clock_in'] > $workStart) {
-            $isLate = true;
-            $summary['late']++;
+        if ($att && $att['clock_in'] && $sched['active']) {
+            [$lateFlag, $_] = is_late($att['clock_in'], $sched);
+            if ($lateFlag) {
+                $isLate = true;
+                $summary['late']++;
+            }
         }
 
         $employees[] = [
