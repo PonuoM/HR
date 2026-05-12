@@ -7,45 +7,32 @@ import { useAuth } from '../contexts/AuthContext';
 import DatePickerModal from '../components/DatePickerModal';
 import LocationPickerModal, { LocationData } from '../components/LocationPickerModal';
 
-// Calculate leave days based on department work hours.
-// Same-day partial leaves are snapped UP to the nearest 0.5 day —
-// HR rule: no hourly leave, minimum half-day. This makes 0.5 day mean
-// the same effective time-off regardless of dept hours (7 vs 8 vs 9 hrs).
-function calcLeaveDays(start: string, end: string, workHoursPerDay: number): number {
+// HR rule: leave is counted in 0.5-day or 1-day units only (no fractional hours).
+// Same-day partial:
+//   - Covers the entire workday (start ≤ workStart AND end ≥ workEnd) → 1.0 day
+//   - Otherwise (any partial that doesn't span the full workday)        → 0.5 day
+// Multi-day → calendar days (existing behavior).
+//
+// `workStart` / `workEnd` default to "09:00" / "17:00" if not provided.
+function calcLeaveDays(start: string, end: string, _workHoursPerDay: number, workStart = '09:00', workEnd = '17:00'): number {
     if (!start || !end) return 0;
     const s = new Date(start);
     const e = new Date(end);
     if (isNaN(s.getTime()) || isNaN(e.getTime())) return 0;
-    const diffMs = e.getTime() - s.getTime();
-    if (diffMs <= 0) return 0;
+    if (e <= s) return 0;
 
-    const hpd = workHoursPerDay || 8;
-
-    // If same calendar day → partial day based on hours, snapped to 0.5
     if (s.toDateString() === e.toDateString()) {
-        const startHour = s.getHours() + s.getMinutes() / 60;
-        const endHour = e.getHours() + e.getMinutes() / 60;
-
-        let workHours = endHour - startHour;
-
-        // Deduct lunch break (12:00 - 13:00)
-        const lunchStart = 12;
-        const lunchEnd = 13;
-        const overlapStart = Math.max(startHour, lunchStart);
-        const overlapEnd = Math.min(endHour, lunchEnd);
-
-        if (overlapEnd > overlapStart) {
-            workHours -= (overlapEnd - overlapStart);
-        }
-
-        if (workHours <= 0) return 0;
-        const fraction = workHours / hpd;
-        // Snap UP to nearest 0.5: any partial day = ≥0.5, more than half = 1.0
-        return Math.ceil(fraction * 2) / 2;
+        // Same-day partial — collapse to 0.5 or 1.0 based on whether it spans full workday
+        const [wsH, wsM] = workStart.split(':').map(Number);
+        const [weH, weM] = workEnd.split(':').map(Number);
+        const dayStart = new Date(s); dayStart.setHours(wsH, wsM, 0, 0);
+        const dayEnd   = new Date(s); dayEnd.setHours(weH, weM, 0, 0);
+        if (s <= dayStart && e >= dayEnd) return 1;
+        return 0.5;
     }
 
-    // Multi-day: count calendar days
-    const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    // Multi-day → calendar days
+    const days = Math.ceil((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24));
     return days;
 }
 
@@ -99,7 +86,7 @@ const CreateRequestScreen: React.FC = () => {
     const isUnlimited = selectedQuota?.remaining === -1;
     const quotaTotal = selectedQuota ? Number(selectedQuota.total) : 0;
     const quotaUsed = selectedQuota ? Number(selectedQuota.used) : 0;
-    const leaveDays = useMemo(() => calcLeaveDays(startDate, endDate, workHoursPerDay), [startDate, endDate, workHoursPerDay]);
+    const leaveDays = useMemo(() => calcLeaveDays(startDate, endDate, workHoursPerDay, workStart, workEnd), [startDate, endDate, workHoursPerDay, workStart, workEnd]);
 
     // Auto-select first available leave type based on actual quotas
     useEffect(() => {

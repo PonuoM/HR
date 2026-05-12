@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import ScheduleEditor, { ScheduleJson, parseScheduleJson, defaultWeeklySchedule } from '../../components/ScheduleEditor';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
-import { getDepartments, getPositions, getEmployees, createEmployee, updateEmployee, resetEmployeePassword, deleteEmployee, suspendEmployee, unsuspendEmployee, getCompanies } from '../../services/api';
+import { getDepartments, getPositions, getEmployees, createEmployee, updateEmployee, resetEmployeePassword, deleteEmployee, suspendEmployee, unsuspendEmployee, getCompanies, getLeaveQuotas, getLeaveRequests } from '../../services/api';
 import { useToast } from '../../components/Toast';
 import CustomSelect from '../../components/CustomSelect';
 import { useAuth } from '../../contexts/AuthContext';
@@ -62,6 +63,19 @@ const AdminEmployeeScreen: React.FC = () => {
     const [editApprover2, setEditApprover2] = useState('');
     const [editIsAdmin, setEditIsAdmin] = useState(false);
     const [editNickname, setEditNickname] = useState('');
+    const [editScheduleJson, setEditScheduleJson] = useState<ScheduleJson | null>(null);
+    const [editLateGrace, setEditLateGrace] = useState<string>('');
+
+    // Per-employee leave quota + history (loaded only when an employee is being edited)
+    const editEmpId = editingEmployee?.id || '';
+    const { data: empQuotas } = useApi<any[]>(
+        () => editEmpId ? getLeaveQuotas(editEmpId) : Promise.resolve([]),
+        [editEmpId]
+    );
+    const { data: empLeaveReqs } = useApi<any[]>(
+        () => editEmpId ? getLeaveRequests({ employee_id: editEmpId }) : Promise.resolve([]),
+        [editEmpId]
+    );
 
     // Initialize edit modal state when employee selected
     useEffect(() => {
@@ -72,6 +86,8 @@ const AdminEmployeeScreen: React.FC = () => {
             setEditApprover2(editingEmployee.approver2_id || '');
             setEditIsAdmin(editingEmployee.is_admin === 1 || editingEmployee.is_admin === '1');
             setEditNickname(editingEmployee.nickname || '');
+            setEditScheduleJson(parseScheduleJson(editingEmployee.schedule_json));
+            setEditLateGrace(editingEmployee.late_grace_minutes != null ? String(editingEmployee.late_grace_minutes) : '');
         }
     }, [editingEmployee]);
 
@@ -102,17 +118,21 @@ const AdminEmployeeScreen: React.FC = () => {
         ? Array.from(new Map((employees || []).filter((e: any) => e.company_name).map((e: any) => [String(e.company_id), { value: String(e.company_id), label: `${e.company_name} (${e.company_code || ''})` }])).values())
         : [];
 
-    // Handle Navigation State from Dashboard
+    // Handle Navigation State from Dashboard / Quota Overview
     useEffect(() => {
         if (location.state) {
-            const state = location.state as { openAddModal?: boolean };
+            const state = location.state as { openAddModal?: boolean; editEmployeeId?: string };
             if (state.openAddModal) {
                 setShowAddModal(true);
+            }
+            if (state.editEmployeeId && employees) {
+                const target = (employees as any[]).find((e: any) => e.id === state.editEmployeeId);
+                if (target) setEditingEmployee(target);
             }
             // Clear state to avoid reopening on refresh (optional, but good practice)
             window.history.replaceState({}, document.title);
         }
-    }, [location]);
+    }, [location, employees]);
 
 
 
@@ -704,6 +724,8 @@ const AdminEmployeeScreen: React.FC = () => {
                                         approver_id: approverVal || null,
                                         approver2_id: approver2Val || null,
                                         is_admin: editIsAdmin ? 1 : 0,
+                                        schedule_json: editScheduleJson ? JSON.stringify(editScheduleJson) : null,
+                                        late_grace_minutes: editLateGrace !== '' ? parseInt(editLateGrace) : null,
                                     } as any);
                                     toast('แก้ไขข้อมูลเรียบร้อย', 'success');
                                     setEditingEmployee(null);
@@ -836,6 +858,239 @@ const AdminEmployeeScreen: React.FC = () => {
                                         </label>
                                     </div>
                                 )}
+
+                                {/* ── Leave quota + history (read-only) ── */}
+                                {(() => {
+                                    const quotas = (empQuotas || []) as any[];
+                                    const reqs = (empLeaveReqs || []) as any[];
+                                    if (quotas.length === 0) return null;
+
+                                    // Group requests by leave_type_id, only this year
+                                    const thisYear = new Date().getFullYear();
+                                    const reqsByType: Record<string, any[]> = {};
+                                    reqs.forEach((r: any) => {
+                                        if (r.status === 'rejected' || r.status === 'cancelled') return;
+                                        const startYear = r.start_date ? new Date(r.start_date).getFullYear() : thisYear;
+                                        if (startYear !== thisYear) return;
+                                        const k = String(r.leave_type_id ?? 'ot');
+                                        if (!reqsByType[k]) reqsByType[k] = [];
+                                        reqsByType[k].push(r);
+                                    });
+
+                                    const fmtThaiShort = (d: string) => {
+                                        if (!d) return '-';
+                                        const dt = new Date(d);
+                                        return dt.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+                                    };
+                                    // Round + trim trailing zeros: 5.00 → "5", 5.50 → "5.5", 0.99 → "0.99"
+                                    const fmtNum = (n: number | null | undefined): string => {
+                                        if (n === null || n === undefined) return '-';
+                                        const r = Math.round(Number(n) * 100) / 100;
+                                        return Number.isInteger(r) ? r.toString() : parseFloat(r.toFixed(2)).toString();
+                                    };
+
+                                    return (
+                                        <details className="bg-blue-50/40 dark:bg-blue-900/10 rounded-xl border border-blue-200/60 dark:border-blue-800/40 group">
+                                            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl flex items-center justify-between">
+                                                <span className="flex items-center gap-2">
+                                                    <span className="material-icons-round text-base text-blue-600">beach_access</span>
+                                                    โควต้าการลา + ประวัติใช้งาน
+                                                    <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">ปี {thisYear + 543}</span>
+                                                </span>
+                                                <span className="material-icons-round text-base text-gray-400 transition-transform group-open:rotate-180">expand_more</span>
+                                            </summary>
+                                            <div className="px-3 py-3 border-t border-blue-200/60 dark:border-blue-800/40 space-y-2">
+                                                {quotas.map((q: any) => {
+                                                    const isUnlimited = Number(q.remaining) === -1;
+                                                    const total = Number(q.total) || 0;
+                                                    const used = Number(q.used) || 0;
+                                                    const remaining = Number(q.remaining) || 0;
+                                                    const typeReqs = reqsByType[String(q.leave_type_id)] || [];
+                                                    return (
+                                                        <details key={q.leave_type_id} className="bg-white dark:bg-gray-900/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                                                            <summary className="cursor-pointer px-3 py-2 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-lg">
+                                                                <div className="flex items-center gap-2 min-w-0">
+                                                                    <span className={`material-icons-round text-base text-${q.color || 'gray'}-500`}>{q.icon || 'star'}</span>
+                                                                    <span className="text-sm font-semibold text-gray-900 dark:text-white truncate">{q.leave_type_name}</span>
+                                                                    {typeReqs.length > 0 && (
+                                                                        <span className="text-[10px] text-gray-500">({typeReqs.length} รายการ)</span>
+                                                                    )}
+                                                                </div>
+                                                                <div className="flex items-center gap-2 shrink-0">
+                                                                    <span className="text-xs text-gray-500">ใช้ <b className="text-purple-600">{fmtNum(used)}</b></span>
+                                                                    <span className="text-xs text-gray-400">/</span>
+                                                                    <span className="text-xs text-gray-500">เหลือ <b className={remaining < 0 ? 'text-red-700' : (remaining <= 1 && !isUnlimited ? 'text-red-600' : 'text-green-600')}>{isUnlimited ? '∞' : (remaining < 0 ? `เกิน ${fmtNum(Math.abs(remaining))}` : fmtNum(remaining))}</b> {isUnlimited || remaining < 0 ? '' : `/ ${fmtNum(total)}`}</span>
+                                                                </div>
+                                                            </summary>
+                                                            <div className="px-3 py-2 border-t border-gray-100 dark:border-gray-700">
+                                                                {typeReqs.length === 0 ? (
+                                                                    <div className="text-[11px] text-gray-400 italic py-1">ยังไม่ได้ใช้</div>
+                                                                ) : (
+                                                                    <div className="space-y-1">
+                                                                        {typeReqs.map((r: any) => {
+                                                                            const isPending = r.status === 'pending';
+                                                                            const targetPath = isPending ? '/leave/approvals' : '/leave/history';
+                                                                            return (
+                                                                                <button
+                                                                                    key={r.id}
+                                                                                    type="button"
+                                                                                    onClick={() => { setEditingEmployee(null); navigate(targetPath); }}
+                                                                                    className="w-full flex items-center justify-between gap-2 text-xs px-2 py-1.5 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left transition-colors"
+                                                                                    title={`ไปที่หน้า${isPending ? 'อนุมัติ' : 'ประวัติ'}`}
+                                                                                >
+                                                                                    <span className="text-gray-700 dark:text-gray-300 truncate flex-1">
+                                                                                        {fmtThaiShort(r.start_date)}
+                                                                                        {r.end_date && r.end_date !== r.start_date && ` — ${fmtThaiShort(r.end_date)}`}
+                                                                                    </span>
+                                                                                    <span className="text-gray-500 shrink-0">{fmtNum(r.total_days)} วัน</span>
+                                                                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${
+                                                                                        isPending ? 'bg-amber-100 text-amber-700' :
+                                                                                        r.status === 'approved' ? 'bg-green-100 text-green-700' :
+                                                                                        'bg-gray-100 text-gray-600'
+                                                                                    }`}>
+                                                                                        {isPending ? 'รออนุมัติ' : r.status === 'approved' ? 'อนุมัติ' : r.status}
+                                                                                    </span>
+                                                                                    <span className="material-icons-round text-xs text-gray-300 shrink-0">arrow_forward</span>
+                                                                                </button>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </details>
+                                                    );
+                                                })}
+                                            </div>
+                                        </details>
+                                    );
+                                })()}
+
+                                {/* ── Per-employee work-schedule override (simple-by-default) ── */}
+                                <details className="bg-amber-50/40 dark:bg-amber-900/10 rounded-xl border border-amber-200/60 dark:border-amber-800/40 group">
+                                    <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-xl flex items-center justify-between">
+                                        <span className="flex items-center gap-2">
+                                            <span className="material-icons-round text-base text-amber-600">schedule</span>
+                                            ตารางเวลาเฉพาะคนนี้
+                                            {editScheduleJson && <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">override</span>}
+                                        </span>
+                                        <span className="material-icons-round text-base text-gray-400 transition-transform group-open:rotate-180">expand_more</span>
+                                    </summary>
+                                    <div className="px-4 py-3 border-t border-amber-200/60 dark:border-amber-800/40 space-y-3">
+                                        <div className="text-[11px] text-gray-500">
+                                            ตั้งเวลาทำงาน <b>ต่างจากแผนก</b> สำหรับ admin / ผู้บริหาร / ตำแหน่งพิเศษ
+                                        </div>
+
+                                        {/* Toggle override on/off */}
+                                        <label className="flex items-center justify-between bg-white dark:bg-gray-900/60 border border-amber-200 dark:border-amber-700/40 rounded-lg px-3 py-2 cursor-pointer">
+                                            <div>
+                                                <div className="text-xs font-semibold text-gray-700 dark:text-gray-300">เปิดใช้ตารางเฉพาะคนนี้</div>
+                                                <div className="text-[10px] text-gray-500">{editScheduleJson ? 'ใช้ตารางที่ตั้งด้านล่าง' : 'ใช้ตารางตามแผนก'}</div>
+                                            </div>
+                                            <input type="checkbox" checked={!!editScheduleJson}
+                                                onChange={(e) => setEditScheduleJson(e.target.checked ? defaultWeeklySchedule() : null)}
+                                                className="sr-only peer" />
+                                            <div className="relative w-11 h-6 bg-gray-300 dark:bg-gray-600 peer-checked:bg-amber-500 rounded-full transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-transform peer-checked:after:translate-x-5"></div>
+                                        </label>
+
+                                        {/* SIMPLE form when override on */}
+                                        {editScheduleJson && (() => {
+                                            // Derive shared in/out from any active day (default to Monday's)
+                                            const firstActive = ['1', '2', '3', '4', '5', '6', '7'].find(k => editScheduleJson[k]?.active);
+                                            const sharedIn = firstActive ? (editScheduleJson[firstActive].in || '09:00') : '09:00';
+                                            const sharedOut = firstActive ? (editScheduleJson[firstActive].out || '17:00') : '17:00';
+                                            const sharedLunch = firstActive ? (editScheduleJson[firstActive].lunch_min ?? 60) : 60;
+
+                                            const updateAllActiveDays = (patch: { in?: string; out?: string; lunch_min?: number }) => {
+                                                const next = { ...editScheduleJson };
+                                                ['1', '2', '3', '4', '5', '6', '7'].forEach(k => {
+                                                    if (next[k]?.active) next[k] = { ...next[k], ...patch };
+                                                });
+                                                setEditScheduleJson(next);
+                                            };
+
+                                            const toggleDayActive = (k: string, active: boolean) => {
+                                                const next = { ...editScheduleJson };
+                                                next[k] = active
+                                                    ? { active: true, in: sharedIn, out: sharedOut, lunch_min: sharedLunch }
+                                                    : { active: false };
+                                                setEditScheduleJson(next);
+                                            };
+
+                                            return (
+                                                <div className="space-y-3 bg-white dark:bg-gray-900/60 rounded-lg border border-amber-200 dark:border-amber-700/40 p-3">
+                                                    <div className="grid grid-cols-2 gap-3">
+                                                        <div>
+                                                            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">เวลาเข้างาน</label>
+                                                            <input type="time" value={sharedIn} onChange={(e) => updateAllActiveDays({ in: e.target.value })}
+                                                                className="w-full bg-white dark:bg-gray-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">เวลาออกงาน</label>
+                                                            <input type="time" value={sharedOut} onChange={(e) => updateAllActiveDays({ out: e.target.value })}
+                                                                className="w-full bg-white dark:bg-gray-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">วันทำงาน</label>
+                                                        <div className="flex flex-wrap gap-1.5">
+                                                            {[
+                                                                { k: '1', l: 'จ.' }, { k: '2', l: 'อ.' }, { k: '3', l: 'พ.' }, { k: '4', l: 'พฤ.' },
+                                                                { k: '5', l: 'ศ.' }, { k: '6', l: 'ส.' }, { k: '7', l: 'อา.' },
+                                                            ].map(({ k, l }) => {
+                                                                const isOn = !!editScheduleJson[k]?.active;
+                                                                return (
+                                                                    <button key={k} type="button"
+                                                                        onClick={() => toggleDayActive(k, !isOn)}
+                                                                        className={`w-10 h-10 rounded-lg text-xs font-bold transition-colors ${isOn ? 'bg-primary text-white shadow-sm' : 'bg-gray-100 dark:bg-gray-800 text-gray-400 hover:bg-gray-200'}`}>
+                                                                        {l}
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">พักเที่ยง (นาที)</label>
+                                                        <select value={sharedLunch} onChange={(e) => updateAllActiveDays({ lunch_min: parseInt(e.target.value) })}
+                                                            className="w-full bg-white dark:bg-gray-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50">
+                                                            <option value={0}>0 นาที (ไม่หัก)</option>
+                                                            <option value={30}>30 นาที</option>
+                                                            <option value={45}>45 นาที</option>
+                                                            <option value={60}>60 นาที</option>
+                                                            <option value={90}>90 นาที</option>
+                                                        </select>
+                                                    </div>
+
+                                                    {/* Advanced — per-day editor */}
+                                                    <details className="text-xs">
+                                                        <summary className="cursor-pointer text-amber-700 dark:text-amber-400 font-semibold py-1 hover:underline">
+                                                            ⚙️ ต้องการเวลาต่างกันแต่ละวัน? (advanced)
+                                                        </summary>
+                                                        <div className="mt-2">
+                                                            <ScheduleEditor
+                                                                value={editScheduleJson}
+                                                                onChange={setEditScheduleJson}
+                                                                allowOverride={false}
+                                                            />
+                                                        </div>
+                                                    </details>
+                                                </div>
+                                            );
+                                        })()}
+
+                                        {/* Grace period — always available */}
+                                        <div>
+                                            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
+                                                Grace period — สาย ≤ X นาที = ไม่นับสาย
+                                            </label>
+                                            <input type="number" min={0} max={60}
+                                                value={editLateGrace}
+                                                onChange={(e) => setEditLateGrace(e.target.value)}
+                                                placeholder="ใช้ค่า default ของแผนก"
+                                                className="w-full bg-white dark:bg-gray-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                                            <p className="text-[10px] text-gray-400 mt-1">เว้นว่าง = ใช้ค่าของแผนก</p>
+                                        </div>
+                                    </div>
+                                </details>
 
                                 <div className="flex gap-3 pt-2">
                                     <button type="button" onClick={() => setEditingEmployee(null)} className="flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">

@@ -85,6 +85,9 @@ const AdminDashboardScreen: React.FC = () => {
       case 'quota':
         navigate('/admin/quotas');
         break;
+      case 'quota_overview':
+        navigate('/admin/quota-overview');
+        break;
       case 'review_requests':
         navigate('/requests');
         break;

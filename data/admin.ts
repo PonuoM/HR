@@ -14,6 +14,7 @@ export const ADMIN_QUICK_ACTIONS: AdminQuickAction[] = [
     { key: 'add_employee', icon: 'person_add', label: 'เพิ่มพนักงานใหม่', subtitle: 'สร้างบัญชีผู้ใช้', iconBg: 'bg-green-100 dark:bg-green-900/30', iconColor: 'text-green-600' },
     { key: 'announce', icon: 'campaign', label: 'ประกาศข่าวสาร', subtitle: 'สร้างโพสต์ประชาสัมพันธ์', iconBg: 'bg-blue-100 dark:bg-blue-900/30', iconColor: 'text-blue-600' },
     { key: 'quota', icon: 'settings', label: 'ตั้งค่าโควต้า', subtitle: 'จัดการสิทธิ์การลา', iconBg: 'bg-purple-100 dark:bg-purple-900/30', iconColor: 'text-purple-600' },
+    { key: 'quota_overview', icon: 'beach_access', label: 'ภาพรวมโควต้าทุกคน', subtitle: 'ดูโควต้า + การใช้งานของพนักงานทุกคน', iconBg: 'bg-cyan-100 dark:bg-cyan-900/30', iconColor: 'text-cyan-600' },
 ];
 
 /** Mock pending requests for admin dashboard */

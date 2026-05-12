@@ -82,6 +82,139 @@ function get_tier_quota($conn, $employee_id, $leave_type_id, $default_quota, $co
     return (int)$default_quota;
 }
 
+if ($method === 'GET' && ($_GET['action'] ?? '') === 'summary') {
+    // ── Company-wide overview: all active employees + their quotas (read-only, no auto-provision) ──
+    $year = (int)($_GET['year'] ?? date('Y'));
+    $company_id = get_company_id();
+
+    // Optional superadmin: cross-company view
+    $caller_id = get_employee_id();
+    $is_super = false;
+    if ($caller_id) {
+        $sa = $conn->prepare("SELECT is_superadmin FROM employees WHERE id = ?");
+        $sa->bind_param('s', $caller_id);
+        $sa->execute();
+        $row = $sa->get_result()->fetch_assoc();
+        $is_super = $row && $row['is_superadmin'];
+    }
+    $cross_company = !empty($_GET['all_companies']) && $is_super;
+
+    // Active leave types for this company (or all if cross-company)
+    if ($cross_company) {
+        $ltSql = "SELECT id, name, color, icon, type, default_quota FROM leave_types WHERE is_active = 1 ORDER BY id";
+        $ltRes = $conn->query($ltSql);
+    } else {
+        $ltStmt = $conn->prepare("SELECT id, name, color, icon, type, default_quota FROM leave_types WHERE company_id = ? AND is_active = 1 ORDER BY id");
+        $ltStmt->bind_param('i', $company_id);
+        $ltStmt->execute();
+        $ltRes = $ltStmt->get_result();
+    }
+    $leaveTypes = [];
+    while ($row = $ltRes->fetch_assoc()) $leaveTypes[] = $row;
+
+    // All active employees (in company)
+    if ($cross_company) {
+        $empSql = "SELECT e.id, e.name, e.nickname, e.hire_date, e.company_id,
+                          d.name AS department, c.name AS company_name
+                   FROM employees e
+                   LEFT JOIN departments d ON e.department_id = d.id
+                   LEFT JOIN companies c ON e.company_id = c.id
+                   WHERE e.is_active = 1
+                   ORDER BY e.company_id, e.id";
+        $empRes = $conn->query($empSql);
+    } else {
+        $empStmt = $conn->prepare("SELECT e.id, e.name, e.nickname, e.hire_date,
+                                          d.name AS department
+                                   FROM employees e
+                                   LEFT JOIN departments d ON e.department_id = d.id
+                                   WHERE e.is_active = 1 AND e.company_id = ?
+                                   ORDER BY e.id");
+        $empStmt->bind_param('i', $company_id);
+        $empStmt->execute();
+        $empRes = $empStmt->get_result();
+    }
+    $employees = [];
+    while ($row = $empRes->fetch_assoc()) $employees[] = $row;
+
+    // Bulk fetch ALL quotas for the year (one query)
+    $quotaMap = []; // [employee_id][leave_type_id] => total
+    if ($cross_company) {
+        $qRes = $conn->query("SELECT employee_id, leave_type_id, total FROM leave_quotas WHERE year = $year");
+    } else {
+        $qStmt = $conn->prepare("SELECT lq.employee_id, lq.leave_type_id, lq.total FROM leave_quotas lq JOIN employees e ON lq.employee_id = e.id WHERE lq.year = ? AND e.company_id = ?");
+        $qStmt->bind_param('ii', $year, $company_id);
+        $qStmt->execute();
+        $qRes = $qStmt->get_result();
+    }
+    while ($row = $qRes->fetch_assoc()) {
+        $quotaMap[$row['employee_id']][(int)$row['leave_type_id']] = (float)$row['total'];
+    }
+
+    // Bulk fetch ALL used (approved + pending) for the year
+    $usedMap = []; // [employee_id][leave_type_id] => used
+    if ($cross_company) {
+        $uRes = $conn->query("SELECT employee_id, leave_type_id, SUM(total_days) AS used
+                              FROM leave_requests
+                              WHERE status IN ('approved','pending') AND YEAR(start_date) = $year
+                              GROUP BY employee_id, leave_type_id");
+    } else {
+        $uStmt = $conn->prepare("SELECT lr.employee_id, lr.leave_type_id, SUM(lr.total_days) AS used
+                                 FROM leave_requests lr JOIN employees e ON lr.employee_id = e.id
+                                 WHERE lr.status IN ('approved','pending') AND YEAR(lr.start_date) = ? AND e.company_id = ?
+                                 GROUP BY lr.employee_id, lr.leave_type_id");
+        $uStmt->bind_param('ii', $year, $company_id);
+        $uStmt->execute();
+        $uRes = $uStmt->get_result();
+    }
+    while ($row = $uRes->fetch_assoc()) {
+        $usedMap[$row['employee_id']][(int)$row['leave_type_id']] = (float)$row['used'];
+    }
+
+    // Compose response: per-employee quota matrix
+    $rows = [];
+    foreach ($employees as $emp) {
+        $eid = $emp['id'];
+        $perType = [];
+        foreach ($leaveTypes as $lt) {
+            $ltId = (int)$lt['id'];
+            $total = $quotaMap[$eid][$ltId] ?? null;
+            $used  = $usedMap[$eid][$ltId] ?? 0;
+            // remaining: -1 = unlimited (only for unpaid leave_type with total=0)
+            $remaining = null;
+            if ($total !== null) {
+                if ($total == 0 && $lt['type'] === 'unpaid') $remaining = -1;
+                else $remaining = round($total - $used, 2); // round to kill float precision noise
+            }
+            $perType[] = [
+                'leave_type_id'   => $ltId,
+                'leave_type_name' => $lt['name'],
+                'color'           => $lt['color'],
+                'icon'            => $lt['icon'],
+                'category'        => $lt['type'],
+                'total'           => $total !== null ? round($total, 2) : null,
+                'used'            => round($used, 2),
+                'remaining'       => $remaining,
+            ];
+        }
+        $rows[] = [
+            'employee_id' => $eid,
+            'name'        => $emp['name'],
+            'nickname'    => $emp['nickname'],
+            'department'  => $emp['department'] ?? '-',
+            'hire_date'   => $emp['hire_date'],
+            'company_id'  => $emp['company_id'] ?? null,
+            'company_name'=> $emp['company_name'] ?? null,
+            'quotas'      => $perType,
+        ];
+    }
+
+    json_response([
+        'year' => $year,
+        'leave_types' => $leaveTypes,
+        'employees' => $rows,
+    ]);
+}
+
 if ($method === 'GET') {
     $employee_id = $conn->real_escape_string($_GET['employee_id'] ?? 'EMP001');
     $year = (int)($_GET['year'] ?? date('Y'));
@@ -170,9 +303,9 @@ if ($method === 'GET') {
     $result = $conn->query($sql);
     $quotas = [];
     while ($row = $result->fetch_assoc()) {
-        $row['used'] = (float)$row['used'];
-        $row['total'] = (float)$row['total'];
-        $row['remaining'] = $row['total'] - $row['used'];
+        $row['used'] = round((float)$row['used'], 2);
+        $row['total'] = round((float)$row['total'], 2);
+        $row['remaining'] = round($row['total'] - $row['used'], 2);
         // Only "unpaid" leave types are truly unlimited.
         // total=0 on seniority/annual types means "no entitlement yet"
         // (e.g. employee in probation, missing hire_date, or new hire <6 mo) — not unlimited.
