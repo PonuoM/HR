@@ -53,7 +53,7 @@ interface ReportData {
 interface DailyRow {
     date: string;
     day_of_week: number;
-    status: 'present' | 'late' | 'leave' | 'absent' | 'holiday' | 'weekend' | 'future';
+    status: 'present' | 'late' | 'leave' | 'absent' | 'holiday' | 'weekend' | 'future' | 'pre_hire';
     clock_in: string | null;
     clock_out: string | null;
     late_minutes: number;
@@ -82,6 +82,7 @@ const STATUS_CONFIG: Record<string, { label: string; icon: string; bg: string; t
     holiday: { label: 'วันหยุด', icon: 'celebration', bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-700 dark:text-blue-300' },
     weekend: { label: 'วันหยุด', icon: 'weekend', bg: 'bg-gray-100 dark:bg-gray-700/50', text: 'text-gray-500 dark:text-gray-400' },
     future: { label: '-', icon: 'schedule', bg: 'bg-gray-50 dark:bg-gray-800/30', text: 'text-gray-400 dark:text-gray-500' },
+    pre_hire: { label: 'ก่อนเข้างาน', icon: 'person_add_disabled', bg: 'bg-slate-100 dark:bg-slate-800/40', text: 'text-slate-500 dark:text-slate-400' },
 };
 
 const formatNum = (v: any) => {
@@ -179,9 +180,10 @@ const AdminAttendanceReportScreen: React.FC = () => {
     const [editClockOut, setEditClockOut] = useState('');
     const [isSavingEdit, setIsSavingEdit] = useState(false);
 
-    // ── PDF export state (per-employee → ZIP) ──
-    const [pdfRenderEmp, setPdfRenderEmp] = useState<ReportRow | null>(null);
+    // ── PDF export state (per-employee daily report → ZIP) ──
     const [pdfProgress, setPdfProgress] = useState<{ current: number; total: number } | null>(null);
+    // The daily data + employee meta for the currently-rendering PDF (offscreen)
+    const [pdfRenderData, setPdfRenderData] = useState<{ emp: ReportRow; daily: DailyData } | null>(null);
     const pdfCardRef = useRef<HTMLDivElement>(null);
 
     // ── HR record-leave-on-behalf modal state ──
@@ -529,6 +531,9 @@ const AdminAttendanceReportScreen: React.FC = () => {
         return `ปี ${selectedYear + 543}`;
     }, [viewMode, selectedMonth, selectedYear, cutoffMode, customDateFrom, customDateTo]);
 
+    // Export each employee's daily attendance as a PDF, bundled into a ZIP.
+    // Renders the same Excel-style daily table that's shown in the modal,
+    // captures via html2canvas (preserves Thai text), and embeds in jsPDF.
     const exportPdfZip = useCallback(async () => {
         if (!report || report.length === 0) {
             alert('ไม่มีข้อมูลพนักงานให้ export');
@@ -541,27 +546,76 @@ const AdminAttendanceReportScreen: React.FC = () => {
         setPdfProgress({ current: 0, total: targets.length });
         const zip = new JSZip();
 
+        // Build the date-range query the daily endpoint expects
+        let dateParam: string;
+        if (viewMode === 'custom') {
+            dateParam = `date_from=${customDateFrom}&date_to=${customDateTo}`;
+        } else if (viewMode === 'monthly') {
+            dateParam = cutoffMode ? `cutoff_month=${selectedMonth}` : `month=${selectedMonth}`;
+        } else {
+            dateParam = `date_from=${selectedYear}-01-01&date_to=${selectedYear}-12-31`;
+        }
+
         try {
             for (let i = 0; i < targets.length; i++) {
                 const emp = targets[i];
-                setPdfRenderEmp(emp);
-                // Wait 2 frames so React commits + browser paints
+
+                // Fetch daily detail for this employee
+                let daily: DailyData | null = null;
+                try {
+                    const res = await fetch(
+                        `${API_BASE}/attendance_report.php?action=daily&${dateParam}&employee_id=${emp.employee_id}`,
+                        { headers: getAuthHeaders() }
+                    );
+                    daily = await res.json();
+                } catch {
+                    setPdfProgress({ current: i + 1, total: targets.length });
+                    continue;
+                }
+                if (!daily || !daily.days) {
+                    setPdfProgress({ current: i + 1, total: targets.length });
+                    continue;
+                }
+
+                // Render the offscreen template for this employee
+                setPdfRenderData({ emp, daily });
+                // 2 frames so React commits + browser paints
                 await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 
                 const node = pdfCardRef.current;
-                if (!node) continue;
+                if (!node) {
+                    setPdfProgress({ current: i + 1, total: targets.length });
+                    continue;
+                }
 
                 const canvas = await html2canvas(node, {
                     scale: 2,
                     backgroundColor: '#ffffff',
                     logging: false,
                 });
-                const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                const imgData = canvas.toDataURL('image/jpeg', 0.92);
 
+                // Portrait A4; scale image width to page, height proportional
                 const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-                const pdfW = pdf.internal.pageSize.getWidth();
-                const pdfH = (canvas.height * pdfW) / canvas.width;
-                pdf.addImage(imgData, 'JPEG', 0, 0, pdfW, Math.min(pdfH, pdf.internal.pageSize.getHeight()));
+                const pageW = pdf.internal.pageSize.getWidth();
+                const pageH = pdf.internal.pageSize.getHeight();
+                const imgW = pageW;
+                const imgH = (canvas.height * imgW) / canvas.width;
+
+                if (imgH <= pageH) {
+                    // Fits on one page
+                    pdf.addImage(imgData, 'JPEG', 0, 0, imgW, imgH);
+                } else {
+                    // Multi-page: slice the image into page-height chunks
+                    let remainingH = imgH;
+                    let position = 0;
+                    while (remainingH > 0) {
+                        pdf.addImage(imgData, 'JPEG', 0, position, imgW, imgH);
+                        remainingH -= pageH;
+                        position -= pageH;
+                        if (remainingH > 0) pdf.addPage();
+                    }
+                }
 
                 const blob = pdf.output('blob');
                 const safeName = (emp.employee_name || emp.employee_id).replace(/[^\w฀-๿\s.-]/g, '').trim() || emp.employee_id;
@@ -570,16 +624,16 @@ const AdminAttendanceReportScreen: React.FC = () => {
                 setPdfProgress({ current: i + 1, total: targets.length });
             }
 
-            setPdfRenderEmp(null);
+            setPdfRenderData(null);
             const zipBlob = await zip.generateAsync({ type: 'blob' });
             saveAs(zipBlob, `attendance_${periodSlug}.zip`);
         } catch (err: any) {
             alert(`Export ไม่สำเร็จ: ${err?.message || err}`);
         } finally {
             setPdfProgress(null);
-            setPdfRenderEmp(null);
+            setPdfRenderData(null);
         }
-    }, [report, periodSlug]);
+    }, [report, periodSlug, viewMode, selectedMonth, selectedYear, cutoffMode, customDateFrom, customDateTo]);
 
     // Open daily detail — seed modal-local dates from outer filter
     const openDetail = (empId: string) => {
@@ -640,10 +694,10 @@ const AdminAttendanceReportScreen: React.FC = () => {
                                     disabled={pdfProgress !== null}
                                     className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors text-sm text-gray-700 dark:text-gray-200 border-t border-gray-100 dark:border-gray-700 disabled:opacity-50"
                                 >
-                                    <span className="material-icons-round text-purple-500 text-lg">folder_zip</span>
+                                    <span className="material-icons-round text-purple-600 text-lg">folder_zip</span>
                                     <div className="text-left">
                                         <div className="font-semibold">PDF ละคน (ZIP)</div>
-                                        <div className="text-xs text-gray-400">1 ไฟล์ PDF / พนักงาน รวมเป็น ZIP</div>
+                                        <div className="text-xs text-gray-400">1 ไฟล์ .pdf / พนักงาน — รายวัน + summary</div>
                                     </div>
                                 </button>
                                 {viewMode === 'monthly' && (
@@ -1164,7 +1218,7 @@ const AdminAttendanceReportScreen: React.FC = () => {
                                         📅 รายวัน — {detailData?.employee_name || '...'}
                                     </h2>
                                     <p className="text-xs text-gray-500 truncate">
-                                        {detailData?.department} • เข้างาน {fmtTime(detailData?.work_start_time || null)}
+                                        {detailData?.department} • เข้างาน {fmtTime(detailData?.work_start_time || null)} – ออกงาน {fmtTime(detailData?.work_end_time || null)}
                                     </p>
                                 </div>
                                 <button onClick={() => setDetailEmpId(null)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-500 shrink-0">
@@ -1389,76 +1443,106 @@ const AdminAttendanceReportScreen: React.FC = () => {
                 </div>
             )}
 
-            {/* ═══ Hidden render area for PDF generation (offscreen) ═══ */}
+            {/* ═══ Hidden render area for per-employee daily PDF (offscreen) ═══ */}
             <div style={{ position: 'fixed', left: -10000, top: 0, width: 794, pointerEvents: 'none' }}>
-                <div ref={pdfCardRef} style={{ width: 794, padding: 32, background: '#ffffff', fontFamily: 'Sukhumvit Set, Prompt, sans-serif', color: '#111' }}>
-                    {pdfRenderEmp && (() => {
-                        const r = pdfRenderEmp;
-                        const colorMap: Record<string, string> = {
-                            blue: '#3b82f6', red: '#ef4444', orange: '#f97316', amber: '#f59e0b',
-                            purple: '#a855f7', cyan: '#06b6d4', green: '#22c55e', gray: '#6b7280',
+                <div ref={pdfCardRef} style={{ width: 794, padding: 24, background: '#ffffff', fontFamily: 'Sukhumvit Set, Prompt, "Noto Sans Thai", sans-serif', color: '#111', fontSize: 12 }}>
+                    {pdfRenderData && (() => {
+                        const { emp, daily } = pdfRenderData;
+                        const dowNames = ['', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์', 'อาทิตย์'];
+                        const statusLabel = (r: DailyRow): string => {
+                            if (r.status === 'leave' && r.leave_type) return `ลา (${r.leave_type})`;
+                            if (r.status === 'holiday') return 'หยุดนักขัตฤกษ์';
+                            return ({ present: 'มาทำงาน', late: 'สาย', absent: 'ขาดงาน', leave: 'ลา', weekend: 'วันหยุด', future: '-', pre_hire: 'ยังไม่เข้างาน' } as Record<string, string>)[r.status] || r.status;
                         };
+                        const statusColor = (r: DailyRow): string => {
+                            if (r.status === 'late') return '#d97706';
+                            if (r.status === 'absent') return '#dc2626';
+                            if (r.status === 'leave') return '#7c3aed';
+                            if (r.status === 'holiday') return '#2563eb';
+                            if (r.status === 'weekend') return '#6b7280';
+                            if (r.status === 'pre_hire') return '#94a3b8';
+                            return '#111';
+                        };
+                        const rowBg = (r: DailyRow): string => {
+                            if (r.status === 'late') return '#fef3c7';
+                            if (r.status === 'absent') return '#fee2e2';
+                            if (r.status === 'leave') return '#ede9fe';
+                            if (r.status === 'holiday') return '#dbeafe';
+                            if (r.status === 'weekend') return '#f3f4f6';
+                            if (r.status === 'pre_hire') return '#f1f5f9';
+                            return '#ffffff';
+                        };
+
+                        let cntPresent = 0, cntLate = 0, cntAbsent = 0, cntLeave = 0, totalLateMin = 0;
+                        daily.days.forEach(r => {
+                            if (r.status === 'present') cntPresent++;
+                            else if (r.status === 'late') { cntLate++; totalLateMin += r.late_minutes || 0; }
+                            else if (r.status === 'absent') cntAbsent++;
+                            else if (r.status === 'leave') cntLeave++;
+                        });
+
+                        const cellBase: React.CSSProperties = { border: '1px solid #d1d5db', padding: '5px 8px', verticalAlign: 'middle' };
+                        const headBase: React.CSSProperties = { ...cellBase, background: '#f3f4f6', fontWeight: 700, textAlign: 'center', fontSize: 11.5 };
+
                         return (
-                            <div style={{ border: '1px solid #e5e7eb', borderRadius: 12, overflow: 'hidden' }}>
-                                {/* Header */}
-                                <div style={{ background: 'linear-gradient(135deg,#3b82f6,#1e40af)', color: 'white', padding: '20px 24px' }}>
-                                    <div style={{ fontSize: 12, opacity: 0.85 }}>📅 รายงานการเข้างาน</div>
-                                    <div style={{ fontSize: 22, fontWeight: 700, marginTop: 4 }}>{periodLabelText}</div>
+                            <div>
+                                {/* Title rows */}
+                                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>
+                                    รายงานเข้างานรายวัน — {periodLabelText}
                                 </div>
-                                {/* Employee info */}
-                                <div style={{ padding: '20px 24px', borderBottom: '1px solid #e5e7eb' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
-                                        <div>
-                                            <div style={{ fontSize: 22, fontWeight: 700, color: '#111' }}>{r.employee_name}</div>
-                                            <div style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>รหัส: {r.employee_id} • แผนก: {r.department}</div>
-                                            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>เวลาทำงาน: {fmtTime(r.work_start_time || null)} – {fmtTime((r as any).work_end_time || null)}</div>
-                                        </div>
-                                        <div style={{ textAlign: 'right' }}>
-                                            <div style={{ fontSize: 11, color: '#6b7280' }}>เบี้ยขยัน</div>
-                                            <div style={{ fontSize: 16, fontWeight: 700, color: r.diligence_eligible ? '#22c55e' : '#ef4444' }}>
-                                                {r.diligence_eligible ? '✅ ได้' : '❌ ไม่ได้'}
-                                            </div>
-                                        </div>
-                                    </div>
+                                <div style={{ fontSize: 12, marginBottom: 2 }}>
+                                    พนักงาน: <b>{daily.employee_name}</b> ({daily.employee_id})
                                 </div>
-                                {/* Summary numbers grid */}
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, padding: 24 }}>
-                                    {[
-                                        { label: 'มาทำงาน', value: `${r.actual_work_days}/${r.expected_work_days}`, color: 'blue' },
-                                        { label: 'ขาดงาน', value: `${formatNum(r.absent_days)} วัน`, color: r.absent_days > 0 ? 'red' : 'gray' },
-                                        { label: 'ลารวม', value: `${formatNum(r.total_leave_days)} วัน`, color: r.total_leave_days > 0 ? 'purple' : 'gray' },
-                                        { label: 'สาย', value: `${r.late_count} ครั้ง`, sub: r.late_minutes_total > 0 ? formatMinutesDuration(r.late_minutes_total) : '-', color: r.late_count > 0 ? 'orange' : 'gray' },
-                                        { label: 'กลับก่อน', value: `${r.early_leave_count || 0} ครั้ง`, sub: r.early_leave_minutes_total > 0 ? formatMinutesDuration(r.early_leave_minutes_total) : '-', color: (r.early_leave_count || 0) > 0 ? 'amber' : 'gray' },
-                                        { label: 'OT', value: formatTimeDuration(r.ot_hours), color: r.ot_hours > 0 ? 'cyan' : 'gray' },
-                                    ].map((s, i) => (
-                                        <div key={i} style={{ background: '#f9fafb', borderRadius: 10, padding: 14, textAlign: 'center', border: '1px solid #f3f4f6' }}>
-                                            <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6 }}>{s.label}</div>
-                                            <div style={{ fontSize: 18, fontWeight: 700, color: colorMap[s.color] }}>{s.value}</div>
-                                            {s.sub && <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 2 }}>{s.sub}</div>}
-                                        </div>
-                                    ))}
+                                <div style={{ fontSize: 12, marginBottom: 8, display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+                                    <span>แผนก: <b>{daily.department || '-'}</b></span>
+                                    <span>เวลาเข้างาน: <b>{(daily.work_start_time || '').substring(0, 5)} น.</b></span>
+                                    <span>เวลาออกงาน: <b>{(daily.work_end_time || '').substring(0, 5) || '-'} น.</b></span>
                                 </div>
-                                {/* Leave breakdown */}
-                                {r.leave_by_type && r.leave_by_type.length > 0 && (
-                                    <div style={{ padding: '0 24px 24px' }}>
-                                        <div style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 8, paddingBottom: 8, borderBottom: '2px solid #e5e7eb' }}>รายละเอียดการลา</div>
-                                        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-                                            <tbody>
-                                                {r.leave_by_type.map(l => (
-                                                    <tr key={l.leave_type_id}>
-                                                        <td style={{ padding: '6px 0', color: '#374151' }}>• {l.leave_type_name}</td>
-                                                        <td style={{ padding: '6px 0', textAlign: 'right', color: '#7c3aed', fontWeight: 600 }}>{formatNum(l.days)} วัน</td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                )}
-                                {/* Total work hours */}
-                                <div style={{ background: '#f9fafb', padding: '14px 24px', borderTop: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <div style={{ fontSize: 13, color: '#6b7280' }}>ชั่วโมงทำงานรวม</div>
-                                    <div style={{ fontSize: 16, fontWeight: 700, color: '#111' }}>{formatTimeDuration(r.total_work_hours)}</div>
-                                </div>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                                    <thead>
+                                        <tr>
+                                            <th style={{ ...headBase, width: '11%' }}>วันที่</th>
+                                            <th style={{ ...headBase, width: '9%' }}>วัน</th>
+                                            <th style={{ ...headBase, width: '9%' }}>เข้างาน</th>
+                                            <th style={{ ...headBase, width: '9%' }}>ออกงาน</th>
+                                            <th style={{ ...headBase, width: '18%' }}>สถานะ</th>
+                                            <th style={{ ...headBase, width: '10%' }}>สาย (นาที)</th>
+                                            <th style={{ ...headBase, width: '11%' }}>ชม.ทำงาน</th>
+                                            <th style={{ ...headBase, width: '23%' }}>หมายเหตุ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {daily.days.map((r, idx) => {
+                                            const d = new Date(r.date);
+                                            const dateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear() + 543}`;
+                                            return (
+                                                <tr key={idx} style={{ background: rowBg(r) }}>
+                                                    <td style={{ ...cellBase, fontSize: 11 }}>{dateStr}</td>
+                                                    <td style={{ ...cellBase, fontSize: 11 }}>{dowNames[r.day_of_week] || ''}</td>
+                                                    <td style={{ ...cellBase, fontSize: 11, textAlign: 'right' }}>{r.clock_in ? r.clock_in.substring(0, 5) : '-'}</td>
+                                                    <td style={{ ...cellBase, fontSize: 11, textAlign: 'right' }}>{r.clock_out ? r.clock_out.substring(0, 5) : '-'}</td>
+                                                    <td style={{ ...cellBase, fontSize: 11, color: statusColor(r), fontWeight: r.status !== 'present' && r.status !== 'future' ? 600 : 400 }}>
+                                                        {statusLabel(r)}
+                                                    </td>
+                                                    <td style={{ ...cellBase, fontSize: 11, textAlign: 'right' }}>{r.late_minutes > 0 ? r.late_minutes : ''}</td>
+                                                    <td style={{ ...cellBase, fontSize: 11, textAlign: 'right' }}>{r.work_hours > 0 ? Math.round(r.work_hours * 10) / 10 : ''}</td>
+                                                    <td style={{ ...cellBase, fontSize: 10.5 }}>
+                                                        {r.holiday_name || (r.status === 'leave' && r.leave_type) || (r.status === 'absent' ? 'ไม่มาทำงาน' : '')}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                        <tr style={{ background: '#e5e7eb', fontWeight: 700 }}>
+                                            <td style={{ ...cellBase, fontSize: 12 }}>สรุป</td>
+                                            <td style={{ ...cellBase, fontSize: 11 }} colSpan={4}>
+                                                มา:{cntPresent}  สาย:{cntLate}  ขาด:{cntAbsent}  ลา:{cntLeave}
+                                            </td>
+                                            <td style={{ ...cellBase, fontSize: 11 }} colSpan={3}>
+                                                รวม {totalLateMin} นาที
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
                             </div>
                         );
                     })()}
@@ -1469,7 +1553,7 @@ const AdminAttendanceReportScreen: React.FC = () => {
             {pdfProgress && (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm">
                     <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl px-8 py-6 max-w-sm w-full mx-4 text-center">
-                        <span className="material-icons-round text-purple-500 text-5xl animate-pulse">folder_zip</span>
+                        <span className="material-icons-round text-purple-600 text-5xl animate-pulse">folder_zip</span>
                         <h3 className="text-base font-bold text-gray-900 dark:text-white mt-3">กำลัง Export PDF...</h3>
                         <p className="text-sm text-gray-500 mt-1">{pdfProgress.current} / {pdfProgress.total} ไฟล์</p>
                         <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2 mt-4 overflow-hidden">
