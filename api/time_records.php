@@ -36,49 +36,35 @@ function create_notification_tr($conn, $employee_id, $title, $message, $icon = '
 
 /**
  * Sync an approved time_record into the attendance table.
- * Uses INSERT … ON DUPLICATE KEY UPDATE so it works whether
- * the day already has an attendance row or not.
+ *
+ * Rules (driven by $req['correction_type']):
+ *   - 'clock_in'  → only update clock_in.  Existing clock_out is PRESERVED.
+ *   - 'clock_out' → only update clock_out. Existing clock_in is PRESERVED.
+ *   - 'both' / 'offsite' → update both, but if a side is null/00:00, the
+ *     existing value on that side is preserved (COALESCE).
+ *
+ * Defensive: '00:00:00' / '00:00' on the side that "shouldn't" be edited is
+ * treated as null — protects against form defaults like the workaround used
+ * for the time_records.clock_in_time NOT-NULL constraint.
  */
 function sync_to_attendance($conn, $req) {
     $emp_id   = $req['employee_id'];
     $date     = $req['record_date'];
-    $clockIn  = $req['clock_in_time'];
+    $clockIn  = $req['clock_in_time'] ?? null;
     $clockOut = $req['clock_out_time'] ?? null;
     $locName  = $req['location_name'] ?? 'บันทึกเวลาย้อนหลัง';
     $locText  = $locName ?: 'บันทึกเวลาย้อนหลัง';
     $correctionType = $req['correction_type'] ?? 'both';
     $isOffsite = ($correctionType === 'offsite') ? 1 : 0;
-    $source = 'request'; // Mark that this came from an approved time record
+    $source = 'request';
 
-    if ($correctionType === 'clock_out') {
-        // Clock-out only: update existing attendance record's clock_out
-        $stmt = $conn->prepare(
-            "UPDATE attendance SET clock_out = ?, location = CONCAT(IFNULL(location,''), ' / ', ?), 
-             clock_out_location_name = ?, source = ? WHERE employee_id = ? AND date = ?"
-        );
-        $stmt->bind_param('ssssss', $clockOut, $locText, $locName, $source, $emp_id, $date);
-        $stmt->execute();
-        // If no row was updated (no attendance record exists), create one with just clock_out
-        if ($stmt->affected_rows === 0) {
-            $stmt2 = $conn->prepare(
-                "INSERT INTO attendance (employee_id, date, clock_out, location, clock_out_location_name, source)
-                 VALUES (?, ?, ?, ?, ?, ?)"
-            );
-            $stmt2->bind_param('ssssss', $emp_id, $date, $clockOut, $locText, $locName, $source);
-            $stmt2->execute();
-        }
-    } elseif ($clockOut) {
-        // Both clock_in + clock_out (or offsite)
-        $stmt = $conn->prepare(
-            "INSERT INTO attendance (employee_id, date, clock_in, clock_out, location, location_name, is_offsite, source)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE clock_in = VALUES(clock_in), clock_out = VALUES(clock_out),
-                location = VALUES(location), location_name = VALUES(location_name),
-                is_offsite = VALUES(is_offsite), source = VALUES(source)"
-        );
-        $stmt->bind_param('ssssssis', $emp_id, $date, $clockIn, $clockOut, $locText, $locName, $isOffsite, $source);
-    } else {
-        // Clock-in only
+    // Treat '00:00[:00]' as missing — it's a sentinel from form defaults / NOT-NULL workaround
+    $isZeroTime = static function ($t) { return $t === '00:00:00' || $t === '00:00'; };
+    if ($isZeroTime($clockIn))  $clockIn  = null;
+    if ($isZeroTime($clockOut)) $clockOut = null;
+
+    if ($correctionType === 'clock_in') {
+        // Only update clock_in. Preserve existing clock_out via "do not include in UPDATE".
         $stmt = $conn->prepare(
             "INSERT INTO attendance (employee_id, date, clock_in, location, location_name, is_offsite, source)
              VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -87,7 +73,41 @@ function sync_to_attendance($conn, $req) {
                 is_offsite = VALUES(is_offsite), source = VALUES(source)"
         );
         $stmt->bind_param('sssssis', $emp_id, $date, $clockIn, $locText, $locName, $isOffsite, $source);
+        $stmt->execute();
+        return;
     }
+
+    if ($correctionType === 'clock_out') {
+        // Only update clock_out. Preserve existing clock_in.
+        $stmt = $conn->prepare(
+            "UPDATE attendance SET clock_out = ?, clock_out_location_name = ?, source = ?
+             WHERE employee_id = ? AND date = ?"
+        );
+        $stmt->bind_param('sssss', $clockOut, $locName, $source, $emp_id, $date);
+        $stmt->execute();
+        if ($stmt->affected_rows === 0) {
+            // No existing row — create with just clock_out (clock_in stays NULL)
+            $stmt2 = $conn->prepare(
+                "INSERT INTO attendance (employee_id, date, clock_out, clock_out_location_name, source)
+                 VALUES (?, ?, ?, ?, ?)"
+            );
+            $stmt2->bind_param('sssss', $emp_id, $date, $clockOut, $locName, $source);
+            $stmt2->execute();
+        }
+        return;
+    }
+
+    // 'both' or 'offsite' — update both. COALESCE keeps existing if new is null.
+    $stmt = $conn->prepare(
+        "INSERT INTO attendance (employee_id, date, clock_in, clock_out, location, location_name, is_offsite, source)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+            clock_in  = COALESCE(VALUES(clock_in),  clock_in),
+            clock_out = COALESCE(VALUES(clock_out), clock_out),
+            location = VALUES(location), location_name = VALUES(location_name),
+            is_offsite = VALUES(is_offsite), source = VALUES(source)"
+    );
+    $stmt->bind_param('ssssssis', $emp_id, $date, $clockIn, $clockOut, $locText, $locName, $isOffsite, $source);
     $stmt->execute();
 }
 
