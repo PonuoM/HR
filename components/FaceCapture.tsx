@@ -14,9 +14,14 @@ interface FaceCaptureProps {
     checkLocationFn?: (lat: number, lng: number) => Promise<{ matched: boolean; location_name: string; distance: number }>;
 }
 
-const MATCH_THRESHOLD = 0.55;
-const MIN_FACE_SIZE = 150;
+// Lowered from 0.55 — was admitting look-alikes (siblings, similar features).
+// 0.45 keeps legit users in while pushing FAR (false-accept rate) down sharply.
+const MATCH_THRESHOLD = 0.45;
+// Lowered from 150 — too strict for older phones / users sitting back.
+const MIN_FACE_SIZE = 120;
 const NO_FACE_TIMEOUT_MS = 15000;
+// Hard cap on getUserMedia so the screen never sits black indefinitely.
+const CAMERA_START_TIMEOUT_MS = 10000;
 
 // ───── Registration steps ─────
 type RegStep = 'center' | 'left' | 'right';
@@ -125,9 +130,14 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
         if (!modelsLoaded) return;
         const startCamera = async () => {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'user' }
-                });
+                // Race getUserMedia against a timeout so a hung permission prompt
+                // or unresponsive driver doesn't leave the user staring at black.
+                const stream = await Promise.race<MediaStream>([
+                    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } }),
+                    new Promise<MediaStream>((_, reject) =>
+                        setTimeout(() => reject(new Error('camera_timeout')), CAMERA_START_TIMEOUT_MS)
+                    ),
+                ]);
                 if (!mountedRef.current) {
                     stream.getTracks().forEach(t => t.stop());
                     return;
@@ -153,11 +163,19 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
                     setStatus('detecting');
                     setMessage(mode === 'register' ? REG_STEPS[0].instruction : 'กรุณาหันหน้าตรงกับกล้อง');
                 }
-            } catch (err) {
+            } catch (err: any) {
                 console.error('Camera error:', err);
                 if (!mountedRef.current) return;
                 setStatus('error');
-                setMessage('ไม่สามารถเปิดกล้องได้ กรุณาอนุญาตการเข้าถึงกล้อง');
+                if (err?.message === 'camera_timeout') {
+                    setMessage('กล้องเปิดไม่ตอบสนอง — กรุณาปิดแอปแล้วลองใหม่');
+                } else if (err?.name === 'NotAllowedError') {
+                    setMessage('ถูกปฏิเสธสิทธิ์กล้อง — เปิดสิทธิ์ในตั้งค่าเบราว์เซอร์ก่อน');
+                } else if (err?.name === 'NotFoundError') {
+                    setMessage('ไม่พบกล้อง — เครื่องนี้อาจไม่มีกล้องหน้า');
+                } else {
+                    setMessage('ไม่สามารถเปิดกล้องได้ กรุณาอนุญาตการเข้าถึงกล้อง');
+                }
             }
         };
         startCamera();
@@ -313,8 +331,10 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
                     }
                 }
 
+                // inputSize 416 (was 320): better detection on darker skin tones
+                // and small/distant faces — costs ~30% more CPU per frame.
                 const detection = await faceapi
-                    .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 }))
+                    .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.4 }))
                     .withFaceLandmarks()
                     .withFaceDescriptor();
 
@@ -541,8 +561,10 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
                     </div>
                 )}
 
-                {/* Loading overlay */}
-                {status === 'loading' && (
+                {/* Loading overlay — covers both model load AND camera-start gap.
+                    Without 'ready' here the user sees a black <video> for 1-3s
+                    after models finish but before getUserMedia resolves. */}
+                {(status === 'loading' || status === 'ready') && (
                     <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
                         <div className="text-center text-white">
                             <span className="material-icons-round text-5xl animate-spin mb-3 block">autorenew</span>
