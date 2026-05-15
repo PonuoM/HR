@@ -1,9 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { API_BASE, getAuthHeaders, getEmployees, getLeaveTypes, getLeaveQuotas, createLeaveRequestAsAdmin } from '../../services/api';
+import { API_BASE, getAuthHeaders, getEmployees, getLeaveTypes, getLeaveQuotas, createLeaveRequestAsAdmin, updateOtRate } from '../../services/api';
 import { useApi } from '../../hooks/useApi';
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 
@@ -50,6 +48,17 @@ interface ReportData {
     };
 }
 
+interface OtEntry {
+    id: number;
+    date: string;
+    start_time: string;
+    end_time: string;
+    hours: number;
+    ot_rate: number;
+    reason: string;
+    status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+}
+
 interface DailyRow {
     date: string;
     day_of_week: number;
@@ -60,6 +69,10 @@ interface DailyRow {
     work_hours: number;
     leave_type: string | null;
     holiday_name: string | null;
+    admin_note: string | null;
+    edited_by: string | null;
+    edited_at: string | null;
+    ot: OtEntry[];
 }
 
 interface DailyData {
@@ -70,6 +83,7 @@ interface DailyData {
     work_end_time: string;
     month: string;
     days: DailyRow[];
+    ot_entries: OtEntry[];
 }
 
 const DOW_TH = ['', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.', 'อา.'];
@@ -84,6 +98,205 @@ const STATUS_CONFIG: Record<string, { label: string; icon: string; bg: string; t
     future: { label: '-', icon: 'schedule', bg: 'bg-gray-50 dark:bg-gray-800/30', text: 'text-gray-400 dark:text-gray-500' },
     pre_hire: { label: 'ก่อนเข้างาน', icon: 'person_add_disabled', bg: 'bg-slate-100 dark:bg-slate-800/40', text: 'text-slate-500 dark:text-slate-400' },
 };
+
+// HTML escape — needed because we build a printable doc as a string and inject
+// employee data into it (admin_note, reasons, names are user-controllable).
+const esc = (s: any): string => String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+// Build a self-contained printable HTML doc for ALL employees' daily reports.
+// Browser renders text natively (vector) → far crisper than html2canvas.
+function buildPrintableReportHtml(
+    allDaily: { emp: ReportRow; daily: DailyData }[],
+    periodLabel: string
+): string {
+    const dowNames = ['', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์', 'อาทิตย์'];
+
+    const statusLabel = (r: DailyRow): string => {
+        if (r.status === 'leave' && r.leave_type) return `ลา (${r.leave_type})`;
+        if (r.status === 'holiday') return 'หยุดนักขัตฤกษ์';
+        return ({ present: 'มาทำงาน', late: 'สาย', absent: 'ขาดงาน', leave: 'ลา', weekend: 'วันหยุด', future: '-', pre_hire: 'ยังไม่เข้างาน' } as Record<string, string>)[r.status] || r.status;
+    };
+    const rowBgClass = (r: DailyRow): string => {
+        if (r.status === 'absent') return 'absent';
+        if (r.status === 'late') return 'late';
+        if (r.status === 'leave') return 'leave';
+        if (r.status === 'holiday') return 'holiday';
+        if (r.status === 'weekend') return 'weekend';
+        if (r.status === 'pre_hire') return 'pre';
+        return '';
+    };
+
+    const employeePages = allDaily.map(({ emp, daily }) => {
+        let cntPresent = 0, cntLate = 0, cntAbsent = 0, cntLeave = 0, totalLateMin = 0;
+        const otTotal: Record<string, number> = { '1.0': 0, '1.5': 0, '2.0': 0, '3.0': 0 };
+        let otRawHours = 0;
+        daily.days.forEach(r => {
+            if (r.status === 'present') cntPresent++;
+            else if (r.status === 'late') { cntLate++; totalLateMin += r.late_minutes || 0; }
+            else if (r.status === 'absent') cntAbsent++;
+            else if (r.status === 'leave') cntLeave++;
+            (r.ot || []).forEach(o => {
+                const key = Number(o.ot_rate).toFixed(1);
+                if (otTotal[key] !== undefined) otTotal[key] += o.hours || 0;
+                otRawHours += o.hours || 0;
+            });
+        });
+        const fmtOt = (v: number) => v > 0 ? (Math.round(v * 10) / 10).toString() : '';
+        const fmtT = (v: number) => v > 0 ? (Math.round(v * 10) / 10).toString() : '–';
+
+        const rowsHtml = daily.days.map(r => {
+            const d = new Date(r.date);
+            const dateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear() + 543}`;
+            const otByRate: Record<string, number> = { '1.0': 0, '1.5': 0, '2.0': 0, '3.0': 0 };
+            const otNotes: string[] = [];
+            (r.ot || []).forEach(o => {
+                const key = Number(o.ot_rate).toFixed(1);
+                if (otByRate[key] !== undefined) otByRate[key] += o.hours || 0;
+                if (o.reason) otNotes.push(o.reason);
+            });
+            const noteParts: string[] = [];
+            if (r.holiday_name) noteParts.push(r.holiday_name);
+            if (r.status === 'leave' && r.leave_type) noteParts.push(r.leave_type);
+            if (r.status === 'absent') noteParts.push('ไม่มาทำงาน');
+            if (r.admin_note) noteParts.push('✎ ' + r.admin_note);
+
+            return `<tr class="${rowBgClass(r)}">
+                <td class="c">${esc(dateStr)}</td>
+                <td class="c">${esc(dowNames[r.day_of_week] || '')}</td>
+                <td class="c${r.status === 'late' ? ' b' : ''}">${esc(r.clock_in ? r.clock_in.substring(0, 5) : '-')}</td>
+                <td class="c">${esc(r.clock_out ? r.clock_out.substring(0, 5) : '-')}</td>
+                <td class="${r.status === 'late' || r.status === 'absent' ? 'b' : ''}">${esc(statusLabel(r))}</td>
+                <td class="c">${r.late_minutes > 0 ? r.late_minutes : ''}</td>
+                <td class="c">${r.work_hours > 0 ? Math.round(r.work_hours * 10) / 10 : ''}</td>
+                <td class="c ot">${fmtOt(otByRate['1.0'])}</td>
+                <td class="c ot">${fmtOt(otByRate['1.5'])}</td>
+                <td class="c ot">${fmtOt(otByRate['2.0'])}</td>
+                <td class="c ot">${fmtOt(otByRate['3.0'])}</td>
+                <td class="n">${esc(otNotes.join(' • '))}</td>
+                <td class="n">${esc(noteParts.join(' • '))}</td>
+            </tr>`;
+        }).join('');
+
+        return `<section class="page">
+            <h1>รายงานเข้างานรายวัน — ${esc(periodLabel)}</h1>
+            <div class="meta">พนักงาน: <b>${esc(daily.employee_name)}</b> (${esc(daily.employee_id)})</div>
+            <div class="meta">
+                แผนก: <b>${esc(daily.department || '-')}</b>
+                &nbsp;&nbsp;&nbsp;เวลาเข้างาน: <b>${esc((daily.work_start_time || '').substring(0, 5))} น.</b>
+                &nbsp;&nbsp;&nbsp;เวลาออกงาน: <b>${esc((daily.work_end_time || '').substring(0, 5) || '-')} น.</b>
+            </div>
+            <table>
+                <colgroup>
+                    <col style="width:7%"><col style="width:5%"><col style="width:6%"><col style="width:6%">
+                    <col style="width:14%"><col style="width:6%"><col style="width:8%">
+                    <col style="width:5%"><col style="width:5%"><col style="width:5%"><col style="width:5%">
+                    <col style="width:11%"><col style="width:17%">
+                </colgroup>
+                <thead>
+                    <tr>
+                        <th rowspan="2">วันที่</th>
+                        <th rowspan="2">วัน</th>
+                        <th rowspan="2">เข้างาน</th>
+                        <th rowspan="2">ออกงาน</th>
+                        <th rowspan="2">สถานะ</th>
+                        <th rowspan="2">สาย (นาที)</th>
+                        <th rowspan="2">ชม.ทำงาน</th>
+                        <th colspan="4">OT (เวลา / อัตรา / ชม.)</th>
+                        <th rowspan="2">หมายเหตุ OT</th>
+                        <th rowspan="2">หมายเหตุ</th>
+                    </tr>
+                    <tr>
+                        <th>1</th><th>1.5</th><th>2</th><th>3</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rowsHtml}
+                    <tr class="sum">
+                        <td class="c"><b>สรุป</b></td>
+                        <td colspan="4"><b>มา:${cntPresent}&nbsp;&nbsp;สาย:${cntLate}&nbsp;&nbsp;ขาด:${cntAbsent}&nbsp;&nbsp;ลา:${cntLeave}</b></td>
+                        <td colspan="2" style="text-align:right"><b>สายรวม ${totalLateMin} นาที</b></td>
+                        <td class="c"><b>${fmtT(otTotal['1.0'])}</b></td>
+                        <td class="c"><b>${fmtT(otTotal['1.5'])}</b></td>
+                        <td class="c"><b>${fmtT(otTotal['2.0'])}</b></td>
+                        <td class="c"><b>${fmtT(otTotal['3.0'])}</b></td>
+                        <td colspan="2" class="c"><b>OT รวม ${Math.round(otRawHours * 10) / 10} ชม.</b></td>
+                    </tr>
+                </tbody>
+            </table>
+            <p class="foot">หมายเหตุ: ชั่วโมง OT แสดงในช่องอัตราที่ตรง (×1 / ×1.5 / ×2 / ×3) — ฝ่ายบัญชีนำไปคำนวณเงินเองตามอัตรา</p>
+        </section>`;
+    }).join('');
+
+    return `<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>รายงานเข้างานรายวัน — ${esc(periodLabel)}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #fff; color: #000; font-family: "Sarabun", "TH Sarabun New", "Tahoma", sans-serif; }
+    .page { padding: 0; page-break-after: always; page-break-inside: avoid; }
+    .page:last-child { page-break-after: auto; }
+    h1 { font-size: 12pt; font-weight: 700; margin: 0 0 2px 0; }
+    .meta { font-size: 9.5pt; margin: 0 0 1px 0; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; margin-top: 4px; font-size: 9.5pt; }
+    th, td { border: 1px solid #000; padding: 1px 5px; vertical-align: middle; line-height: 1.3; }
+    /* Notes: single-line with ellipsis so rows stay uniform height */
+    td.n {
+        font-size: 9pt;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    th { background: #d1d5db; font-weight: 700; text-align: center; font-size: 9.5pt; }
+    td.c { text-align: center; }
+    td.b { font-weight: 700; }
+    td.ot { font-weight: 600; text-align: center; }
+    tr { page-break-inside: avoid; }
+    tr.late td { background: #e5e7eb; }
+    tr.absent td { background: #d1d5db; }
+    tr.leave td { background: #ededed; }
+    tr.holiday td { background: #f3f4f6; }
+    tr.weekend td { background: #f9fafb; }
+    tr.pre td { background: #fafafa; }
+    tr.sum td { background: #9ca3af; font-weight: 700; }
+    .foot { font-size: 7.5pt; color: #374151; margin-top: 2px; }
+    /* Print-specific */
+    @page { size: A4 landscape; margin: 6mm; }
+    @media print {
+        .toolbar { display: none !important; }
+        body { padding-top: 0 !important; }
+    }
+    /* Onscreen toolbar with hint */
+    .toolbar { position: fixed; top: 0; left: 0; right: 0; background: #1f2937; color: #fff; padding: 8px 16px; font-size: 13px; display: flex; align-items: center; gap: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); z-index: 1000; }
+    .toolbar button { background: #3b82f6; color: #fff; border: 0; padding: 6px 14px; border-radius: 4px; font: inherit; cursor: pointer; }
+    .toolbar button:hover { background: #2563eb; }
+    body { padding-top: 44px; }
+    /* Visual page mock onscreen — invisible in print (resets to @page margin) */
+    .page { padding: 8mm 6mm; margin: 12px auto; max-width: 297mm; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.15); }
+    @media print {
+        .page { padding: 0; margin: 0; max-width: none; box-shadow: none; }
+    }
+</style>
+</head>
+<body>
+<div class="toolbar">
+    <span>📄 พรีวิว — กด <b>Print</b> เพื่อบันทึกเป็น PDF</span>
+    <button onclick="window.print()">🖨️ Print / Save PDF</button>
+    <button onclick="window.close()" style="background:#6b7280">ปิด</button>
+</div>
+${employeePages}
+</body>
+</html>`;
+}
 
 const formatNum = (v: any) => {
     const n = Number(v);
@@ -178,13 +391,13 @@ const AdminAttendanceReportScreen: React.FC = () => {
     const [editingDate, setEditingDate] = useState<string | null>(null);
     const [editClockIn, setEditClockIn] = useState('');
     const [editClockOut, setEditClockOut] = useState('');
+    const [editAdminNote, setEditAdminNote] = useState('');
     const [isSavingEdit, setIsSavingEdit] = useState(false);
+    // Per-OT-entry rate update in-flight (entry id → boolean)
+    const [otRateUpdating, setOtRateUpdating] = useState<Record<number, boolean>>({});
 
-    // ── PDF export state (per-employee daily report → ZIP) ──
+    // ── PDF export progress (batch HTML generation → ZIP) ──
     const [pdfProgress, setPdfProgress] = useState<{ current: number; total: number } | null>(null);
-    // The daily data + employee meta for the currently-rendering PDF (offscreen)
-    const [pdfRenderData, setPdfRenderData] = useState<{ emp: ReportRow; daily: DailyData } | null>(null);
-    const pdfCardRef = useRef<HTMLDivElement>(null);
 
     // ── HR record-leave-on-behalf modal state ──
     const [recordLeaveFor, setRecordLeaveFor] = useState<{ id: string; name: string } | null>(null);
@@ -351,7 +564,8 @@ const AdminAttendanceReportScreen: React.FC = () => {
                     target_employee_id: detailEmpId,
                     date,
                     clock_in: editClockIn || null,
-                    clock_out: editClockOut || null
+                    clock_out: editClockOut || null,
+                    admin_note: editAdminNote, // empty string => clear, content => save
                 })
             });
             const d = await res.json();
@@ -367,6 +581,20 @@ const AdminAttendanceReportScreen: React.FC = () => {
             setIsSavingEdit(false);
         }
     };
+
+    // HR changes OT rate inline on an entry (excel-style, no modal)
+    const handleChangeOtRate = useCallback(async (entryId: number, newRate: number) => {
+        setOtRateUpdating(prev => ({ ...prev, [entryId]: true }));
+        try {
+            await updateOtRate(entryId, newRate);
+            fetchDetailData(true);
+            refetchReport(); // OT total on outer table may change
+        } catch (e: any) {
+            alert(e?.message || 'อัปเดตอัตรา OT ไม่สำเร็จ');
+        } finally {
+            setOtRateUpdating(prev => { const n = { ...prev }; delete n[entryId]; return n; });
+        }
+    }, [fetchDetailData, refetchReport]);
 
     // Get leave days for a specific type
     const getLeave = (row: ReportRow, typeId: number) => {
@@ -531,109 +759,127 @@ const AdminAttendanceReportScreen: React.FC = () => {
         return `ปี ${selectedYear + 543}`;
     }, [viewMode, selectedMonth, selectedYear, cutoffMode, customDateFrom, customDateTo]);
 
-    // Export each employee's daily attendance as a PDF, bundled into a ZIP.
-    // Renders the same Excel-style daily table that's shown in the modal,
-    // captures via html2canvas (preserves Thai text), and embeds in jsPDF.
+    // Build the date-range query the daily endpoint expects
+    const dailyDateParam = useMemo(() => {
+        if (viewMode === 'custom') return `date_from=${customDateFrom}&date_to=${customDateTo}`;
+        if (viewMode === 'monthly') return cutoffMode ? `cutoff_month=${selectedMonth}` : `month=${selectedMonth}`;
+        return `date_from=${selectedYear}-01-01&date_to=${selectedYear}-12-31`;
+    }, [viewMode, selectedMonth, selectedYear, cutoffMode, customDateFrom, customDateTo]);
+
+    // Export each employee's daily report as a real PDF (server-side mPDF render),
+    // bundled into a ZIP. Backend endpoint /api/attendance_pdf.php produces vector
+    // PDFs with embedded Sarabun font — crisp text + proper Thai diacritics. HR
+    // gets ZIP of .pdf files ready to attach in chat / email.
     const exportPdfZip = useCallback(async () => {
         if (!report || report.length === 0) {
             alert('ไม่มีข้อมูลพนักงานให้ export');
             return;
         }
-        if (!confirm(`Export PDF จำนวน ${report.length} ไฟล์ (รวมเป็น ZIP)?\nอาจใช้เวลา ${Math.ceil(report.length * 1.5)}-${report.length * 3} วินาที`)) return;
+        if (!confirm(`Export PDF จำนวน ${report.length} ไฟล์ (รวมเป็น ZIP)?`)) return;
 
         setShowExportMenu(false);
         const targets = report;
         setPdfProgress({ current: 0, total: targets.length });
         const zip = new JSZip();
 
-        // Build the date-range query the daily endpoint expects
-        let dateParam: string;
-        if (viewMode === 'custom') {
-            dateParam = `date_from=${customDateFrom}&date_to=${customDateTo}`;
-        } else if (viewMode === 'monthly') {
-            dateParam = cutoffMode ? `cutoff_month=${selectedMonth}` : `month=${selectedMonth}`;
-        } else {
-            dateParam = `date_from=${selectedYear}-01-01&date_to=${selectedYear}-12-31`;
-        }
-
         try {
-            for (let i = 0; i < targets.length; i++) {
-                const emp = targets[i];
-
-                // Fetch daily detail for this employee
-                let daily: DailyData | null = null;
-                try {
-                    const res = await fetch(
-                        `${API_BASE}/attendance_report.php?action=daily&${dateParam}&employee_id=${emp.employee_id}`,
-                        { headers: getAuthHeaders() }
-                    );
-                    daily = await res.json();
-                } catch {
-                    setPdfProgress({ current: i + 1, total: targets.length });
-                    continue;
-                }
-                if (!daily || !daily.days) {
-                    setPdfProgress({ current: i + 1, total: targets.length });
-                    continue;
-                }
-
-                // Render the offscreen template for this employee
-                setPdfRenderData({ emp, daily });
-                // 2 frames so React commits + browser paints
-                await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-
-                const node = pdfCardRef.current;
-                if (!node) {
-                    setPdfProgress({ current: i + 1, total: targets.length });
-                    continue;
-                }
-
-                const canvas = await html2canvas(node, {
-                    scale: 2,
-                    backgroundColor: '#ffffff',
-                    logging: false,
+            // Fetch PDF blobs in parallel batches of 3 (PDF render is heavier than JSON)
+            const batchSize = 3;
+            for (let i = 0; i < targets.length; i += batchSize) {
+                const batch = targets.slice(i, i + batchSize);
+                const results = await Promise.all(batch.map(async emp => {
+                    try {
+                        const res = await fetch(
+                            `${API_BASE}/attendance_pdf.php?${dailyDateParam}&employee_id=${emp.employee_id}`,
+                            { headers: getAuthHeaders() }
+                        );
+                        if (!res.ok) return null;
+                        const blob = await res.blob();
+                        return { emp, blob };
+                    } catch { return null; }
+                }));
+                results.forEach(r => {
+                    if (!r) return;
+                    const safeName = (r.emp.employee_name || r.emp.employee_id).replace(/[^\w฀-๿\s.-]/g, '').trim() || r.emp.employee_id;
+                    zip.file(`${r.emp.employee_id}_${safeName}.pdf`, r.blob);
                 });
-                const imgData = canvas.toDataURL('image/jpeg', 0.92);
-
-                // Portrait A4; scale image width to page, height proportional
-                const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-                const pageW = pdf.internal.pageSize.getWidth();
-                const pageH = pdf.internal.pageSize.getHeight();
-                const imgW = pageW;
-                const imgH = (canvas.height * imgW) / canvas.width;
-
-                if (imgH <= pageH) {
-                    // Fits on one page
-                    pdf.addImage(imgData, 'JPEG', 0, 0, imgW, imgH);
-                } else {
-                    // Multi-page: slice the image into page-height chunks
-                    let remainingH = imgH;
-                    let position = 0;
-                    while (remainingH > 0) {
-                        pdf.addImage(imgData, 'JPEG', 0, position, imgW, imgH);
-                        remainingH -= pageH;
-                        position -= pageH;
-                        if (remainingH > 0) pdf.addPage();
-                    }
-                }
-
-                const blob = pdf.output('blob');
-                const safeName = (emp.employee_name || emp.employee_id).replace(/[^\w฀-๿\s.-]/g, '').trim() || emp.employee_id;
-                zip.file(`${emp.employee_id}_${safeName}.pdf`, blob);
-
-                setPdfProgress({ current: i + 1, total: targets.length });
+                setPdfProgress({ current: Math.min(i + batchSize, targets.length), total: targets.length });
             }
 
-            setPdfRenderData(null);
             const zipBlob = await zip.generateAsync({ type: 'blob' });
             saveAs(zipBlob, `attendance_${periodSlug}.zip`);
         } catch (err: any) {
             alert(`Export ไม่สำเร็จ: ${err?.message || err}`);
         } finally {
             setPdfProgress(null);
-            setPdfRenderData(null);
         }
-    }, [report, periodSlug, viewMode, selectedMonth, selectedYear, cutoffMode, customDateFrom, customDateTo]);
+    }, [report, periodSlug, dailyDateParam]);
+
+    // Preview ALL employees' daily reports as a NATIVE HTML page in a new tab.
+    // User hits Ctrl+P / Cmd+P → Save as PDF. Text/borders render at native browser
+    // quality (vector + crisp), not rasterized — Thai diacritics & หัว stay sharp.
+    const previewPdfAll = useCallback(async () => {
+        if (!report || report.length === 0) {
+            alert('ไม่มีข้อมูลพนักงานให้พรีวิว');
+            return;
+        }
+        setShowExportMenu(false);
+        const targets = report;
+        setPdfProgress({ current: 0, total: targets.length });
+
+        try {
+            // Fetch daily detail for every employee in parallel batches of 5
+            // to avoid overwhelming the server.
+            const allDaily: { emp: ReportRow; daily: DailyData }[] = [];
+            const batchSize = 5;
+            for (let i = 0; i < targets.length; i += batchSize) {
+                const batch = targets.slice(i, i + batchSize);
+                const results = await Promise.all(batch.map(async emp => {
+                    try {
+                        const res = await fetch(
+                            `${API_BASE}/attendance_report.php?action=daily&${dailyDateParam}&employee_id=${emp.employee_id}`,
+                            { headers: getAuthHeaders() }
+                        );
+                        return { emp, daily: await res.json() as DailyData };
+                    } catch {
+                        return null;
+                    }
+                }));
+                results.forEach(r => { if (r && r.daily?.days) allDaily.push(r); });
+                setPdfProgress({ current: Math.min(i + batchSize, targets.length), total: targets.length });
+            }
+
+            // Build self-contained HTML and open in new tab
+            const html = buildPrintableReportHtml(allDaily, periodLabelText);
+            const win = window.open('', '_blank');
+            if (!win) {
+                alert('เบราว์เซอร์บล็อก popup — กรุณาอนุญาต popup สำหรับเว็บนี้');
+                return;
+            }
+            win.document.open();
+            win.document.write(html);
+            win.document.close();
+            // Trigger the print dialog automatically after the page finishes loading
+            // (fonts ready ensures Sarabun is fully loaded before printing).
+            const triggerPrint = () => {
+                try {
+                    if ((win.document as any).fonts?.ready) {
+                        (win.document as any).fonts.ready.then(() => {
+                            setTimeout(() => { try { win.focus(); win.print(); } catch {} }, 300);
+                        });
+                    } else {
+                        setTimeout(() => { try { win.focus(); win.print(); } catch {} }, 800);
+                    }
+                } catch {}
+            };
+            if (win.document.readyState === 'complete') triggerPrint();
+            else win.addEventListener('load', triggerPrint);
+        } catch (err: any) {
+            alert(`พรีวิวไม่สำเร็จ: ${err?.message || err}`);
+        } finally {
+            setPdfProgress(null);
+        }
+    }, [report, dailyDateParam, periodLabelText]);
 
     // Open daily detail — seed modal-local dates from outer filter
     const openDetail = (empId: string) => {
@@ -679,13 +925,14 @@ const AdminAttendanceReportScreen: React.FC = () => {
                                 </a>
                                 <button
                                     type="button"
-                                    onClick={() => { setShowExportMenu(false); setTimeout(() => window.print(), 100); }}
-                                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors text-sm text-gray-700 dark:text-gray-200 border-t border-gray-100 dark:border-gray-700"
+                                    onClick={previewPdfAll}
+                                    disabled={pdfProgress !== null}
+                                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors text-sm text-gray-700 dark:text-gray-200 border-t border-gray-100 dark:border-gray-700 disabled:opacity-50"
                                 >
                                     <span className="material-icons-round text-red-500 text-lg">picture_as_pdf</span>
                                     <div className="text-left">
-                                        <div className="font-semibold">พิมพ์ / บันทึก PDF (รวม)</div>
-                                        <div className="text-xs text-gray-400">ใช้ Print Dialog → "Save as PDF"</div>
+                                        <div className="font-semibold">พรีวิว PDF (รวมทุกคน)</div>
+                                        <div className="text-xs text-gray-400">เปิดดูในแท็บใหม่ — กด Save / Print เองได้</div>
                                     </div>
                                 </button>
                                 <button
@@ -697,7 +944,7 @@ const AdminAttendanceReportScreen: React.FC = () => {
                                     <span className="material-icons-round text-purple-600 text-lg">folder_zip</span>
                                     <div className="text-left">
                                         <div className="font-semibold">PDF ละคน (ZIP)</div>
-                                        <div className="text-xs text-gray-400">1 ไฟล์ .pdf / พนักงาน — รายวัน + summary</div>
+                                        <div className="text-xs text-gray-400">1 ไฟล์ .pdf / พนักงาน — ส่งทางแชท/อีเมลได้เลย</div>
                                     </div>
                                 </button>
                                 {viewMode === 'monthly' && (
@@ -1209,7 +1456,7 @@ const AdminAttendanceReportScreen: React.FC = () => {
             {/* ═══ DAILY DETAIL MODAL ═══ */}
             {detailEmpId && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setDetailEmpId(null)}>
-                    <div className="bg-white dark:bg-gray-900 w-full max-w-2xl max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden animate-scale-in flex flex-col" onClick={e => e.stopPropagation()}>
+                    <div className="bg-white dark:bg-gray-900 w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden animate-scale-in flex flex-col" onClick={e => e.stopPropagation()}>
                         {/* Modal Header */}
                         <div className="p-4 border-b border-gray-100 dark:border-gray-800 shrink-0">
                             <div className="flex items-start justify-between gap-3">
@@ -1252,6 +1499,59 @@ const AdminAttendanceReportScreen: React.FC = () => {
                                 </div>
                             ) : detailData ? (
                                 <>
+                                    {/* OT Summary Card */}
+                                    {detailData.ot_entries && detailData.ot_entries.length > 0 && (() => {
+                                        const totalHours = detailData.ot_entries.reduce((s, e) => s + (e.hours || 0), 0);
+                                        return (
+                                            <div className="mb-4 rounded-xl border border-cyan-100 dark:border-cyan-900/40 bg-cyan-50/50 dark:bg-cyan-900/10 p-3">
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="material-icons-round text-cyan-600 dark:text-cyan-400 text-base">bolt</span>
+                                                        <span className="text-sm font-bold text-cyan-700 dark:text-cyan-300">OT ในช่วงนี้</span>
+                                                    </div>
+                                                    <span className="text-xs text-cyan-700 dark:text-cyan-300 font-semibold">
+                                                        {detailData.ot_entries.length} รายการ • รวม {formatTimeDuration(totalHours)}
+                                                    </span>
+                                                </div>
+                                                <div className="space-y-1.5">
+                                                    {detailData.ot_entries.map(e => {
+                                                        const d = new Date(e.date);
+                                                        const dateLabel = `${d.getDate()}/${d.getMonth() + 1} (${DOW_TH[((d.getDay() + 6) % 7) + 1]})`;
+                                                        const updating = !!otRateUpdating[e.id];
+                                                        return (
+                                                            <div key={e.id} className="flex items-center gap-2 text-xs bg-white dark:bg-gray-800 rounded-lg px-2 py-1.5 border border-cyan-100/60 dark:border-cyan-900/30">
+                                                                <span className="font-semibold text-gray-700 dark:text-gray-200 w-[68px]">{dateLabel}</span>
+                                                                <span className="font-mono text-gray-500">{e.start_time}–{e.end_time}</span>
+                                                                <span className="text-cyan-700 dark:text-cyan-300 font-semibold">{formatTimeDuration(e.hours)}</span>
+                                                                <select
+                                                                    value={Number(e.ot_rate).toFixed(1)}
+                                                                    onChange={ev => handleChangeOtRate(e.id, parseFloat(ev.target.value))}
+                                                                    disabled={updating}
+                                                                    className="ml-auto px-1.5 py-0.5 rounded border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-[11px] font-semibold text-cyan-700 dark:text-cyan-300 focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:opacity-50"
+                                                                    title="คลิกเพื่อเปลี่ยนอัตรา OT"
+                                                                >
+                                                                    <option value="1.0">×1.0</option>
+                                                                    <option value="1.5">×1.5</option>
+                                                                    <option value="2.0">×2.0</option>
+                                                                    <option value="3.0">×3.0</option>
+                                                                </select>
+                                                                {e.status === 'pending' && (
+                                                                    <span className="px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-[9px] font-bold">รออนุมัติ</span>
+                                                                )}
+                                                                {e.status === 'rejected' && (
+                                                                    <span className="px-1.5 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-[9px] font-bold">ปฏิเสธ</span>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                                <p className="text-[10px] text-cyan-600/70 dark:text-cyan-400/70 mt-2 leading-snug">
+                                                    HR แก้อัตราได้ทันที (×1 / ×1.5 / ×2 / ×3) ระบบจะอัปเดตทั่วทั้งรายงาน
+                                                </p>
+                                            </div>
+                                        );
+                                    })()}
+
                                     {/* Legend */}
                                     <div className="flex flex-wrap gap-2 mb-4">
                                         {['present', 'late', 'leave', 'absent', 'holiday', 'weekend'].map(s => {
@@ -1266,8 +1566,8 @@ const AdminAttendanceReportScreen: React.FC = () => {
                                     </div>
 
                                     {/* Daily Table */}
-                                    <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-                                        <table className="w-full text-sm">
+                                    <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-x-auto">
+                                        <table className="w-full text-sm min-w-[720px]">
                                             <thead>
                                                 <tr className="bg-gray-50 dark:bg-gray-800/80 text-[11px] text-gray-500 uppercase tracking-wider">
                                                     <th className="p-2 text-left font-semibold">วันที่</th>
@@ -1275,6 +1575,7 @@ const AdminAttendanceReportScreen: React.FC = () => {
                                                     <th className="p-2 text-center font-semibold">เข้า</th>
                                                     <th className="p-2 text-center font-semibold">ออก</th>
                                                     <th className="p-2 text-center font-semibold">เวลาทำงาน</th>
+                                                    <th className="p-2 text-center font-semibold">OT</th>
                                                     <th className="p-2 text-left font-semibold">หมายเหตุ</th>
                                                 </tr>
                                             </thead>
@@ -1283,64 +1584,95 @@ const AdminAttendanceReportScreen: React.FC = () => {
                                                     const cfg = STATUS_CONFIG[day.status] || STATUS_CONFIG.future;
                                                     const dateObj = new Date(day.date);
                                                     const isWeekendOrHoliday = day.status === 'weekend' || day.status === 'holiday';
+                                                    const isEditing = editingDate === day.date;
                                                     return (
-                                                                <tr key={day.date} className={`${isWeekendOrHoliday ? 'opacity-60' : ''} ${day.status === 'absent' ? 'bg-red-50/50 dark:bg-red-900/10' : ''} ${day.status === 'late' ? 'bg-orange-50/50 dark:bg-orange-900/10' : ''}`}>
-                                                                    <td className="p-2">
-                                                                        <span className="font-semibold text-gray-900 dark:text-white">{dateObj.getDate()}</span>
-                                                                        <span className={`ml-1 text-xs ${day.day_of_week >= 6 ? 'text-red-400' : 'text-gray-400'}`}>
-                                                                            {DOW_TH[day.day_of_week]}
-                                                                        </span>
-                                                                    </td>
-                                                                    <td className="p-2 text-center">
-                                                                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${cfg.bg} ${cfg.text}`}>
-                                                                            <span className="material-icons-round text-xs">{cfg.icon}</span>
-                                                                            {cfg.label}
-                                                                        </span>
-                                                                    </td>
-                                                                    <td className={`p-2 text-center text-xs font-mono ${day.status === 'late' ? 'text-orange-600 font-bold' : 'text-gray-600 dark:text-gray-300'}`}>
-                                                                        {editingDate === day.date ? (
-                                                                            <input type="time" value={editClockIn} onChange={e => setEditClockIn(e.target.value)} className="w-[75px] px-1 py-0.5 bg-gray-100 dark:bg-gray-800 border-none rounded outline-none focus:ring-1 focus:ring-primary text-center text-primary font-semibold" />
-                                                                        ) : (
-                                                                            fmtTime(day.clock_in)
-                                                                        )}
-                                                                    </td>
-                                                                    <td className="p-2 text-center text-xs font-mono text-gray-600 dark:text-gray-300">
-                                                                        {editingDate === day.date ? (
-                                                                            <input type="time" value={editClockOut} onChange={e => setEditClockOut(e.target.value)} className="w-[75px] px-1 py-0.5 bg-gray-100 dark:bg-gray-800 border-none rounded outline-none focus:ring-1 focus:ring-primary text-center text-primary font-semibold" />
-                                                                        ) : (
-                                                                            fmtTime(day.clock_out)
-                                                                        )}
-                                                                    </td>
-                                                                    <td className="p-2 text-center text-xs text-gray-600 dark:text-gray-300">
-                                                                        {formatTimeDuration(day.work_hours)}
-                                                                    </td>
-                                                                    <td className="p-2 text-xs text-gray-500 flex items-center justify-between">
-                                                                        <span>
+                                                        <tr key={day.date} className={`${isWeekendOrHoliday ? 'opacity-60' : ''} ${day.status === 'absent' ? 'bg-red-50/50 dark:bg-red-900/10' : ''} ${day.status === 'late' ? 'bg-orange-50/50 dark:bg-orange-900/10' : ''}`}>
+                                                            <td className="p-2 whitespace-nowrap">
+                                                                <span className="font-semibold text-gray-900 dark:text-white">{dateObj.getDate()}</span>
+                                                                <span className={`ml-1 text-xs ${day.day_of_week >= 6 ? 'text-red-400' : 'text-gray-400'}`}>
+                                                                    {DOW_TH[day.day_of_week]}
+                                                                </span>
+                                                            </td>
+                                                            <td className="p-2 text-center">
+                                                                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${cfg.bg} ${cfg.text}`}>
+                                                                    <span className="material-icons-round text-xs">{cfg.icon}</span>
+                                                                    {cfg.label}
+                                                                </span>
+                                                            </td>
+                                                            <td className={`p-2 text-center text-xs font-mono ${day.status === 'late' ? 'text-orange-600 font-bold' : 'text-gray-600 dark:text-gray-300'}`}>
+                                                                {isEditing ? (
+                                                                    <input type="time" value={editClockIn} onChange={e => setEditClockIn(e.target.value)} className="w-[75px] px-1 py-0.5 bg-gray-100 dark:bg-gray-800 border-none rounded outline-none focus:ring-1 focus:ring-primary text-center text-primary font-semibold" />
+                                                                ) : (
+                                                                    fmtTime(day.clock_in)
+                                                                )}
+                                                            </td>
+                                                            <td className="p-2 text-center text-xs font-mono text-gray-600 dark:text-gray-300">
+                                                                {isEditing ? (
+                                                                    <input type="time" value={editClockOut} onChange={e => setEditClockOut(e.target.value)} className="w-[75px] px-1 py-0.5 bg-gray-100 dark:bg-gray-800 border-none rounded outline-none focus:ring-1 focus:ring-primary text-center text-primary font-semibold" />
+                                                                ) : (
+                                                                    fmtTime(day.clock_out)
+                                                                )}
+                                                            </td>
+                                                            <td className="p-2 text-center text-xs text-gray-600 dark:text-gray-300 whitespace-nowrap">
+                                                                {formatTimeDuration(day.work_hours)}
+                                                            </td>
+                                                            <td className="p-2 text-center text-[11px] whitespace-nowrap">
+                                                                {day.ot && day.ot.length > 0 ? (
+                                                                    <div className="flex flex-col gap-0.5 items-center">
+                                                                        {day.ot.map(o => (
+                                                                            <span key={o.id} className="font-mono text-cyan-700 dark:text-cyan-300">
+                                                                                {o.start_time}–{o.end_time}
+                                                                                <span className="ml-1 font-sans font-bold">×{Number(o.ot_rate).toFixed(1)}</span>
+                                                                            </span>
+                                                                        ))}
+                                                                    </div>
+                                                                ) : (
+                                                                    <span className="text-gray-300">–</span>
+                                                                )}
+                                                            </td>
+                                                            <td className="p-2 text-xs text-gray-500">
+                                                                {isEditing ? (
+                                                                    <div className="flex items-center gap-1.5">
+                                                                        <input
+                                                                            type="text"
+                                                                            value={editAdminNote}
+                                                                            onChange={e => setEditAdminNote(e.target.value.slice(0, 200))}
+                                                                            placeholder="หมายเหตุ HR..."
+                                                                            className="flex-1 min-w-0 px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 border-none rounded text-[11px] outline-none focus:ring-1 focus:ring-primary text-gray-700 dark:text-gray-200"
+                                                                        />
+                                                                        <button onClick={() => handleSaveEdit(day.date)} disabled={isSavingEdit} className="flex items-center justify-center w-6 h-6 rounded-full bg-green-50 text-green-600 hover:bg-green-100 dark:bg-green-900/30 dark:text-green-400 disabled:opacity-50 transition-colors shrink-0">
+                                                                            <span className="material-icons-round text-[14px]">check</span>
+                                                                        </button>
+                                                                        <button onClick={() => setEditingDate(null)} className="flex items-center justify-center w-6 h-6 rounded-full bg-gray-50 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 transition-colors shrink-0">
+                                                                            <span className="material-icons-round text-[14px]">close</span>
+                                                                        </button>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="flex items-start justify-between gap-1">
+                                                                        <div className="flex-1 min-w-0">
                                                                             {day.status === 'late' && <span className="text-orange-600 mr-2">สาย {formatMinutesDuration(day.late_minutes)}</span>}
                                                                             {day.status === 'leave' && <span className="text-purple-600 mr-2">{day.leave_type}</span>}
                                                                             {day.status === 'holiday' && <span className="text-blue-600 mr-2">{day.holiday_name}</span>}
                                                                             {day.status === 'absent' && <span className="text-red-600 mr-2">ไม่มาทำงาน</span>}
-                                                                        </span>
-                                                                        {editingDate === day.date ? (
-                                                                            <div className="flex items-center gap-2">
-                                                                                <button onClick={() => handleSaveEdit(day.date)} disabled={isSavingEdit} className="flex items-center justify-center w-6 h-6 rounded-full bg-green-50 text-green-600 hover:bg-green-100 dark:bg-green-900/30 dark:text-green-400 disabled:opacity-50 transition-colors">
-                                                                                    <span className="material-icons-round text-[14px]">check</span>
-                                                                                </button>
-                                                                                <button onClick={() => setEditingDate(null)} className="flex items-center justify-center w-6 h-6 rounded-full bg-gray-50 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 transition-colors">
-                                                                                    <span className="material-icons-round text-[14px]">close</span>
-                                                                                </button>
-                                                                            </div>
-                                                                        ) : (
-                                                                            <button onClick={() => {
-                                                                                setEditingDate(day.date);
-                                                                                setEditClockIn(day.clock_in ? day.clock_in.substring(0, 5) : '');
-                                                                                setEditClockOut(day.clock_out ? day.clock_out.substring(0, 5) : '');
-                                                                            }} className="text-gray-300 hover:text-primary transition-colors p-1" title="แก้ไขเวลา">
-                                                                                <span className="material-icons-round text-[14px]">edit</span>
-                                                                            </button>
-                                                                        )}
-                                                                    </td>
-                                                                </tr>
+                                                                            {day.admin_note && (
+                                                                                <span className="block mt-0.5 text-gray-700 dark:text-gray-200 italic">
+                                                                                    <span className="material-icons-round text-[12px] align-middle text-gray-400 mr-0.5">edit_note</span>
+                                                                                    {day.admin_note}
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                        <button onClick={() => {
+                                                                            setEditingDate(day.date);
+                                                                            setEditClockIn(day.clock_in ? day.clock_in.substring(0, 5) : '');
+                                                                            setEditClockOut(day.clock_out ? day.clock_out.substring(0, 5) : '');
+                                                                            setEditAdminNote(day.admin_note || '');
+                                                                        }} className="text-gray-300 hover:text-primary transition-colors p-1 shrink-0" title="แก้ไขเวลา / หมายเหตุ">
+                                                                            <span className="material-icons-round text-[14px]">edit</span>
+                                                                        </button>
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                        </tr>
                                                     );
                                                 })}
                                             </tbody>
@@ -1443,111 +1775,6 @@ const AdminAttendanceReportScreen: React.FC = () => {
                 </div>
             )}
 
-            {/* ═══ Hidden render area for per-employee daily PDF (offscreen) ═══ */}
-            <div style={{ position: 'fixed', left: -10000, top: 0, width: 794, pointerEvents: 'none' }}>
-                <div ref={pdfCardRef} style={{ width: 794, padding: 24, background: '#ffffff', fontFamily: 'Sukhumvit Set, Prompt, "Noto Sans Thai", sans-serif', color: '#111', fontSize: 12 }}>
-                    {pdfRenderData && (() => {
-                        const { emp, daily } = pdfRenderData;
-                        const dowNames = ['', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์', 'อาทิตย์'];
-                        const statusLabel = (r: DailyRow): string => {
-                            if (r.status === 'leave' && r.leave_type) return `ลา (${r.leave_type})`;
-                            if (r.status === 'holiday') return 'หยุดนักขัตฤกษ์';
-                            return ({ present: 'มาทำงาน', late: 'สาย', absent: 'ขาดงาน', leave: 'ลา', weekend: 'วันหยุด', future: '-', pre_hire: 'ยังไม่เข้างาน' } as Record<string, string>)[r.status] || r.status;
-                        };
-                        const statusColor = (r: DailyRow): string => {
-                            if (r.status === 'late') return '#d97706';
-                            if (r.status === 'absent') return '#dc2626';
-                            if (r.status === 'leave') return '#7c3aed';
-                            if (r.status === 'holiday') return '#2563eb';
-                            if (r.status === 'weekend') return '#6b7280';
-                            if (r.status === 'pre_hire') return '#94a3b8';
-                            return '#111';
-                        };
-                        const rowBg = (r: DailyRow): string => {
-                            if (r.status === 'late') return '#fef3c7';
-                            if (r.status === 'absent') return '#fee2e2';
-                            if (r.status === 'leave') return '#ede9fe';
-                            if (r.status === 'holiday') return '#dbeafe';
-                            if (r.status === 'weekend') return '#f3f4f6';
-                            if (r.status === 'pre_hire') return '#f1f5f9';
-                            return '#ffffff';
-                        };
-
-                        let cntPresent = 0, cntLate = 0, cntAbsent = 0, cntLeave = 0, totalLateMin = 0;
-                        daily.days.forEach(r => {
-                            if (r.status === 'present') cntPresent++;
-                            else if (r.status === 'late') { cntLate++; totalLateMin += r.late_minutes || 0; }
-                            else if (r.status === 'absent') cntAbsent++;
-                            else if (r.status === 'leave') cntLeave++;
-                        });
-
-                        const cellBase: React.CSSProperties = { border: '1px solid #d1d5db', padding: '5px 8px', verticalAlign: 'middle' };
-                        const headBase: React.CSSProperties = { ...cellBase, background: '#f3f4f6', fontWeight: 700, textAlign: 'center', fontSize: 11.5 };
-
-                        return (
-                            <div>
-                                {/* Title rows */}
-                                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>
-                                    รายงานเข้างานรายวัน — {periodLabelText}
-                                </div>
-                                <div style={{ fontSize: 12, marginBottom: 2 }}>
-                                    พนักงาน: <b>{daily.employee_name}</b> ({daily.employee_id})
-                                </div>
-                                <div style={{ fontSize: 12, marginBottom: 8, display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-                                    <span>แผนก: <b>{daily.department || '-'}</b></span>
-                                    <span>เวลาเข้างาน: <b>{(daily.work_start_time || '').substring(0, 5)} น.</b></span>
-                                    <span>เวลาออกงาน: <b>{(daily.work_end_time || '').substring(0, 5) || '-'} น.</b></span>
-                                </div>
-                                <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-                                    <thead>
-                                        <tr>
-                                            <th style={{ ...headBase, width: '11%' }}>วันที่</th>
-                                            <th style={{ ...headBase, width: '9%' }}>วัน</th>
-                                            <th style={{ ...headBase, width: '9%' }}>เข้างาน</th>
-                                            <th style={{ ...headBase, width: '9%' }}>ออกงาน</th>
-                                            <th style={{ ...headBase, width: '18%' }}>สถานะ</th>
-                                            <th style={{ ...headBase, width: '10%' }}>สาย (นาที)</th>
-                                            <th style={{ ...headBase, width: '11%' }}>ชม.ทำงาน</th>
-                                            <th style={{ ...headBase, width: '23%' }}>หมายเหตุ</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {daily.days.map((r, idx) => {
-                                            const d = new Date(r.date);
-                                            const dateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear() + 543}`;
-                                            return (
-                                                <tr key={idx} style={{ background: rowBg(r) }}>
-                                                    <td style={{ ...cellBase, fontSize: 11 }}>{dateStr}</td>
-                                                    <td style={{ ...cellBase, fontSize: 11 }}>{dowNames[r.day_of_week] || ''}</td>
-                                                    <td style={{ ...cellBase, fontSize: 11, textAlign: 'right' }}>{r.clock_in ? r.clock_in.substring(0, 5) : '-'}</td>
-                                                    <td style={{ ...cellBase, fontSize: 11, textAlign: 'right' }}>{r.clock_out ? r.clock_out.substring(0, 5) : '-'}</td>
-                                                    <td style={{ ...cellBase, fontSize: 11, color: statusColor(r), fontWeight: r.status !== 'present' && r.status !== 'future' ? 600 : 400 }}>
-                                                        {statusLabel(r)}
-                                                    </td>
-                                                    <td style={{ ...cellBase, fontSize: 11, textAlign: 'right' }}>{r.late_minutes > 0 ? r.late_minutes : ''}</td>
-                                                    <td style={{ ...cellBase, fontSize: 11, textAlign: 'right' }}>{r.work_hours > 0 ? Math.round(r.work_hours * 10) / 10 : ''}</td>
-                                                    <td style={{ ...cellBase, fontSize: 10.5 }}>
-                                                        {r.holiday_name || (r.status === 'leave' && r.leave_type) || (r.status === 'absent' ? 'ไม่มาทำงาน' : '')}
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
-                                        <tr style={{ background: '#e5e7eb', fontWeight: 700 }}>
-                                            <td style={{ ...cellBase, fontSize: 12 }}>สรุป</td>
-                                            <td style={{ ...cellBase, fontSize: 11 }} colSpan={4}>
-                                                มา:{cntPresent}  สาย:{cntLate}  ขาด:{cntAbsent}  ลา:{cntLeave}
-                                            </td>
-                                            <td style={{ ...cellBase, fontSize: 11 }} colSpan={3}>
-                                                รวม {totalLateMin} นาที
-                                            </td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        );
-                    })()}
-                </div>
-            </div>
 
             {/* ═══ Progress overlay during PDF export ═══ */}
             {pdfProgress && (

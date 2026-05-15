@@ -53,6 +53,9 @@ test_*.php
 # One-shot data recovery / recalc scripts
 recalc_*.php
 fix_*.php
+# Underscore-prefixed PHP files = dev-only debug helpers
+# (build-host.js skips them; never ship to prod)
+api/_*.php
 # DB schema inspection dumps
 *cols.txt
 cols.txt

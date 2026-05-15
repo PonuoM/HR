@@ -48,7 +48,12 @@ mkdirSync(apiDst, { recursive: true });
 
 readdirSync(apiSrc).forEach(file => {
     const srcPath = join(apiSrc, file);
-    if (statSync(srcPath).isFile()) {
+    const isFile = statSync(srcPath).isFile();
+    if (isFile) {
+        // Skip dev-only debug helpers (they expose internals)
+        if (file.startsWith('_')) {
+            return;
+        }
         if (file === 'config.php') {
             // Use production config instead
             const prodConfig = join(apiSrc, 'config.production.php');
@@ -64,6 +69,21 @@ readdirSync(apiSrc).forEach(file => {
         } else {
             cpSync(srcPath, join(apiDst, file));
         }
+    } else {
+        // Recursively copy subdirectories under api/ (e.g. api/lib/ for mPDF).
+        // Skip composer dev artifacts that bloat the upload.
+        cpSync(srcPath, join(apiDst, file), {
+            recursive: true,
+            filter: (src) => {
+                const norm = src.replace(/\\/g, '/');
+                if (norm.endsWith('/composer.json')) return false;
+                if (norm.endsWith('/composer.lock')) return false;
+                if (norm.endsWith('/.gitignore')) return false;
+                if (norm.endsWith('/README.md')) return false;
+                return true;
+            },
+        });
+        console.log(`📦 Copied api/${file}/ recursively`);
     }
 });
 console.log('📦 Copied PHP API files → host-build/api/');

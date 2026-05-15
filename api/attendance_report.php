@@ -107,12 +107,43 @@ if ($action === 'daily' && $employee_id && ($month || $cutoff_month || ($date_fr
 
     // Get attendance records indexed by date
     $attMap = [];
-    $attStmt = $conn->prepare("SELECT date, clock_in, clock_out FROM attendance WHERE employee_id = ? AND date BETWEEN ? AND ?");
+    $attStmt = $conn->prepare("SELECT date, clock_in, clock_out, admin_note, edited_by, edited_at FROM attendance WHERE employee_id = ? AND date BETWEEN ? AND ?");
     $attStmt->bind_param('sss', $employee_id, $startDate, $endDate);
     $attStmt->execute();
     $attRes = $attStmt->get_result();
     while ($a = $attRes->fetch_assoc()) {
         $attMap[$a['date']] = $a;
+    }
+
+    // Get OT entries — leave_requests with [OT] reason, for this employee in range.
+    // Grouped by DATE(start_date) since OT is typically same-day.
+    $otByDate = [];
+    $otStmt = $conn->prepare(
+        "SELECT id, start_date, end_date, total_days AS hours, ot_rate, reason, status
+         FROM leave_requests
+         WHERE employee_id = ?
+           AND reason LIKE '[OT]%'
+           AND DATE(start_date) BETWEEN ? AND ?"
+    );
+    $otStmt->bind_param('sss', $employee_id, $startDate, $endDate);
+    $otStmt->execute();
+    $otRes = $otStmt->get_result();
+    while ($ot = $otRes->fetch_assoc()) {
+        $sDt = new DateTime($ot['start_date']);
+        $eDt = new DateTime($ot['end_date']);
+        $dateKey = $sDt->format('Y-m-d');
+        // Strip "[OT] " prefix from reason for cleaner display
+        $cleanReason = preg_replace('/^\[OT\]\s*/', '', $ot['reason']);
+        $otByDate[$dateKey][] = [
+            'id' => (int)$ot['id'],
+            'date' => $dateKey,
+            'start_time' => $sDt->format('H:i'),
+            'end_time' => $eDt->format('H:i'),
+            'hours' => (float)$ot['hours'],
+            'ot_rate' => $ot['ot_rate'] !== null ? (float)$ot['ot_rate'] : 1.0,
+            'reason' => $cleanReason,
+            'status' => $ot['status'],
+        ];
     }
 
     // Get holidays indexed by date (prepared statement)
@@ -191,6 +222,8 @@ if ($action === 'daily' && $employee_id && ($month || $cutoff_month || ($date_fr
             $workHours = round(calc_effective_work_hours_v2($clockIn, $clockOut, $sched), 2);
         }
 
+        $otForDay = $otByDate[$dateStr] ?? [];
+
         $days[] = [
             'date' => $dateStr,
             'day_of_week' => $dow,
@@ -201,9 +234,17 @@ if ($action === 'daily' && $employee_id && ($month || $cutoff_month || ($date_fr
             'work_hours' => $workHours,
             'leave_type' => $leaveType,
             'holiday_name' => $holidayName,
+            'admin_note' => $att['admin_note'] ?? null,
+            'edited_by' => $att['edited_by'] ?? null,
+            'edited_at' => $att['edited_at'] ?? null,
+            'ot' => $otForDay, // array of OT entries on this day (usually 0 or 1)
         ];
         $current->modify('+1 day');
     }
+
+    // Flat list of all OT entries in the period (for the modal summary card)
+    $otList = [];
+    foreach ($otByDate as $arr) foreach ($arr as $e) $otList[] = $e;
 
     json_response([
         'employee_id' => $emp['id'],
@@ -213,6 +254,7 @@ if ($action === 'daily' && $employee_id && ($month || $cutoff_month || ($date_fr
         'work_end_time' => $workEnd,
         'month' => $month,
         'days' => $days,
+        'ot_entries' => $otList,
     ]);
 }
 

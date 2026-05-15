@@ -1,0 +1,4 @@
+# Vendor folder is ~9MB — track essentials in git (composer.json/lock) but
+# avoid committing the full vendor tree unless deploying.
+# Uncomment the line below if you want to skip vendor in git:
+# vendor/
