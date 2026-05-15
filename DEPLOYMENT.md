@@ -24,6 +24,24 @@ The PHP backend runs under your local web server (e.g., AppServ/XAMPP) at
 `http://localhost/hr-mobile-connect/api/`. Vite dev proxy is configured to
 forward `/hr-mobile-connect/api` calls.
 
+## 📋 Production Server Requirements
+
+- Apache + `mod_rewrite` + `mod_env`
+- **PHP 8.0 or newer** — required by `api/attendance_pdf.php` (mPDF v8)
+- MySQL 5.7+ / MariaDB 10.3+ (utf8mb4)
+- `api/lib/vendor/` is checked into the repo (mPDF + Sarabun fonts, ~11 MB) —
+  no `composer install` step is needed on the server.
+
+> Local AppServ ships PHP 7.3 which **cannot** run mPDF v8. The PDF endpoint
+> only works on a PHP 8 server (i.e. production). All other endpoints
+> remain compatible with PHP 7.3 for dev.
+
+## 🔄 PWA Cache Busting
+
+Bump `CACHE_NAME` in [public/sw.js](public/sw.js) (e.g. `hr-connect-vN` →
+`hr-connect-vN+1`) on every release that changes shipped frontend assets.
+Without a bump, returning users see the previous build until they hard-reload.
+
 ## 🚀 Production Deployment (Apache)
 
 ### Option A — Apache `SetEnv` (preferred)
