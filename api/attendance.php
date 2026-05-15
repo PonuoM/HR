@@ -126,31 +126,53 @@ if ($method === 'POST' && isset($_GET['action']) && $_GET['action'] === 'admin_e
     }
 
     $body = get_json_body();
-    $target_emp_id = $conn->real_escape_string($body['target_employee_id'] ?? '');
-    $date = $conn->real_escape_string($body['date'] ?? '');
-    $clock_in = !empty($body['clock_in']) ? $conn->real_escape_string($body['clock_in']) : null;
-    $clock_out = !empty($body['clock_out']) ? $conn->real_escape_string($body['clock_out']) : null;
+    $target_emp_id = $body['target_employee_id'] ?? '';
+    $date = $body['date'] ?? '';
+    $clock_in = !empty($body['clock_in']) ? $body['clock_in'] : null;
+    $clock_out = !empty($body['clock_out']) ? $body['clock_out'] : null;
+    // admin_note: explicit empty string => clear (NULL); missing key => do not touch on update
+    $note_provided = array_key_exists('admin_note', $body);
+    $admin_note = $note_provided ? (trim((string)$body['admin_note']) === '' ? null : trim((string)$body['admin_note'])) : null;
 
     if (!$target_emp_id || !$date) {
         json_response(['error' => 'Missing employee_id or date'], 400);
     }
 
-    if ($clock_in === null && $clock_out === null) {
+    // Delete only when every field is empty AND admin explicitly cleared the note.
+    if ($clock_in === null && $clock_out === null && $note_provided && $admin_note === null) {
         $stmt = $conn->prepare("DELETE FROM attendance WHERE employee_id = ? AND date = ?");
         $stmt->bind_param('ss', $target_emp_id, $date);
         $stmt->execute();
         json_response(['message' => 'Attendance record deleted']);
     }
 
-    $stmt = $conn->prepare(
-        "INSERT INTO attendance (employee_id, date, clock_in, clock_out, source) 
-         VALUES (?, ?, ?, ?, 'admin_override')
-         ON DUPLICATE KEY UPDATE 
-            clock_in = VALUES(clock_in), 
-            clock_out = VALUES(clock_out), 
-            source = 'admin_override'"
-    );
-    $stmt->bind_param('ssss', $target_emp_id, $date, $clock_in, $clock_out);
+    // UPSERT: if note key absent, preserve existing note via COALESCE trick using a sentinel
+    if ($note_provided) {
+        $stmt = $conn->prepare(
+            "INSERT INTO attendance (employee_id, date, clock_in, clock_out, admin_note, edited_by, edited_at, source)
+             VALUES (?, ?, ?, ?, ?, ?, NOW(), 'admin_override')
+             ON DUPLICATE KEY UPDATE
+                clock_in = VALUES(clock_in),
+                clock_out = VALUES(clock_out),
+                admin_note = VALUES(admin_note),
+                edited_by = VALUES(edited_by),
+                edited_at = NOW(),
+                source = 'admin_override'"
+        );
+        $stmt->bind_param('ssssss', $target_emp_id, $date, $clock_in, $clock_out, $admin_note, $employee_id_header);
+    } else {
+        $stmt = $conn->prepare(
+            "INSERT INTO attendance (employee_id, date, clock_in, clock_out, edited_by, edited_at, source)
+             VALUES (?, ?, ?, ?, ?, NOW(), 'admin_override')
+             ON DUPLICATE KEY UPDATE
+                clock_in = VALUES(clock_in),
+                clock_out = VALUES(clock_out),
+                edited_by = VALUES(edited_by),
+                edited_at = NOW(),
+                source = 'admin_override'"
+        );
+        $stmt->bind_param('sssss', $target_emp_id, $date, $clock_in, $clock_out, $employee_id_header);
+    }
     $stmt->execute();
 
     json_response(['message' => 'Attendance updated by admin']);
