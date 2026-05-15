@@ -29,6 +29,7 @@ import AdminHolidayScreen from './screens/admin/AdminHolidayScreen';
 import AdminCompanyScreen from './screens/admin/AdminCompanyScreen';
 import AdminSecurityScreen from './screens/admin/AdminSecurityScreen';
 import AdminFaceRegistrationScreen from './screens/admin/AdminFaceRegistrationScreen';
+import AdminFaceTestScreen from './screens/admin/AdminFaceTestScreen';
 import AdminActivityScreen from './screens/admin/AdminActivityScreen';
 import SettingsScreen from './screens/settings/SettingsScreen';
 import SecurityScreen from './screens/settings/SecurityScreen';
@@ -162,6 +163,7 @@ const App: React.FC = () => {
                       <Route path="/admin/companies" element={<AdminCompanyScreen />} />
                       <Route path="/admin/security" element={<AdminSecurityScreen />} />
                       <Route path="/admin/face-registration" element={<AdminFaceRegistrationScreen />} />
+                      <Route path="/admin/face-test" element={<AdminFaceTestScreen />} />
                       <Route path="/admin/activities" element={<AdminActivityScreen />} />
                     </Routes>
                   </PageTransition>
