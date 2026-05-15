@@ -46,6 +46,17 @@ if ($audCheck->num_rows === 0) {
     $conn->query("ALTER TABLE activity_settings ADD COLUMN audience ENUM('all','admin') NOT NULL DEFAULT 'all' AFTER external_url");
 }
 
+// ── Auto-create extra-viewers table (admin-only links can grant exceptions to specific non-admin staff) ──
+$conn->query("CREATE TABLE IF NOT EXISTS activity_extra_viewers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    activity_id INT NOT NULL,
+    employee_id VARCHAR(20) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_act_emp (activity_id, employee_id),
+    INDEX idx_employee (employee_id),
+    CONSTRAINT fk_extra_act FOREIGN KEY (activity_id) REFERENCES activity_settings(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
 // ── Seed default activities (INSERT IGNORE = safe to run every time) ──
 // columns: key, enabled, label, description, icon, external_url, audience, sort_order
 $defaults = [
@@ -71,11 +82,82 @@ if ($action === 'list' && $method === 'GET') {
     $stmt->execute();
     $result = $stmt->get_result();
     $activities = [];
+    $idsByKey = [];
     while ($r = $result->fetch_assoc()) {
         $r['enabled'] = (bool)$r['enabled'];
+        $r['extra_viewers'] = []; // populated below
+        $idsByKey[(int)$r['id']] = count($activities);
         $activities[] = $r;
     }
+
+    // Pull extra viewers in one round-trip and bucket them by activity_id.
+    if ($activities) {
+        $ids = array_keys($idsByKey);
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $types = str_repeat('i', count($ids));
+        $vstmt = $conn->prepare("SELECT activity_id, employee_id FROM activity_extra_viewers WHERE activity_id IN ($placeholders)");
+        $vstmt->bind_param($types, ...$ids);
+        $vstmt->execute();
+        $vres = $vstmt->get_result();
+        while ($v = $vres->fetch_assoc()) {
+            $idx = $idsByKey[(int)$v['activity_id']] ?? null;
+            if ($idx !== null) $activities[$idx]['extra_viewers'][] = $v['employee_id'];
+        }
+    }
+
     json_response($activities);
+}
+
+// ═══ ADD VIEWER (admin) — grant a non-admin employee access to an admin-only link ═══
+if ($action === 'add_viewer' && $method === 'POST') {
+    require_admin($conn);
+    $data = get_json_body();
+    $key = $data['key'] ?? null;
+    $emp = $data['employee_id'] ?? null;
+    if (!$key || !$emp) json_response(['error' => 'Missing key or employee_id'], 400);
+
+    // Resolve activity_id within this company so cross-company tampering is impossible.
+    $find = $conn->prepare("SELECT id FROM activity_settings WHERE company_id = ? AND activity_key = ?");
+    $find->bind_param('is', $company_id, $key);
+    $find->execute();
+    $row = $find->get_result()->fetch_assoc();
+    if (!$row) json_response(['error' => 'Activity not found'], 404);
+    $aid = (int)$row['id'];
+
+    // Sanity-check that the employee belongs to the same company.
+    $emp_check = $conn->prepare("SELECT id FROM employees WHERE id = ? AND company_id = ?");
+    $emp_check->bind_param('si', $emp, $company_id);
+    $emp_check->execute();
+    if ($emp_check->get_result()->num_rows === 0) {
+        json_response(['error' => 'Employee not found in this company'], 404);
+    }
+
+    $ins = $conn->prepare("INSERT IGNORE INTO activity_extra_viewers (activity_id, employee_id) VALUES (?, ?)");
+    $ins->bind_param('is', $aid, $emp);
+    $ins->execute();
+    json_response(['success' => true, 'key' => $key, 'employee_id' => $emp, 'added' => $ins->affected_rows > 0]);
+}
+
+// ═══ REMOVE VIEWER (admin) ═══
+if ($action === 'remove_viewer' && $method === 'POST') {
+    require_admin($conn);
+    $data = get_json_body();
+    $key = $data['key'] ?? null;
+    $emp = $data['employee_id'] ?? null;
+    if (!$key || !$emp) json_response(['error' => 'Missing key or employee_id'], 400);
+
+    // Same company-scoped resolve.
+    $find = $conn->prepare("SELECT id FROM activity_settings WHERE company_id = ? AND activity_key = ?");
+    $find->bind_param('is', $company_id, $key);
+    $find->execute();
+    $row = $find->get_result()->fetch_assoc();
+    if (!$row) json_response(['error' => 'Activity not found'], 404);
+    $aid = (int)$row['id'];
+
+    $del = $conn->prepare("DELETE FROM activity_extra_viewers WHERE activity_id = ? AND employee_id = ?");
+    $del->bind_param('is', $aid, $emp);
+    $del->execute();
+    json_response(['success' => true, 'key' => $key, 'employee_id' => $emp, 'removed' => $del->affected_rows]);
 }
 
 // ═══ UPDATE LINK (admin) — change external_url and/or audience for a link activity ═══

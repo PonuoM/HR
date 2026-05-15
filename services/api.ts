@@ -619,6 +619,22 @@ export async function updateActivityLink(opts: {
     });
 }
 
+// HR-only: grant a non-admin employee access to an admin-only activity.
+export async function addActivityViewer(key: string, employee_id: string) {
+    return fetchApi<{ success: boolean; added: boolean }>('activity_settings.php?action=add_viewer', {
+        method: 'POST',
+        body: JSON.stringify({ key, employee_id }),
+    });
+}
+
+// HR-only: revoke an extra viewer.
+export async function removeActivityViewer(key: string, employee_id: string) {
+    return fetchApi<{ success: boolean; removed: number }>('activity_settings.php?action=remove_viewer', {
+        method: 'POST',
+        body: JSON.stringify({ key, employee_id }),
+    });
+}
+
 export async function checkAttendanceAlerts(employeeId: string) {
     return fetchApi<{ alerts: any[]; total: number; is_birthday?: boolean; birthday_colleagues?: string[] }>(`attendance_alerts.php?action=check`);
 }

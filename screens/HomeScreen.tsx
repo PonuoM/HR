@@ -52,6 +52,13 @@ const HomeScreen: React.FC = () => {
         const fromConst: QuickMenuItem[] = QUICK_MENU_ITEMS
             .filter(item => item.activityKey && enabledKeys.has(item.activityKey));
 
+        // Build a quick lookup: activity_key → extra viewer empIds, so we can
+        // grant access to specific non-admin employees on admin-only links.
+        const extraByKey: Record<string, string[]> = {};
+        enabled.forEach((a: any) => {
+            extraByKey[a.activity_key] = Array.isArray(a.extra_viewers) ? a.extra_viewers : [];
+        });
+
         const fromDb: QuickMenuItem[] = enabled
             .filter((a: any) => a.external_url) // only link-type activities
             .map((a: any) => ({
@@ -62,10 +69,13 @@ const HomeScreen: React.FC = () => {
                 audience: (a.audience as 'all' | 'admin') || 'all',
             }));
 
-        return [...fromConst, ...fromDb].filter(item =>
-            item.audience !== 'admin' || isAdmin
-        );
-    }, [activitySettings, isAdmin]);
+        return [...fromConst, ...fromDb].filter(item => {
+            if (item.audience !== 'admin') return true;
+            if (isAdmin) return true;
+            const extras = item.activityKey ? (extraByKey[item.activityKey] || []) : [];
+            return !!empId && extras.includes(empId);
+        });
+    }, [activitySettings, isAdmin, empId]);
 
     // === ATTENDANCE ALERTS ===
     const [attendanceAlerts, setAttendanceAlerts] = useState<any[]>([]);

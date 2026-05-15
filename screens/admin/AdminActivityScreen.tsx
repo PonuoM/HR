@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../../components/Toast';
-import { getActivitySettings, toggleActivity, setSystemStartDate, updateActivityLink } from '../../services/api';
+import { getActivitySettings, toggleActivity, setSystemStartDate, updateActivityLink, getEmployees, addActivityViewer, removeActivityViewer } from '../../services/api';
 
 interface Activity {
     id: number;
@@ -14,7 +14,10 @@ interface Activity {
     start_date: string | null;
     external_url: string | null;
     audience: 'all' | 'admin';
+    extra_viewers: string[];
 }
+
+interface EmpRef { id: string; name: string; nickname?: string; is_admin?: number }
 
 const ACTIVITY_COLORS: Record<string, string> = {
     employee_vote: 'from-amber-400 to-orange-500',
@@ -43,6 +46,12 @@ const AdminActivityScreen: React.FC = () => {
     const [linkDrafts, setLinkDrafts] = useState<Record<string, { url: string; audience: 'all' | 'admin' }>>({});
     const [savingLink, setSavingLink] = useState<string | null>(null);
 
+    // Employee picker state — loaded once, opened per-activity from a modal
+    const [allEmployees, setAllEmployees] = useState<EmpRef[]>([]);
+    const [pickerForKey, setPickerForKey] = useState<string | null>(null);
+    const [pickerSearch, setPickerSearch] = useState('');
+    const [viewerBusy, setViewerBusy] = useState<string | null>(null); // `${key}:${empId}` while pending
+
     const loadActivities = useCallback(async () => {
         setLoading(true);
         try {
@@ -56,6 +65,43 @@ const AdminActivityScreen: React.FC = () => {
     }, [toast]);
 
     useEffect(() => { loadActivities(); }, [loadActivities]);
+
+    // Load employee directory once for the picker modal.
+    useEffect(() => {
+        getEmployees().then(setAllEmployees).catch(() => { });
+    }, []);
+
+    const handleAddViewer = async (key: string, empId: string) => {
+        setViewerBusy(`${key}:${empId}`);
+        try {
+            await addActivityViewer(key, empId);
+            setActivities(prev => prev.map(a =>
+                a.activity_key === key
+                    ? { ...a, extra_viewers: Array.from(new Set([...a.extra_viewers, empId])) }
+                    : a
+            ));
+        } catch (e: any) {
+            toast(e.message || 'เพิ่มไม่สำเร็จ', 'error');
+        } finally {
+            setViewerBusy(null);
+        }
+    };
+
+    const handleRemoveViewer = async (key: string, empId: string) => {
+        setViewerBusy(`${key}:${empId}`);
+        try {
+            await removeActivityViewer(key, empId);
+            setActivities(prev => prev.map(a =>
+                a.activity_key === key
+                    ? { ...a, extra_viewers: a.extra_viewers.filter(id => id !== empId) }
+                    : a
+            ));
+        } catch (e: any) {
+            toast(e.message || 'ลบไม่สำเร็จ', 'error');
+        } finally {
+            setViewerBusy(null);
+        }
+    };
 
     // Load start_date from activities
     useEffect(() => {
@@ -309,6 +355,51 @@ const AdminActivityScreen: React.FC = () => {
                                                     บันทึก
                                                 </button>
                                             </div>
+
+                                            {/* Extra viewers — only meaningful when audience is 'admin' */}
+                                            {act.audience === 'admin' && (
+                                                <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+                                                    <div className="flex items-center justify-between mb-1.5">
+                                                        <label className="text-[11px] font-semibold text-gray-600 dark:text-gray-300">
+                                                            ผู้ดูเพิ่มนอกเหนือ Admin
+                                                            {act.extra_viewers.length > 0 && (
+                                                                <span className="ml-1.5 text-gray-400">({act.extra_viewers.length})</span>
+                                                            )}
+                                                        </label>
+                                                        <button
+                                                            onClick={() => { setPickerForKey(act.activity_key); setPickerSearch(''); }}
+                                                            className="text-xs font-semibold text-primary hover:underline flex items-center gap-0.5"
+                                                        >
+                                                            <span className="material-icons-round text-sm">person_add</span>
+                                                            เพิ่มผู้ดู
+                                                        </button>
+                                                    </div>
+                                                    {act.extra_viewers.length === 0 ? (
+                                                        <p className="text-[11px] text-gray-400 italic">ยังไม่มี — admin เห็นได้ทุกคนอยู่แล้ว</p>
+                                                    ) : (
+                                                        <div className="flex flex-wrap gap-1.5">
+                                                            {act.extra_viewers.map(empId => {
+                                                                const e = allEmployees.find(x => x.id === empId);
+                                                                const busy = viewerBusy === `${act.activity_key}:${empId}`;
+                                                                return (
+                                                                    <span key={empId}
+                                                                        className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800 text-xs text-cyan-700 dark:text-cyan-300">
+                                                                        <span>{e?.nickname || e?.name || empId}</span>
+                                                                        <button
+                                                                            onClick={() => handleRemoveViewer(act.activity_key, empId)}
+                                                                            disabled={busy}
+                                                                            className="hover:text-red-500 disabled:opacity-50"
+                                                                            title="ลบ"
+                                                                        >
+                                                                            <span className="material-icons-round text-sm">{busy ? 'autorenew' : 'close'}</span>
+                                                                        </button>
+                                                                    </span>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </div>
@@ -323,6 +414,92 @@ const AdminActivityScreen: React.FC = () => {
                     <p className="text-xs text-gray-400">กิจกรรมใหม่จะปรากฏที่นี่เมื่อมีการเพิ่มในระบบ</p>
                 </div>
             </div>
+
+            {/* ───────── Employee picker modal ───────── */}
+            {pickerForKey && (() => {
+                const act = activities.find(a => a.activity_key === pickerForKey);
+                if (!act) return null;
+                const search = pickerSearch.trim().toLowerCase();
+                // Hide admins (already see the link) and already-added viewers
+                const candidates = allEmployees
+                    .filter(e => !e.is_admin)
+                    .filter(e => !act.extra_viewers.includes(e.id))
+                    .filter(e => !search
+                        || e.name.toLowerCase().includes(search)
+                        || (e.nickname || '').toLowerCase().includes(search)
+                        || e.id.toLowerCase().includes(search));
+
+                return (
+                    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+                        onClick={() => setPickerForKey(null)}>
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col"
+                            onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+                                <div>
+                                    <h3 className="text-base font-bold text-gray-900 dark:text-white">เพิ่มผู้ดู</h3>
+                                    <p className="text-[11px] text-gray-500 dark:text-gray-400">{act.label}</p>
+                                </div>
+                                <button onClick={() => setPickerForKey(null)} className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700">
+                                    <span className="material-icons-round text-gray-500">close</span>
+                                </button>
+                            </div>
+                            <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700">
+                                <div className="relative">
+                                    <span className="material-icons-round absolute left-3 top-2.5 text-gray-400 text-lg">search</span>
+                                    <input
+                                        type="text"
+                                        autoFocus
+                                        value={pickerSearch}
+                                        onChange={(e) => setPickerSearch(e.target.value)}
+                                        placeholder="ค้นหาชื่อ / ชื่อเล่น / รหัส"
+                                        className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary/30 focus:border-primary outline-none"
+                                    />
+                                </div>
+                            </div>
+                            <div className="flex-1 overflow-y-auto">
+                                {candidates.length === 0 ? (
+                                    <p className="text-center text-sm text-gray-400 py-12">
+                                        {search ? 'ไม่พบพนักงาน' : 'ไม่มีพนักงานที่เพิ่มได้'}
+                                    </p>
+                                ) : (
+                                    candidates.map(e => {
+                                        const busy = viewerBusy === `${pickerForKey}:${e.id}`;
+                                        return (
+                                            <button
+                                                key={e.id}
+                                                onClick={() => handleAddViewer(pickerForKey, e.id)}
+                                                disabled={busy}
+                                                className="w-full px-5 py-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 border-b border-gray-50 dark:border-gray-700/50 last:border-b-0 disabled:opacity-50"
+                                            >
+                                                <div className="flex items-center gap-3 text-left">
+                                                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
+                                                        {(e.nickname || e.name).slice(0, 2)}
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                                                            {e.name} {e.nickname && <span className="text-gray-500 font-normal">({e.nickname})</span>}
+                                                        </p>
+                                                        <p className="text-[11px] text-gray-400">{e.id}</p>
+                                                    </div>
+                                                </div>
+                                                <span className="material-icons-round text-primary text-xl">
+                                                    {busy ? 'autorenew' : 'add_circle'}
+                                                </span>
+                                            </button>
+                                        );
+                                    })
+                                )}
+                            </div>
+                            <div className="px-5 py-3 border-t border-gray-100 dark:border-gray-700">
+                                <button onClick={() => setPickerForKey(null)}
+                                    className="w-full py-2 rounded-lg bg-gray-100 dark:bg-gray-700 text-sm font-semibold text-gray-700 dark:text-gray-200">
+                                    เสร็จสิ้น
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
         </div>
     );
 };
