@@ -36,14 +36,28 @@ if ($colCheck->num_rows === 0) {
     $conn->query("ALTER TABLE activity_settings ADD COLUMN start_date DATE DEFAULT NULL AFTER sort_order");
 }
 
+// ── Auto-add external_url + audience columns (upgrade path for v3 link activities) ──
+$urlCheck = $conn->query("SHOW COLUMNS FROM activity_settings LIKE 'external_url'");
+if ($urlCheck->num_rows === 0) {
+    $conn->query("ALTER TABLE activity_settings ADD COLUMN external_url VARCHAR(500) DEFAULT NULL AFTER icon");
+}
+$audCheck = $conn->query("SHOW COLUMNS FROM activity_settings LIKE 'audience'");
+if ($audCheck->num_rows === 0) {
+    $conn->query("ALTER TABLE activity_settings ADD COLUMN audience ENUM('all','admin') NOT NULL DEFAULT 'all' AFTER external_url");
+}
+
 // ── Seed default activities (INSERT IGNORE = safe to run every time) ──
+// columns: key, enabled, label, description, icon, external_url, audience, sort_order
 $defaults = [
-    ['employee_vote', 1, 'โหวตพนักงานดีเด่น', 'ระบบโหวตพนักงานดีเด่นประจำเดือน', 'emoji_events', 1],
-    ['attendance_check', 0, 'ตรวจสอบการลงเวลา', 'แจ้งเตือนเมื่อพนักงานไม่ได้ลงเวลาหรือลงไม่ครบ (จ-ศ)', 'schedule', 2],
+    ['employee_vote',     1, 'โหวตพนักงานดีเด่น',  'ระบบโหวตพนักงานดีเด่นประจำเดือน',                            'emoji_events',  null,                                          'all',   1],
+    ['attendance_check',  0, 'ตรวจสอบการลงเวลา',   'แจ้งเตือนเมื่อพนักงานไม่ได้ลงเวลาหรือลงไม่ครบ (จ-ศ)',          'schedule',      null,                                          'all',   2],
+    ['asset_management',  1, 'ระบบการเบิก',         'จัดการระบบเบิกวัสดุ (สำหรับแอดมินหลังบ้าน)',                  'inventory_2',   'https://asset.prima49.com/index.php',         'admin', 10],
+    ['material_request',  1, 'เบิกวัสดุ',            'ขอเบิกวัสดุสิ้นเปลือง',                                       'shopping_cart', 'https://asset.prima49.com/user_request.php',  'all',   11],
 ];
-$ins = $conn->prepare("INSERT IGNORE INTO activity_settings (company_id, activity_key, enabled, label, description, icon, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)");
+// Types: i (company_id) s i s s s s s i  →  9 binds
+$ins = $conn->prepare("INSERT IGNORE INTO activity_settings (company_id, activity_key, enabled, label, description, icon, external_url, audience, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
 foreach ($defaults as $d) {
-    $ins->bind_param('isisssi', $company_id, $d[0], $d[1], $d[2], $d[3], $d[4], $d[5]);
+    $ins->bind_param('isisssssi', $company_id, $d[0], $d[1], $d[2], $d[3], $d[4], $d[5], $d[6], $d[7]);
     $ins->execute();
 }
 
@@ -52,7 +66,7 @@ $method = get_method();
 
 // ═══ LIST ═══
 if ($action === 'list' && $method === 'GET') {
-    $stmt = $conn->prepare("SELECT id, activity_key, enabled, label, description, icon, sort_order, start_date FROM activity_settings WHERE company_id = ? ORDER BY sort_order, label");
+    $stmt = $conn->prepare("SELECT id, activity_key, enabled, label, description, icon, external_url, audience, sort_order, start_date FROM activity_settings WHERE company_id = ? ORDER BY sort_order, label");
     $stmt->bind_param('i', $company_id);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -62,6 +76,49 @@ if ($action === 'list' && $method === 'GET') {
         $activities[] = $r;
     }
     json_response($activities);
+}
+
+// ═══ UPDATE LINK (admin) — change external_url and/or audience for a link activity ═══
+if ($action === 'update_link' && $method === 'POST') {
+    require_admin($conn);
+    $data = get_json_body();
+    $key = $data['key'] ?? null;
+    if (!$key) json_response(['error' => 'Missing key'], 400);
+
+    $url = array_key_exists('external_url', $data) ? trim((string)$data['external_url']) : null;
+    $audience = $data['audience'] ?? null;
+    if ($audience !== null && !in_array($audience, ['all', 'admin'], true)) {
+        json_response(['error' => 'audience must be all or admin'], 400);
+    }
+    if ($url !== null && $url !== '' && !preg_match('#^https?://#i', $url)) {
+        json_response(['error' => 'external_url must be http(s)://...'], 400);
+    }
+
+    // Build dynamic UPDATE — only touch fields the caller actually provided
+    $sets = [];
+    $types = '';
+    $vals = [];
+    if ($url !== null) {
+        $sets[] = 'external_url = ?';
+        $types .= 's';
+        $vals[] = $url === '' ? null : $url;
+    }
+    if ($audience !== null) {
+        $sets[] = 'audience = ?';
+        $types .= 's';
+        $vals[] = $audience;
+    }
+    if (!$sets) json_response(['error' => 'Nothing to update'], 400);
+
+    $types .= 'is';
+    $vals[] = $company_id;
+    $vals[] = $key;
+
+    $sql = "UPDATE activity_settings SET " . implode(', ', $sets) . " WHERE company_id = ? AND activity_key = ?";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param($types, ...$vals);
+    $stmt->execute();
+    json_response(['success' => true, 'key' => $key, 'affected' => $stmt->affected_rows]);
 }
 
 // ═══ TOGGLE ═══

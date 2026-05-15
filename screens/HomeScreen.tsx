@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import ReactDOM from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { QUICK_MENU_ITEMS } from '../data';
+import type { QuickMenuItem } from '../types';
 import { useApi } from '../hooks/useApi';
 import { API_BASE, getNotifications, getLeaveQuotas, getAttendance, getNews, getEmployee, markNotificationRead, markAllNotificationsRead, deleteNotification, clockIn, clockOut, clockOutOnly, checkLocation, getLeaveRequests, updateLeaveRequest, getTimeRecords, updateTimeRecord, getAllowanceRequests, updateAllowanceRequest, getUploads, getFaceDescriptor, getActivitySettings, checkAttendanceAlerts } from '../services/api';
 import { subscribeToPush } from '../services/pushNotifications';
@@ -39,11 +40,32 @@ const HomeScreen: React.FC = () => {
         QUICK_MENU_ITEMS.filter(item => !item.activityKey),
         []
     );
-    // Enabled activities = items WITH activityKey that are enabled in settings
-    const enabledActivities = useMemo(() => {
-        const enabledKeys = new Set(activitySettings.filter((a: any) => a.enabled).map((a: any) => a.activity_key));
-        return QUICK_MENU_ITEMS.filter(item => item.activityKey && enabledKeys.has(item.activityKey));
-    }, [activitySettings]);
+    // Enabled activities — merges:
+    //   1. Internal-route activities defined in QUICK_MENU_ITEMS (e.g. employee_vote)
+    //   2. External-link activities sourced directly from activity_settings
+    //      (icon + url + audience all live in DB; no frontend constant needed)
+    // Audience filter: 'admin' items hidden from non-admin users.
+    const enabledActivities = useMemo<QuickMenuItem[]>(() => {
+        const enabled = activitySettings.filter((a: any) => a.enabled);
+        const enabledKeys = new Set(enabled.map((a: any) => a.activity_key));
+
+        const fromConst: QuickMenuItem[] = QUICK_MENU_ITEMS
+            .filter(item => item.activityKey && enabledKeys.has(item.activityKey));
+
+        const fromDb: QuickMenuItem[] = enabled
+            .filter((a: any) => a.external_url) // only link-type activities
+            .map((a: any) => ({
+                icon: a.icon || 'link',
+                label: a.label,
+                activityKey: a.activity_key,
+                externalUrl: a.external_url,
+                audience: (a.audience as 'all' | 'admin') || 'all',
+            }));
+
+        return [...fromConst, ...fromDb].filter(item =>
+            item.audience !== 'admin' || isAdmin
+        );
+    }, [activitySettings, isAdmin]);
 
     // === ATTENDANCE ALERTS ===
     const [attendanceAlerts, setAttendanceAlerts] = useState<any[]>([]);
@@ -1124,45 +1146,80 @@ const HomeScreen: React.FC = () => {
                         </h3>
                         {/* Mobile: icon grid — same as quick menu */}
                         <div className="md:hidden grid grid-cols-3 gap-3">
-                            {enabledActivities.map((item, i) => (
-                                <button key={i} onClick={() => item.path && navigate(item.path)} className="flex flex-col items-center gap-1.5 group">
-                                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-100 to-orange-100 dark:from-amber-900/30 dark:to-orange-900/30 border border-amber-200/60 dark:border-amber-700/40 flex items-center justify-center shadow-sm group-active:scale-95 transition-transform" style={{ animation: 'activityCardGlow 4s ease-in-out infinite' }}>
-                                        <svg viewBox="0 0 40 40" className="w-7 h-7" style={{ animation: 'voteIconBounce 2.5s ease-in-out infinite' }}>
-                                            <path d="M12 7h16v3.5c0 5-3.5 9.5-8 11-4.5-1.5-8-6-8-11V7z" fill="url(#actGridTM)" stroke="#D97706" strokeWidth="1.2" />
-                                            <path d="M12 10H9c-.8 0-1.5.7-1.5 1.5v1c0 2.5 1.5 4 3 4.5H12" fill="none" stroke="#D97706" strokeWidth="1.2" strokeLinecap="round" />
-                                            <path d="M28 10h3c.8 0 1.5.7 1.5 1.5v1c0 2.5-1.5 4-3 4.5h-1.5" fill="none" stroke="#D97706" strokeWidth="1.2" strokeLinecap="round" />
-                                            <rect x="17" y="21" width="6" height="5" rx="1" fill="#D97706" />
-                                            <rect x="13" y="26" width="14" height="3.5" rx="1.5" fill="url(#actGridTM)" stroke="#D97706" strokeWidth="0.8" />
-                                            <path d="M20 11l1.2 2.5 2.8.4-2 2 .4 2.8L20 17.2l-2.4 1.5.4-2.8-2-2 2.8-.4z" fill="#FFF" opacity="0.85">
-                                                <animate attributeName="opacity" values="0.85;0.4;0.85" dur="1.8s" repeatCount="indefinite" />
-                                            </path>
-                                            <circle cx="7" cy="5" r="0" fill="#FBBF24"><animate attributeName="r" values="0;1.5;0" dur="2s" repeatCount="indefinite" /><animate attributeName="opacity" values="0;1;0" dur="2s" repeatCount="indefinite" /></circle>
-                                            <circle cx="33" cy="4" r="0" fill="#F59E0B"><animate attributeName="r" values="0;1.3;0" dur="2s" begin="0.6s" repeatCount="indefinite" /><animate attributeName="opacity" values="0;1;0" dur="2s" begin="0.6s" repeatCount="indefinite" /></circle>
-                                            <defs><linearGradient id="actGridTM" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#FCD34D" /><stop offset="100%" stopColor="#F59E0B" /></linearGradient></defs>
-                                        </svg>
-                                    </div>
-                                    <span className="text-[10px] text-center font-semibold text-amber-700 dark:text-amber-400 leading-tight">{item.label}</span>
-                                </button>
-                            ))}
+                            {enabledActivities.map((item, i) => {
+                                const isExternal = !!item.externalUrl;
+                                const Inner = (
+                                    <>
+                                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-100 to-orange-100 dark:from-amber-900/30 dark:to-orange-900/30 border border-amber-200/60 dark:border-amber-700/40 flex items-center justify-center shadow-sm group-active:scale-95 transition-transform" style={{ animation: 'activityCardGlow 4s ease-in-out infinite' }}>
+                                            {isExternal ? (
+                                                <span className="material-icons-round text-2xl text-amber-700 dark:text-amber-400">{item.icon}</span>
+                                            ) : (
+                                                <svg viewBox="0 0 40 40" className="w-7 h-7" style={{ animation: 'voteIconBounce 2.5s ease-in-out infinite' }}>
+                                                    <path d="M12 7h16v3.5c0 5-3.5 9.5-8 11-4.5-1.5-8-6-8-11V7z" fill="url(#actGridTM)" stroke="#D97706" strokeWidth="1.2" />
+                                                    <path d="M12 10H9c-.8 0-1.5.7-1.5 1.5v1c0 2.5 1.5 4 3 4.5H12" fill="none" stroke="#D97706" strokeWidth="1.2" strokeLinecap="round" />
+                                                    <path d="M28 10h3c.8 0 1.5.7 1.5 1.5v1c0 2.5-1.5 4-3 4.5h-1.5" fill="none" stroke="#D97706" strokeWidth="1.2" strokeLinecap="round" />
+                                                    <rect x="17" y="21" width="6" height="5" rx="1" fill="#D97706" />
+                                                    <rect x="13" y="26" width="14" height="3.5" rx="1.5" fill="url(#actGridTM)" stroke="#D97706" strokeWidth="0.8" />
+                                                    <path d="M20 11l1.2 2.5 2.8.4-2 2 .4 2.8L20 17.2l-2.4 1.5.4-2.8-2-2 2.8-.4z" fill="#FFF" opacity="0.85">
+                                                        <animate attributeName="opacity" values="0.85;0.4;0.85" dur="1.8s" repeatCount="indefinite" />
+                                                    </path>
+                                                    <circle cx="7" cy="5" r="0" fill="#FBBF24"><animate attributeName="r" values="0;1.5;0" dur="2s" repeatCount="indefinite" /><animate attributeName="opacity" values="0;1;0" dur="2s" repeatCount="indefinite" /></circle>
+                                                    <circle cx="33" cy="4" r="0" fill="#F59E0B"><animate attributeName="r" values="0;1.3;0" dur="2s" begin="0.6s" repeatCount="indefinite" /><animate attributeName="opacity" values="0;1;0" dur="2s" begin="0.6s" repeatCount="indefinite" /></circle>
+                                                    <defs><linearGradient id="actGridTM" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#FCD34D" /><stop offset="100%" stopColor="#F59E0B" /></linearGradient></defs>
+                                                </svg>
+                                            )}
+                                        </div>
+                                        <span className="text-[10px] text-center font-semibold text-amber-700 dark:text-amber-400 leading-tight">{item.label}</span>
+                                    </>
+                                );
+                                return isExternal ? (
+                                    <a key={i} href={item.externalUrl} target="_blank" rel="noopener noreferrer"
+                                        className="flex flex-col items-center gap-1.5 group">
+                                        {Inner}
+                                    </a>
+                                ) : (
+                                    <button key={i} onClick={() => item.path && navigate(item.path)} className="flex flex-col items-center gap-1.5 group">
+                                        {Inner}
+                                    </button>
+                                );
+                            })}
                         </div>
                         {/* Desktop: list-style buttons — same as quick menu */}
                         <div className="hidden md:flex flex-wrap gap-2.5">
-                            {enabledActivities.map((item, i) => (
-                                <button key={i} onClick={() => item.path && navigate(item.path)} className="inline-flex items-center px-4 py-2.5 gap-3 group bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/15 dark:to-orange-900/15 rounded-xl hover:shadow-md border border-amber-200/50 dark:border-amber-700/30 hover:border-amber-300 transition-all">
-                                    <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center shrink-0">
-                                        <svg viewBox="0 0 40 40" className="w-5 h-5" style={{ animation: 'voteIconBounce 2.5s ease-in-out infinite' }}>
-                                            <path d="M12 7h16v3.5c0 5-3.5 9.5-8 11-4.5-1.5-8-6-8-11V7z" fill="url(#actGridTD)" stroke="#D97706" strokeWidth="1.2" />
-                                            <rect x="17" y="21" width="6" height="5" rx="1" fill="#D97706" />
-                                            <rect x="13" y="26" width="14" height="3.5" rx="1.5" fill="url(#actGridTD)" stroke="#D97706" strokeWidth="0.8" />
-                                            <path d="M20 11l1.2 2.5 2.8.4-2 2 .4 2.8L20 17.2l-2.4 1.5.4-2.8-2-2 2.8-.4z" fill="#FFF" opacity="0.85">
-                                                <animate attributeName="opacity" values="0.85;0.4;0.85" dur="1.8s" repeatCount="indefinite" />
-                                            </path>
-                                            <defs><linearGradient id="actGridTD" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#FCD34D" /><stop offset="100%" stopColor="#F59E0B" /></linearGradient></defs>
-                                        </svg>
-                                    </div>
-                                    <span className="text-xs font-semibold text-amber-700 dark:text-amber-400 leading-tight">{item.label}</span>
-                                </button>
-                            ))}
+                            {enabledActivities.map((item, i) => {
+                                const isExternal = !!item.externalUrl;
+                                const cls = "inline-flex items-center px-4 py-2.5 gap-3 group bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/15 dark:to-orange-900/15 rounded-xl hover:shadow-md border border-amber-200/50 dark:border-amber-700/30 hover:border-amber-300 transition-all";
+                                const Inner = (
+                                    <>
+                                        <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center shrink-0">
+                                            {isExternal ? (
+                                                <span className="material-icons-round text-base text-amber-700 dark:text-amber-400">{item.icon}</span>
+                                            ) : (
+                                                <svg viewBox="0 0 40 40" className="w-5 h-5" style={{ animation: 'voteIconBounce 2.5s ease-in-out infinite' }}>
+                                                    <path d="M12 7h16v3.5c0 5-3.5 9.5-8 11-4.5-1.5-8-6-8-11V7z" fill="url(#actGridTD)" stroke="#D97706" strokeWidth="1.2" />
+                                                    <rect x="17" y="21" width="6" height="5" rx="1" fill="#D97706" />
+                                                    <rect x="13" y="26" width="14" height="3.5" rx="1.5" fill="url(#actGridTD)" stroke="#D97706" strokeWidth="0.8" />
+                                                    <path d="M20 11l1.2 2.5 2.8.4-2 2 .4 2.8L20 17.2l-2.4 1.5.4-2.8-2-2 2.8-.4z" fill="#FFF" opacity="0.85">
+                                                        <animate attributeName="opacity" values="0.85;0.4;0.85" dur="1.8s" repeatCount="indefinite" />
+                                                    </path>
+                                                    <defs><linearGradient id="actGridTD" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#FCD34D" /><stop offset="100%" stopColor="#F59E0B" /></linearGradient></defs>
+                                                </svg>
+                                            )}
+                                        </div>
+                                        <span className="text-xs font-semibold text-amber-700 dark:text-amber-400 leading-tight">{item.label}</span>
+                                        {isExternal && <span className="material-icons-round text-[14px] text-amber-600/70">open_in_new</span>}
+                                    </>
+                                );
+                                return isExternal ? (
+                                    <a key={i} href={item.externalUrl} target="_blank" rel="noopener noreferrer" className={cls}>
+                                        {Inner}
+                                    </a>
+                                ) : (
+                                    <button key={i} onClick={() => item.path && navigate(item.path)} className={cls}>
+                                        {Inner}
+                                    </button>
+                                );
+                            })}
                         </div>
                     </div>
                 </section>

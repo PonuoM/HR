@@ -85,6 +85,10 @@ export interface QuickMenuItem {
   hasNotif?: boolean;
   adminOnly?: boolean;
   activityKey?: string;
+  // Set when the activity is an outbound link (asset.prima49.com etc).
+  // Renders as anchor opening a new tab instead of router navigation.
+  externalUrl?: string;
+  audience?: 'all' | 'admin';
 }
 
 export interface LeaveTypeOption {

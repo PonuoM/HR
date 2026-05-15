@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../../components/Toast';
-import { getActivitySettings, toggleActivity, setSystemStartDate } from '../../services/api';
+import { getActivitySettings, toggleActivity, setSystemStartDate, updateActivityLink } from '../../services/api';
 
 interface Activity {
     id: number;
@@ -12,16 +12,22 @@ interface Activity {
     icon: string;
     sort_order: number;
     start_date: string | null;
+    external_url: string | null;
+    audience: 'all' | 'admin';
 }
 
 const ACTIVITY_COLORS: Record<string, string> = {
     employee_vote: 'from-amber-400 to-orange-500',
     attendance_check: 'from-blue-400 to-indigo-500',
+    asset_management: 'from-slate-500 to-slate-700',
+    material_request: 'from-cyan-400 to-blue-500',
 };
 
 const ACTIVITY_EMOJIS: Record<string, string> = {
     employee_vote: '🏆',
     attendance_check: '⏰',
+    asset_management: '📦',
+    material_request: '🛒',
 };
 
 const AdminActivityScreen: React.FC = () => {
@@ -32,6 +38,10 @@ const AdminActivityScreen: React.FC = () => {
     const [toggling, setToggling] = useState<string | null>(null);
     const [startDateInput, setStartDateInput] = useState('');
     const [savingDate, setSavingDate] = useState(false);
+    // Link-editor draft state — keyed by activity_key. Lets us edit URL +
+    // audience inline without firing a save on every keystroke.
+    const [linkDrafts, setLinkDrafts] = useState<Record<string, { url: string; audience: 'all' | 'admin' }>>({});
+    const [savingLink, setSavingLink] = useState<string | null>(null);
 
     const loadActivities = useCallback(async () => {
         setLoading(true);
@@ -64,6 +74,39 @@ const AdminActivityScreen: React.FC = () => {
             toast(e.message || 'บันทึกไม่สำเร็จ', 'error');
         } finally {
             setSavingDate(false);
+        }
+    };
+
+    // Hydrate link drafts from server data so the form mirrors the saved state.
+    useEffect(() => {
+        const drafts: Record<string, { url: string; audience: 'all' | 'admin' }> = {};
+        activities.forEach(a => {
+            if (a.external_url !== null && a.external_url !== undefined) {
+                drafts[a.activity_key] = {
+                    url: a.external_url || '',
+                    audience: a.audience || 'all',
+                };
+            }
+        });
+        setLinkDrafts(drafts);
+    }, [activities]);
+
+    const handleSaveLink = async (key: string) => {
+        const draft = linkDrafts[key];
+        if (!draft) return;
+        setSavingLink(key);
+        try {
+            await updateActivityLink({ key, external_url: draft.url, audience: draft.audience });
+            setActivities(prev => prev.map(a =>
+                a.activity_key === key
+                    ? { ...a, external_url: draft.url, audience: draft.audience }
+                    : a
+            ));
+            toast('บันทึกลิงก์แล้ว', 'success');
+        } catch (e: any) {
+            toast(e.message || 'บันทึกไม่สำเร็จ', 'error');
+        } finally {
+            setSavingLink(null);
         }
     };
 
@@ -219,6 +262,55 @@ const AdminActivityScreen: React.FC = () => {
                                             </div>
                                         </button>
                                     </div>
+
+                                    {/* Link editor — shown only for external-link activities */}
+                                    {linkDrafts[act.activity_key] !== undefined && (
+                                        <div className="border-t border-gray-100 dark:border-gray-700 px-4 py-3 space-y-2.5 bg-gray-50/50 dark:bg-gray-900/30 rounded-b-xl">
+                                            <div>
+                                                <label className="text-[11px] font-semibold text-gray-600 dark:text-gray-300 block mb-1">URL ปลายทาง</label>
+                                                <input
+                                                    type="url"
+                                                    value={linkDrafts[act.activity_key].url}
+                                                    onChange={(e) => setLinkDrafts(prev => ({
+                                                        ...prev,
+                                                        [act.activity_key]: { ...prev[act.activity_key], url: e.target.value },
+                                                    }))}
+                                                    placeholder="https://..."
+                                                    className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary/30 focus:border-primary outline-none"
+                                                />
+                                            </div>
+                                            <div className="flex items-end gap-2">
+                                                <div className="flex-1">
+                                                    <label className="text-[11px] font-semibold text-gray-600 dark:text-gray-300 block mb-1">ใครเห็น Link นี้ได้</label>
+                                                    <select
+                                                        value={linkDrafts[act.activity_key].audience}
+                                                        onChange={(e) => setLinkDrafts(prev => ({
+                                                            ...prev,
+                                                            [act.activity_key]: { ...prev[act.activity_key], audience: e.target.value as 'all' | 'admin' },
+                                                        }))}
+                                                        className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary/30 focus:border-primary outline-none"
+                                                    >
+                                                        <option value="all">พนักงานทุกคน</option>
+                                                        <option value="admin">เฉพาะ Admin</option>
+                                                    </select>
+                                                </div>
+                                                <button
+                                                    onClick={() => handleSaveLink(act.activity_key)}
+                                                    disabled={savingLink === act.activity_key
+                                                        || (linkDrafts[act.activity_key].url === (act.external_url || '')
+                                                            && linkDrafts[act.activity_key].audience === act.audience)}
+                                                    className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-semibold shadow-sm hover:bg-primary/90 disabled:opacity-40 transition-all flex items-center gap-1"
+                                                >
+                                                    {savingLink === act.activity_key ? (
+                                                        <span className="material-icons-round animate-spin text-sm">autorenew</span>
+                                                    ) : (
+                                                        <span className="material-icons-round text-sm">save</span>
+                                                    )}
+                                                    บันทึก
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             );
                         })}

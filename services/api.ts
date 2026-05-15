@@ -607,6 +607,18 @@ export async function checkActivity(key: string) {
     return fetchApi<{ key: string; enabled: boolean; start_date: string | null }>(`activity_settings.php?action=check&key=${key}`);
 }
 
+// HR-only: edit external_url and/or audience for a link-style activity.
+export async function updateActivityLink(opts: {
+    key: string;
+    external_url?: string;
+    audience?: 'all' | 'admin';
+}) {
+    return fetchApi<{ success: boolean; affected: number }>('activity_settings.php?action=update_link', {
+        method: 'POST',
+        body: JSON.stringify(opts),
+    });
+}
+
 export async function checkAttendanceAlerts(employeeId: string) {
     return fetchApi<{ alerts: any[]; total: number; is_birthday?: boolean; birthday_colleagues?: string[] }>(`attendance_alerts.php?action=check`);
 }
