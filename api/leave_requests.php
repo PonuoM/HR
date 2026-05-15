@@ -141,6 +141,26 @@ if ($method === 'GET') {
 
 // ─── POST (Create) ───
 if ($method === 'POST') {
+    // ─── HR-only: quick-update OT rate on an approved leave_request ───
+    // POST /api/leave_requests.php?action=update_ot_rate&id=X  body: { ot_rate: 1.5 }
+    if (($_GET['action'] ?? '') === 'update_ot_rate') {
+        require_admin($conn);
+        $id = (int)($_GET['id'] ?? 0);
+        $body = get_json_body();
+        $rate = isset($body['ot_rate']) && $body['ot_rate'] !== null ? (float)$body['ot_rate'] : null;
+        if (!$id) json_response(['error' => 'Missing id'], 400);
+        if ($rate === null || !in_array($rate, [1.0, 1.5, 2.0, 3.0], true)) {
+            json_response(['error' => 'ot_rate ต้องเป็น 1, 1.5, 2 หรือ 3'], 400);
+        }
+        $stmt = $conn->prepare("UPDATE leave_requests SET ot_rate = ? WHERE id = ? AND reason LIKE '[OT]%'");
+        $stmt->bind_param('di', $rate, $id);
+        $stmt->execute();
+        if ($stmt->affected_rows === 0) {
+            json_response(['error' => 'ไม่พบใบ OT (id=' . $id . ')'], 404);
+        }
+        json_response(['message' => 'OT rate updated', 'id' => $id, 'ot_rate' => $rate]);
+    }
+
     $body = get_json_body();
     $employee_id = $body['employee_id'];
 
@@ -177,31 +197,41 @@ if ($method === 'POST') {
     // For OT requests, leave_type_id must be NULL (FK constraint doesn't allow 0)
     $leaveTypeId = $isOT ? null : $body['leave_type_id'];
 
+    // OT rate (multiplier) — only meaningful for OT entries. Default 1.0 if not provided.
+    $otRate = null;
+    if ($isOT) {
+        $otRate = isset($body['ot_rate']) ? (float)$body['ot_rate'] : 1.0;
+        if (!in_array($otRate, [1.0, 1.5, 2.0, 3.0], true)) $otRate = 1.0;
+    }
+
     if ($admin_create) {
         // HR-recorded leave: insert as already-approved with is_bypass=1
+        // Params: employee_id(s) leave_type_id(i) start(s) end(s) days(s) ot_rate(d) reason(s)
+        //         approver1(s) approver2(s) admin(s) admin(s) admin(s) = 12 params
         $stmt = $conn->prepare(
             "INSERT INTO leave_requests
-             (employee_id, leave_type_id, start_date, end_date, total_days, reason,
+             (employee_id, leave_type_id, start_date, end_date, total_days, ot_rate, reason,
               expected_approver1_id, expected_approver2_id,
               status, tier1_status, tier2_status, is_bypass, approved_by, approved_at,
               tier1_by, tier1_at, tier2_by, tier2_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'approved', 'skipped', 'skipped', 1, ?, NOW(), ?, NOW(), ?, NOW())"
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', 'skipped', 'skipped', 1, ?, NOW(), ?, NOW(), ?, NOW())"
         );
-        // Types: s i s s s s s s s s s = 11 params (1 int leave_type_id, rest strings)
-        $stmt->bind_param('sisssssssss',
+        $stmt->bind_param('sisssdsssss' . 's',
             $body['employee_id'], $leaveTypeId,
             $body['start_date'], $body['end_date'],
-            $body['total_days'], $body['reason'],
+            $body['total_days'], $otRate, $body['reason'],
             $approver1_id, $approver2_id,
             $admin_actor_id, $admin_actor_id, $admin_actor_id
         );
         $stmt->execute();
     } else {
-        $stmt = $conn->prepare("INSERT INTO leave_requests (employee_id, leave_type_id, start_date, end_date, total_days, reason, expected_approver1_id, expected_approver2_id, tier1_status, tier2_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'pending')");
-        $stmt->bind_param('sissssss',
+        // Params: employee_id(s) leave_type_id(i) start(s) end(s) days(s) ot_rate(d) reason(s)
+        //         approver1(s) approver2(s) = 9 params
+        $stmt = $conn->prepare("INSERT INTO leave_requests (employee_id, leave_type_id, start_date, end_date, total_days, ot_rate, reason, expected_approver1_id, expected_approver2_id, tier1_status, tier2_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'pending')");
+        $stmt->bind_param('sisssdsss',
             $body['employee_id'], $leaveTypeId,
             $body['start_date'], $body['end_date'],
-            $body['total_days'], $body['reason'],
+            $body['total_days'], $otRate, $body['reason'],
             $approver1_id, $approver2_id
         );
         $stmt->execute();

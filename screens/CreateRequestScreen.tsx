@@ -111,6 +111,7 @@ const CreateRequestScreen: React.FC = () => {
     const [otStartTime, setOtStartTime] = useState(''); // HH:mm
     const [otEndTime, setOtEndTime] = useState('');     // HH:mm
     const [otReason, setOtReason] = useState('');
+    const [otRate, setOtRate] = useState<number>(1.0); // OT multiplier — HR can override later
     const [otSubmitting, setOtSubmitting] = useState(false);
     const [otFiles, setOtFiles] = useState<File[]>([]);
     const otFileRef = useRef<HTMLInputElement>(null);
@@ -303,6 +304,7 @@ const CreateRequestScreen: React.FC = () => {
                 start_date: otStart,
                 end_date: otEnd,
                 total_days: otHours,
+                ot_rate: otRate,
                 reason: `[OT] ${otProject.trim()} — ${otReason.trim()}`,
             });
             if (otFiles.length > 0) {
@@ -647,6 +649,28 @@ const CreateRequestScreen: React.FC = () => {
                                     <span className={`text-lg font-bold ${otHours > 0 ? 'text-green-700 dark:text-green-300' : 'text-slate-400'}`}>
                                         {otHours > 0 ? `${otHours} ชม.` : '— ชม.'}
                                     </span>
+                                </div>
+
+                                {/* OT Rate (multiplier) */}
+                                <div className="space-y-1.5">
+                                    <label className={labelCls}>อัตรา OT (เท่า)</label>
+                                    <div className="grid grid-cols-4 gap-2">
+                                        {[1.0, 1.5, 2.0, 3.0].map(r => (
+                                            <button
+                                                key={r}
+                                                type="button"
+                                                onClick={() => setOtRate(r)}
+                                                className={`py-2 rounded-lg border text-sm font-semibold transition-colors ${otRate === r
+                                                    ? 'bg-primary text-white border-primary shadow-sm'
+                                                    : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-primary/40'}`}
+                                            >
+                                                ×{r.toFixed(1)}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <p className="text-[11px] text-slate-400 leading-snug">
+                                        ปกติ ×1.0 — วันธรรมดาหลังเลิกงาน ×1.5 — วันหยุด ×2.0 — วันหยุดนักขัตฤกษ์ ×3.0 (HR สามารถปรับภายหลังได้)
+                                    </p>
                                 </div>
 
                                 {/* Time Pickers */}

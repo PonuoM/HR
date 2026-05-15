@@ -368,8 +368,13 @@ const LeaveApprovalScreen: React.FC = () => {
                                         ) : (
                                             <>
                                                 <div className="flex items-center justify-between mb-1">
-                                                    <span className="text-sm font-semibold text-gray-900 dark:text-white">
+                                                    <span className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-1.5">
                                                         {isOT ? 'ขอทำ OT' : r.leave_type_name}
+                                                        {isOT && r.ot_rate != null && (
+                                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300">
+                                                                ×{Number(r.ot_rate).toFixed(1)}
+                                                            </span>
+                                                        )}
                                                     </span>
                                                     <span className="text-xs text-gray-500">{isOT ? `${r.total_days} ชม.` : formatLeaveDuration(r.total_days, 8, r.start_date, r.end_date)}</span>
                                                 </div>

@@ -186,6 +186,14 @@ export async function updateLeaveRequest(id: number, data: { status: string; app
     return fetchApi<any>(`leave_requests.php?id=${id}`, { method: 'PUT', body: JSON.stringify(data) });
 }
 
+// HR-only: change OT multiplier on an existing OT leave_request
+export async function updateOtRate(id: number, otRate: number) {
+    return fetchApi<any>(`leave_requests.php?action=update_ot_rate&id=${id}`, {
+        method: 'POST',
+        body: JSON.stringify({ ot_rate: otRate }),
+    });
+}
+
 export async function deleteLeaveRequest(id: number) {
     return fetchApi<any>(`leave_requests.php?id=${id}`, { method: 'DELETE' });
 }
