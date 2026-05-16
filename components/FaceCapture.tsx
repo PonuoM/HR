@@ -96,7 +96,11 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
     const [matchResult, setMatchResult] = useState<{ distance: number; matched: boolean } | null>(null);
     const verifyConsecutiveRef = useRef(0);
     const verifyTriggerRef = useRef(false);
-    const VERIFY_CONSECUTIVE_THRESHOLD = 5;
+    // Lowered from 5 — 5 consecutive good frames at ~15fps = 0.3s+ of
+    // holding perfectly still, and any quality blip resets the counter.
+    // 3 feels snappy without significantly hurting verification quality
+    // (the descriptor is still computed at trigger time).
+    const VERIFY_CONSECUTIVE_THRESHOLD = 3;
 
     // ── Clock-in state (verify mode) ──
     const [clockInState, setClockInState] = useState<'idle' | 'gps' | 'ready' | 'clocking' | 'done' | 'error'>('idle');
@@ -346,10 +350,12 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
                     }
                 }
 
-                // inputSize 416 (was 320): better detection on darker skin tones
-                // and small/distant faces — costs ~30% more CPU per frame.
+                // inputSize back to 320: 416 made phones drop to ~15fps which
+                // felt sluggish in the field. 320 keeps ~30fps headroom on
+                // most devices, which matters more for UX than the marginal
+                // detection-accuracy gain on darker skin tones.
                 const detection = await faceapi
-                    .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.4 }))
+                    .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 }))
                     .withFaceLandmarks()
                     .withFaceDescriptor();
 
