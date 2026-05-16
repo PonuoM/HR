@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import * as faceapi from '@vladmandic/face-api';
-import { areFaceModelsPreloaded, preloadFaceModels } from '../services/faceModelLoader';
+import { areFaceModelsPreloaded, preloadFaceModels, resetFaceModels } from '../services/faceModelLoader';
 
 interface FaceCaptureProps {
     mode: 'register' | 'verify';
@@ -79,6 +79,10 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
     const [modelsLoaded, setModelsLoaded] = useState(false);
     const [status, setStatus] = useState<'loading' | 'ready' | 'detecting' | 'captured' | 'error'>('loading');
     const [message, setMessage] = useState('กำลังโหลดโมเดล AI...');
+    // Surface the underlying load failure so admins/users can screenshot
+    // it for support — usually points at WebGL init or a 404.
+    const [lastError, setLastError] = useState<string | null>(null);
+    const [retryCount, setRetryCount] = useState(0);
 
     // ── Register state ──
     const [regStepIdx, setRegStepIdx] = useState(0);
@@ -105,24 +109,33 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
     }, []);
 
     // ━━━ Load face-api models ━━━
-    useEffect(() => {
-        const loadModels = async () => {
-            try {
-                if (!areFaceModelsPreloaded()) {
-                    await preloadFaceModels();
-                }
-                if (!mountedRef.current) return;
-                setModelsLoaded(true);
-                setStatus('ready');
-                setMessage('กำลังเปิดกล้อง...');
-            } catch (err) {
-                console.error('Failed to load face models:', err);
-                if (!mountedRef.current) return;
-                setStatus('error');
-                setMessage('ไม่สามารถโหลดโมเดลได้ กรุณาลองใหม่');
+    const loadModels = useCallback(async () => {
+        setStatus('loading');
+        setMessage('กำลังโหลดโมเดล AI...');
+        setLastError(null);
+        try {
+            if (!areFaceModelsPreloaded()) {
+                await preloadFaceModels();
             }
-        };
-        loadModels();
+            if (!mountedRef.current) return;
+            setModelsLoaded(true);
+            setStatus('ready');
+            setMessage('กำลังเปิดกล้อง...');
+        } catch (err: any) {
+            console.error('Failed to load face models:', err);
+            if (!mountedRef.current) return;
+            setLastError(err?.message ? String(err.message) : String(err));
+            setStatus('error');
+            setMessage('ไม่สามารถโหลดโมเดลได้');
+        }
+    }, []);
+
+    useEffect(() => { loadModels(); }, [loadModels, retryCount]);
+
+    const handleRetry = useCallback(async () => {
+        await resetFaceModels();
+        setModelsLoaded(false);
+        setRetryCount(c => c + 1);
     }, []);
 
     // ━━━ Start camera ━━━
@@ -687,10 +700,30 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
 
                 {/* Error overlay */}
                 {status === 'error' && (
-                    <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
-                        <div className="text-center text-white px-8">
+                    <div className="absolute inset-0 bg-black/80 flex items-center justify-center">
+                        <div className="text-center text-white px-6 max-w-sm w-full">
                             <span className="material-icons-round text-5xl text-red-400 mb-3 block">error_outline</span>
-                            <p className="text-sm">{message}</p>
+                            <p className="text-base font-bold mb-2">{message}</p>
+                            {lastError && (
+                                <details className="mb-4">
+                                    <summary className="text-[11px] text-white/50 cursor-pointer select-none">
+                                        ดูรายละเอียดข้อผิดพลาด
+                                    </summary>
+                                    <p className="text-[10px] text-white/40 font-mono break-words mt-2 px-3 py-2 bg-black/40 rounded text-left">
+                                        {lastError}
+                                    </p>
+                                </details>
+                            )}
+                            <button
+                                onClick={handleRetry}
+                                className="px-6 py-3 bg-primary hover:bg-blue-600 text-white rounded-xl font-semibold text-sm flex items-center gap-2 mx-auto shadow-lg shadow-primary/30 active:scale-95 transition-all"
+                            >
+                                <span className="material-icons-round text-base">refresh</span>
+                                ลองใหม่ (ล้างแคชโมเดล)
+                            </button>
+                            <p className="text-[10px] text-white/40 mt-3">
+                                ถ้ายังไม่หาย: ปิดแอป → เปิดใหม่ หรือ Reinstall PWA
+                            </p>
                         </div>
                     </div>
                 )}
