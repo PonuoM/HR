@@ -14,9 +14,11 @@ interface FaceCaptureProps {
     checkLocationFn?: (lat: number, lng: number) => Promise<{ matched: boolean; location_name: string; distance: number }>;
 }
 
-// Lowered from 0.55 — was admitting look-alikes (siblings, similar features).
-// 0.45 keeps legit users in while pushing FAR (false-accept rate) down sharply.
-const MATCH_THRESHOLD = 0.45;
+// Reverted to 0.55 after 0.45 caused too many "scan failed" retries for
+// legit users in the field. We accept the higher false-accept rate for
+// look-alikes for now; revisit once Human library migration brings
+// liveness checks online (FACE-MIGRATION.md).
+const MATCH_THRESHOLD = 0.55;
 // Lowered from 150 — too strict for older phones / users sitting back.
 const MIN_FACE_SIZE = 120;
 const NO_FACE_TIMEOUT_MS = 15000;
