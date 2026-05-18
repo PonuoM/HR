@@ -101,6 +101,12 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
     // 3 feels snappy without significantly hurting verification quality
     // (the descriptor is still computed at trigger time).
     const VERIFY_CONSECUTIVE_THRESHOLD = 3;
+    // Ring buffer of recent descriptors so verification uses the best
+    // (closest) of K frames instead of a single noisy snapshot. Single-
+    // frame matching loses to motion blur, half-blinks, and the user
+    // micro-tilting the phone — best-of-K is dramatically more robust.
+    const recentDescriptorsRef = useRef<Float32Array[]>([]);
+    const DESCRIPTOR_BUFFER_SIZE = 5;
 
     // ── Clock-in state (verify mode) ──
     const [clockInState, setClockInState] = useState<'idle' | 'gps' | 'ready' | 'clocking' | 'done' | 'error'>('idle');
@@ -275,26 +281,40 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
         if (!referenceDescriptor) return;
 
         const refDesc = new Float32Array(referenceDescriptor);
-        const distance = faceapi.euclideanDistance(currentDescriptor, refDesc);
-        const matched = distance < MATCH_THRESHOLD;
-        setMatchResult({ distance, matched });
-        onMatch?.(distance, matched);
+
+        // Score the current frame AND every buffered frame, take the
+        // minimum distance. One unlucky frame (blink, blur, head turn)
+        // no longer fails the whole verification.
+        const candidates = [currentDescriptor, ...recentDescriptorsRef.current];
+        let bestDistance = Infinity;
+        let bestDescriptor = currentDescriptor;
+        for (const d of candidates) {
+            const dist = faceapi.euclideanDistance(d, refDesc);
+            if (dist < bestDistance) {
+                bestDistance = dist;
+                bestDescriptor = d;
+            }
+        }
+        const matched = bestDistance < MATCH_THRESHOLD;
+        setMatchResult({ distance: bestDistance, matched });
+        onMatch?.(bestDistance, matched);
 
         if (matched) {
             setStatus('captured');
-            setMessage(`✅ ยืนยันตัวตนสำเร็จ (${Math.round((1 - distance) * 100)}%)`);
+            setMessage(`✅ ยืนยันตัวตนสำเร็จ (${Math.round((1 - bestDistance) * 100)}%)`);
             // Start GPS request immediately
             if (onClockIn && checkLocationFn) {
                 requestGPS();
             } else {
-                // No clock-in integration → just return descriptor
-                const desc = Array.from(currentDescriptor);
+                // No clock-in integration → just return the best descriptor
+                const desc = Array.from(bestDescriptor);
                 setTimeout(() => onCapture(desc), 1500);
             }
         } else {
             verifyTriggerRef.current = false;
             verifyConsecutiveRef.current = 0;
-            setMessage(`❌ ใบหน้าไม่ตรงกัน (${Math.round((1 - distance) * 100)}%) — ลองใหม่`);
+            recentDescriptorsRef.current = []; // fresh buffer for the next attempt
+            setMessage(`❌ ใบหน้าไม่ตรงกัน (${Math.round((1 - bestDistance) * 100)}%) — ลองใหม่`);
         }
     }, [referenceDescriptor, onCapture, onMatch, onClockIn, checkLocationFn, requestGPS]);
 
@@ -307,6 +327,7 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
         regConsecutiveRef.current = 0;
         verifyConsecutiveRef.current = 0;
         verifyTriggerRef.current = false;
+        recentDescriptorsRef.current = [];
         lastDetectionAtRef.current = Date.now();
 
         let cancelled = false;
@@ -372,12 +393,26 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
                         const { x, y, width, height } = detection.detection.box;
                         const pose = detectHeadPose(detection.landmarks, detection.detection.box);
 
-                        // ── Quality gates (used by both modes) ──
+                        // Push every detected descriptor into the verify-mode
+                        // ring buffer so best-of-K matching has frames to work
+                        // with even before the consecutive counter fills.
+                        if (mode === 'verify' && detection.descriptor) {
+                            recentDescriptorsRef.current.push(detection.descriptor);
+                            if (recentDescriptorsRef.current.length > DESCRIPTOR_BUFFER_SIZE) {
+                                recentDescriptorsRef.current.shift();
+                            }
+                        }
+
+                        // ── Quality gates ──
+                        // Face size is BLOCKING (descriptor quality degrades sharply on tiny crops).
+                        // Low light is ADVISORY in verify mode — we still let the
+                        // user try, just warn them. Most offices have borderline-dim
+                        // lighting that shouldn't block clock-in.
                         const faceTooSmall = width < MIN_FACE_SIZE || height < MIN_FACE_SIZE;
-                        const qualityFail = faceTooSmall || lowLight;
+                        const qualityFail = faceTooSmall || (mode === 'register' && lowLight);
                         const qualityMessage = faceTooSmall
                             ? '📏 กรุณาเข้าใกล้กล้องอีกหน่อย'
-                            : (lowLight ? '💡 แสงน้อยเกินไป — กรุณาหาที่สว่างกว่า' : '');
+                            : (lowLight ? '💡 แสงน้อย — ลองหาที่สว่างกว่า' : '');
 
                         if (mode === 'register') {
                             const currentStep = REG_STEPS[regStepIdx];
