@@ -13,9 +13,10 @@ type UserVars = {
     id?: string;
     name?: string;
     nickname?: string | null;
+    company_id?: number | string | null;
 };
 
-const TOKEN_RE = /\{(user_name|employee_id|nickname)\}/g;
+const TOKEN_RE = /\{(user_name|employee_id|nickname|company_id)\}/g;
 
 export function substituteUrlVars(url: string | null | undefined, user?: UserVars | null): string {
     if (!url) return '';
@@ -25,6 +26,7 @@ export function substituteUrlVars(url: string | null | undefined, user?: UserVar
             case 'user_name':   return encodeURIComponent(user.name || '');
             case 'employee_id': return encodeURIComponent(user.id || '');
             case 'nickname':    return encodeURIComponent(user.nickname || '');
+            case 'company_id':  return encodeURIComponent(String(user.company_id ?? ''));
             default:            return _match;
         }
     });
