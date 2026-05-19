@@ -9,6 +9,7 @@ import { subscribeToPush } from '../services/pushNotifications';
 import LocationCheckModal from '../components/LocationCheckModal';
 import FaceCapture from '../components/FaceCapture';
 import { formatLeaveDuration } from '../utils/leaveHelpers';
+import { substituteUrlVars } from '../utils/urlTemplate';
 import { useToast } from '../components/Toast';
 import BirthdayCakeAnimation from '../components/BirthdayCakeAnimation';
 import { useAuth } from '../contexts/AuthContext';
@@ -1183,7 +1184,7 @@ const HomeScreen: React.FC = () => {
                                     </>
                                 );
                                 return isExternal ? (
-                                    <a key={i} href={item.externalUrl} target="_blank" rel="noopener noreferrer"
+                                    <a key={i} href={substituteUrlVars(item.externalUrl, currentUser)} target="_blank" rel="noopener noreferrer"
                                         className="flex flex-col items-center gap-1.5 group">
                                         {Inner}
                                     </a>
@@ -1221,7 +1222,7 @@ const HomeScreen: React.FC = () => {
                                     </>
                                 );
                                 return isExternal ? (
-                                    <a key={i} href={item.externalUrl} target="_blank" rel="noopener noreferrer" className={cls}>
+                                    <a key={i} href={substituteUrlVars(item.externalUrl, currentUser)} target="_blank" rel="noopener noreferrer" className={cls}>
                                         {Inner}
                                     </a>
                                 ) : (

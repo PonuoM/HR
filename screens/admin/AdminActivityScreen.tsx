@@ -324,6 +324,9 @@ const AdminActivityScreen: React.FC = () => {
                                                     placeholder="https://..."
                                                     className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary/30 focus:border-primary outline-none"
                                                 />
+                                                <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 leading-snug">
+                                                    ใส่ตัวแปรได้: <code className="text-cyan-600 dark:text-cyan-400">{'{user_name}'}</code>, <code className="text-cyan-600 dark:text-cyan-400">{'{employee_id}'}</code>, <code className="text-cyan-600 dark:text-cyan-400">{'{nickname}'}</code> — จะถูกแทนด้วยข้อมูลพนักงานตอนคลิก
+                                                </p>
                                             </div>
                                             <div className="flex items-end gap-2">
                                                 <div className="flex-1">
