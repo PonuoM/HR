@@ -34,19 +34,19 @@ const REG_STEPS: { key: RegStep; label: string; icon: string; instruction: strin
 ];
 
 // ───── Head pose detection using landmarks ─────
+// Widened center band (0.40–0.60) and removed the unreachable gap that the
+// previous 0.42/0.58 + 0.43/0.57 split created — users would land at 0.41
+// and get classified as nothing, freezing the counter.
 function detectHeadPose(landmarks: faceapi.FaceLandmarks68, box: faceapi.Box): 'center' | 'left' | 'right' | null {
-    // nose tip = landmark 30, face bounding box
     const noseTip = landmarks.positions[30];
-    const faceCenterX = box.x + box.width / 2;
     const relativeNose = (noseTip.x - box.x) / box.width; // 0..1, 0.5 = center
 
-    if (relativeNose >= 0.42 && relativeNose <= 0.58) return 'center';
+    if (relativeNose >= 0.40 && relativeNose <= 0.60) return 'center';
     // Camera is mirrored (scaleX -1), so directions are swapped:
-    // nose < 0.43 in raw frame = user turned RIGHT (from their perspective)
-    // nose > 0.57 in raw frame = user turned LEFT
-    if (relativeNose < 0.43) return 'right';
-    if (relativeNose > 0.57) return 'left';
-    return null;
+    // nose < 0.40 in raw frame = user turned RIGHT (from their perspective)
+    // nose > 0.60 in raw frame = user turned LEFT
+    if (relativeNose < 0.40) return 'right';
+    return 'left';
 }
 
 // ───── Average multiple descriptors ─────
@@ -90,17 +90,22 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
     const [regStepIdx, setRegStepIdx] = useState(0);
     const [capturedDescriptors, setCapturedDescriptors] = useState<number[][]>([]);
     const regConsecutiveRef = useRef(0);
-    const REG_CONSECUTIVE_THRESHOLD = 5;
+    // Lowered from 5 → 2. Field reports of "hold 5+ seconds" — the full
+    // detect+landmarks+descriptor pipeline runs ~100–200ms/frame on mid-tier
+    // phones, so 5 frames = 0.5–1s minimum, and any micro-tilt of the head
+    // used to reset the counter (now: decay-by-1, see detect loop). 2 frames
+    // still rejects single-frame fluke detections.
+    const REG_CONSECUTIVE_THRESHOLD = 2;
 
     // ── Verify state ──
     const [matchResult, setMatchResult] = useState<{ distance: number; matched: boolean } | null>(null);
     const verifyConsecutiveRef = useRef(0);
     const verifyTriggerRef = useRef(false);
-    // Lowered from 5 — 5 consecutive good frames at ~15fps = 0.3s+ of
-    // holding perfectly still, and any quality blip resets the counter.
-    // 3 feels snappy without significantly hurting verification quality
-    // (the descriptor is still computed at trigger time).
-    const VERIFY_CONSECUTIVE_THRESHOLD = 3;
+    // 2 frames ≈ 200–400ms on mid-tier phones — feels instant but lets the
+    // best-of-K ring buffer (below) collect 2 descriptors before triggering,
+    // which avoids the "trigger → motion-blur miss → re-trigger → miss"
+    // flicker that threshold=1 produces.
+    const VERIFY_CONSECUTIVE_THRESHOLD = 2;
     // Ring buffer of recent descriptors so verification uses the best
     // (closest) of K frames instead of a single noisy snapshot. Single-
     // frame matching loses to motion blur, half-blinks, and the user
@@ -157,8 +162,23 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
             try {
                 // Race getUserMedia against a timeout so a hung permission prompt
                 // or unresponsive driver doesn't leave the user staring at black.
+                //
+                // Resolution constraints matter on iOS: without them Safari hands
+                // back the highest-res selfie stream (often 1920×1440 4:3), which
+                // CSS `object-cover` then aggressively crops in a portrait
+                // container — users see an extreme zoom-in and can't frame their
+                // face. 1280×720 is plenty for a 320px detector input and crops
+                // cleanly. `max` ceilings keep iPhones from defaulting to 4K.
                 const stream = await Promise.race<MediaStream>([
-                    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } }),
+                    navigator.mediaDevices.getUserMedia({
+                        video: {
+                            facingMode: 'user',
+                            width: { ideal: 1280, max: 1280 },
+                            height: { ideal: 720, max: 720 },
+                            frameRate: { ideal: 24, max: 30 },
+                        },
+                        audio: false,
+                    }),
                     new Promise<MediaStream>((_, reject) =>
                         setTimeout(() => reject(new Error('camera_timeout')), CAMERA_START_TIMEOUT_MS)
                     ),
@@ -414,6 +434,14 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
                             ? '📏 กรุณาเข้าใกล้กล้องอีกหน่อย'
                             : (lowLight ? '💡 แสงน้อย — ลองหาที่สว่างกว่า' : '');
 
+                        // Soft-decay counter on bad frames instead of hard reset
+                        // to 0. A single blink, motion blur, or micro-tilt should
+                        // not erase a second of held-still progress — that was the
+                        // root of "สแกนติดยาก" complaints in the field.
+                        const decay = (ref: { current: number }) => {
+                            ref.current = Math.max(0, ref.current - 1);
+                        };
+
                         if (mode === 'register') {
                             const currentStep = REG_STEPS[regStepIdx];
                             const isCorrectPose = pose === currentStep.key;
@@ -426,7 +454,7 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
                             drawCorners(ctx, x, y, width, height, color, 20);
 
                             if (qualityFail) {
-                                regConsecutiveRef.current = 0;
+                                decay(regConsecutiveRef);
                                 setMessage(qualityMessage);
                             } else if (isCorrectPose) {
                                 regConsecutiveRef.current++;
@@ -440,7 +468,7 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
                                     return;
                                 }
                             } else {
-                                regConsecutiveRef.current = 0;
+                                decay(regConsecutiveRef);
                                 setMessage(currentStep.instruction);
                             }
                         } else {
@@ -452,7 +480,7 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
                             drawCorners(ctx, x, y, width, height, color, 20);
 
                             if (qualityFail) {
-                                verifyConsecutiveRef.current = 0;
+                                decay(verifyConsecutiveRef);
                                 setMessage(qualityMessage);
                             } else if (!verifyTriggerRef.current) {
                                 verifyConsecutiveRef.current++;
@@ -550,9 +578,13 @@ const FaceCapture: React.FC<FaceCaptureProps> = ({
 
             {/* ── Camera View ── */}
             <div className="flex-1 relative overflow-hidden">
+                {/* object-contain (not -cover) so the full camera frame is
+                    visible — `object-cover` in a portrait container chops the
+                    sides off a 16:9 stream and looks like a heavy zoom-in on
+                    iOS. Letterboxing with black is the lesser evil. */}
                 <video
                     ref={videoRef}
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-contain bg-black"
                     autoPlay playsInline muted
                     style={{ transform: 'scaleX(-1)' }}
                 />

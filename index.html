@@ -18,6 +18,16 @@
     <meta name="apple-mobile-web-app-title" content="HR Connect">
     <link rel="apple-touch-icon" href="/icons/icon-512.png">
 
+    <!-- Face-api model preload: starts the 7MB download in parallel with the
+         JS bundle so by the time the user taps "ลงเวลา" the models are warm.
+         crossorigin is required for fetch-style preload to be reused. -->
+    <link rel="preload" as="fetch" href="/models/tiny_face_detector_model-weights_manifest.json" crossorigin="anonymous">
+    <link rel="preload" as="fetch" href="/models/tiny_face_detector_model.bin" crossorigin="anonymous">
+    <link rel="preload" as="fetch" href="/models/face_landmark_68_model-weights_manifest.json" crossorigin="anonymous">
+    <link rel="preload" as="fetch" href="/models/face_landmark_68_model.bin" crossorigin="anonymous">
+    <link rel="preload" as="fetch" href="/models/face_recognition_model-weights_manifest.json" crossorigin="anonymous">
+    <link rel="preload" as="fetch" href="/models/face_recognition_model.bin" crossorigin="anonymous">
+
     <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@200;300;400;500;600;700&display=swap"
         rel="stylesheet" />
