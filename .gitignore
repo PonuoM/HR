@@ -44,6 +44,8 @@ HR.csv
 HR_import.sql
 HR_*.csv
 HR_*.sql
+# Any CSV anywhere — assume employee/customer PII unless proven otherwise
+*.csv
 
 # ─── Debug / one-off scripts ───
 # Ad-hoc DB inspection scripts (regenerated as needed)
