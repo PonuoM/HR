@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { API_BASE, getAuthHeaders, deleteLeaveRequest } from '../services/api';
+import { API_BASE, getAuthHeaders, deleteLeaveRequest, adminDeleteLeaveRequest } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../components/Toast';
 import { formatLeaveDuration } from '../utils/leaveHelpers';
@@ -75,6 +75,10 @@ const StatusScreen: React.FC = () => {
   const [request, setRequest] = useState<LeaveRequest | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [adminDeleteOpen, setAdminDeleteOpen] = useState(false);
+  const [adminDeleteReason, setAdminDeleteReason] = useState('');
+  const [adminDeleteBusy, setAdminDeleteBusy] = useState(false);
+  const isAdmin = !!authUser && (authUser.is_admin === 1 || authUser.is_superadmin === 1);
 
   useEffect(() => {
     if (!id) return;
@@ -338,37 +342,140 @@ const StatusScreen: React.FC = () => {
         </div>
       </main>
 
-      {/* Bottom action buttons — only show for pending requests */}
-      {request.status === 'pending' && (
+      {/* Bottom action buttons */}
+      {(request.status === 'pending' || (isAdmin && request.employee_id !== empId)) && (
         <div className="absolute bottom-0 w-full bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800 p-4 pb-8 backdrop-blur-lg bg-opacity-95 dark:bg-opacity-95 z-30 md:bg-transparent md:border-none md:pointer-events-none">
           <div className="grid grid-cols-1 gap-3 max-w-2xl mx-auto md:pointer-events-auto">
-            <button 
-              type="button"
-              onClick={async (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                const confirmed = await confirm({
-                    title: 'ยืนยันการยกเลิก',
-                    message: 'คุณต้องการยกเลิกคำขอนี้ใช่หรือไม่?',
-                    confirmText: 'ยกเลิกคำขอ',
-                    cancelText: 'ปิด',
-                    type: 'danger'
-                });
-                if (confirmed) {
+            {/* Owner self-cancel — only for own pending requests */}
+            {request.status === 'pending' && request.employee_id === empId && (
+              <button
+                type="button"
+                onClick={async (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const confirmed = await confirm({
+                      title: 'ยืนยันการยกเลิก',
+                      message: 'คุณต้องการยกเลิกคำขอนี้ใช่หรือไม่?',
+                      confirmText: 'ยกเลิกคำขอ',
+                      cancelText: 'ปิด',
+                      type: 'danger'
+                  });
+                  if (confirmed) {
+                    try {
+                      await deleteLeaveRequest(request.id);
+                      toast('คำขอถูกยกเลิกสำเร็จแล้ว', 'success');
+                      navigate(-1);
+                    } catch (err: any) {
+                      toast(err.message || 'เกิดข้อผิดพลาดในการยกเลิกคำขอ', 'error');
+                    }
+                  }
+                }}
+                className="flex items-center justify-center gap-2 w-full py-3.5 px-4 rounded-xl text-sm font-semibold text-red-600 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/30 dark:text-red-400 transition-colors md:shadow-sm md:bg-white md:dark:bg-gray-800 md:border md:border-red-100"
+              >
+                <span className="material-icons-round text-lg">cancel</span>
+                ยกเลิกคำขอ
+              </button>
+            )}
+
+            {/* Admin destructive delete — any status, NOT own. Audit-logged with reason. */}
+            {isAdmin && request.employee_id !== empId && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setAdminDeleteReason('');
+                  setAdminDeleteOpen(true);
+                }}
+                className="flex items-center justify-center gap-2 w-full py-3.5 px-4 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors shadow-md shadow-red-500/30"
+              >
+                <span className="material-icons-round text-lg">delete_forever</span>
+                ลบใบลานี้ (HR)
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Admin delete reason modal */}
+      {adminDeleteOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="p-5 border-b border-gray-100 dark:border-gray-800 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+                <span className="material-icons-round text-red-600 dark:text-red-400">delete_forever</span>
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-gray-900 dark:text-white">ยืนยันการลบใบลา</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">การลบจะถูกบันทึกเป็นหลักฐาน</p>
+              </div>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="text-sm text-gray-700 dark:text-gray-300">
+                คุณกำลังจะลบใบลาของ <span className="font-semibold">{request.employee_name}</span> วันที่{' '}
+                <span className="font-semibold">{formatThaiDate(request.start_date)}</span> โดยการลบจะ:
+                <ul className="mt-2 list-disc pl-5 space-y-1 text-xs text-gray-600 dark:text-gray-400">
+                  <li>คืนโควต้าการลาให้พนักงานโดยอัตโนมัติ</li>
+                  <li>บันทึก snapshot + เหตุผล + ผู้ลบ + เวลา ลงในตารางหลักฐาน</li>
+                  <li>แจ้งเตือนพนักงานทันที</li>
+                </ul>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                  เหตุผลการลบ <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={adminDeleteReason}
+                  onChange={(e) => setAdminDeleteReason(e.target.value)}
+                  rows={3}
+                  placeholder="เช่น: ลงผิดวัน, พนักงานยกเลิกหลังอนุมัติ, ฯลฯ"
+                  className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500/40 focus:border-red-500"
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="p-5 pt-0 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setAdminDeleteOpen(false)}
+                disabled={adminDeleteBusy}
+                className="flex-1 py-2.5 px-4 rounded-xl text-sm font-semibold text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                disabled={adminDeleteBusy || adminDeleteReason.trim().length === 0}
+                onClick={async () => {
+                  const reason = adminDeleteReason.trim();
+                  if (!reason) return;
+                  setAdminDeleteBusy(true);
                   try {
-                    await deleteLeaveRequest(request.id);
-                    toast('คำขอถูกยกเลิกสำเร็จแล้ว', 'success');
+                    await adminDeleteLeaveRequest(request.id, reason);
+                    toast('ลบใบลาเรียบร้อยแล้ว — บันทึกหลักฐานสำเร็จ', 'success');
+                    setAdminDeleteOpen(false);
                     navigate(-1);
                   } catch (err: any) {
-                    toast(err.message || 'เกิดข้อผิดพลาดในการยกเลิกคำขอ', 'error');
+                    toast(err.message || 'เกิดข้อผิดพลาดในการลบใบลา', 'error');
+                  } finally {
+                    setAdminDeleteBusy(false);
                   }
-                }
-              }} 
-              className="flex items-center justify-center gap-2 w-full py-3.5 px-4 rounded-xl text-sm font-semibold text-red-600 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/30 dark:text-red-400 transition-colors md:shadow-sm md:bg-white md:dark:bg-gray-800 md:border md:border-red-100"
-            >
-              <span className="material-icons-round text-lg">cancel</span>
-              ยกเลิกคำขอ
-            </button>
+                }}
+                className="flex-1 py-2.5 px-4 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {adminDeleteBusy ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                    กำลังลบ...
+                  </>
+                ) : (
+                  <>
+                    <span className="material-icons-round text-base">delete_forever</span>
+                    ยืนยันลบ
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -31,6 +31,7 @@ import AdminSecurityScreen from './screens/admin/AdminSecurityScreen';
 import AdminFaceRegistrationScreen from './screens/admin/AdminFaceRegistrationScreen';
 import AdminFaceTestScreen from './screens/admin/AdminFaceTestScreen';
 import AdminActivityScreen from './screens/admin/AdminActivityScreen';
+import AdminLeaveListScreen from './screens/admin/AdminLeaveListScreen';
 import SettingsScreen from './screens/settings/SettingsScreen';
 import SecurityScreen from './screens/settings/SecurityScreen';
 import HelpScreen from './screens/settings/HelpScreen';
@@ -165,6 +166,7 @@ const App: React.FC = () => {
                       <Route path="/admin/face-registration" element={<AdminFaceRegistrationScreen />} />
                       <Route path="/admin/face-test" element={<AdminFaceTestScreen />} />
                       <Route path="/admin/activities" element={<AdminActivityScreen />} />
+                      <Route path="/admin/leave-list" element={<AdminLeaveListScreen />} />
                     </Routes>
                   </PageTransition>
                 </Layout>

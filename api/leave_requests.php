@@ -483,17 +483,33 @@ if ($method === 'PUT' && isset($_GET['id'])) {
     json_response(['error' => 'Invalid action'], 400);
 }
 
-// ─── DELETE (Cancel Pending Request) ───
+// ─── DELETE ───
+// Two paths:
+//   1) Admin/Superadmin: any status, requires reason, snapshotted to
+//      leave_request_deletions for audit. Quota auto-recovers.
+//   2) Owner self-cancel: only for own pending requests (no audit).
 if ($method === 'DELETE' && isset($_GET['id'])) {
     $id = (int)$_GET['id'];
     $employee_id_header = get_employee_id();
-    
+
     if (!$employee_id_header) {
         json_response(['error' => 'Unauthorized'], 401);
     }
 
-    // Check if the record exists and belongs to the user + is pending
-    $stmt = $conn->prepare("SELECT id, status, employee_id FROM leave_requests WHERE id = ?");
+    // Identify caller role
+    $actorStmt = $conn->prepare("SELECT id, name, is_admin, is_superadmin FROM employees WHERE id = ? AND is_active = 1");
+    $actorStmt->bind_param('s', $employee_id_header);
+    $actorStmt->execute();
+    $actor = $actorStmt->get_result()->fetch_assoc();
+    $isAdmin = $actor && ((int)$actor['is_admin'] === 1 || (int)$actor['is_superadmin'] === 1);
+
+    // Fetch full leave_request row + employee company_id for audit scoping
+    $stmt = $conn->prepare(
+        "SELECT lr.*, e.company_id
+         FROM leave_requests lr
+         JOIN employees e ON lr.employee_id = e.id
+         WHERE lr.id = ?"
+    );
     $stmt->bind_param('i', $id);
     $stmt->execute();
     $req = $stmt->get_result()->fetch_assoc();
@@ -502,10 +518,68 @@ if ($method === 'DELETE' && isset($_GET['id'])) {
         json_response(['error' => 'Record not found'], 404);
     }
 
+    // ─── Admin-delete path: any status, reason required, audit-logged ───
+    if ($isAdmin) {
+        $body = get_json_body();
+        $reason = isset($body['reason']) ? trim($body['reason']) : '';
+        if ($reason === '') {
+            json_response(['error' => 'กรุณาระบุเหตุผลในการลบใบลา'], 400);
+        }
+        // Prevent admin from deleting their OWN leave (must use another admin)
+        if ($employee_id_header === $req['employee_id']) {
+            json_response(['error' => 'ไม่สามารถลบใบลาของตัวเองได้ (ต้องให้ admin ท่านอื่นดำเนินการ)'], 403);
+        }
+
+        // Snapshot the full row as JSON
+        $snapshot = json_encode($req, JSON_UNESCAPED_UNICODE);
+        $companyId = isset($req['company_id']) ? (int)$req['company_id'] : null;
+
+        $auditStmt = $conn->prepare(
+            "INSERT INTO leave_request_deletions
+             (original_request_id, employee_id, company_id, snapshot, deleted_by, deleted_at, reason)
+             VALUES (?, ?, ?, ?, ?, NOW(), ?)"
+        );
+        $auditStmt->bind_param('isisss',
+            $id, $req['employee_id'], $companyId, $snapshot, $employee_id_header, $reason
+        );
+        $auditStmt->execute();
+        $auditId = $conn->insert_id;
+
+        // Hard delete — quota auto-rolls back because quota reads from leave_requests
+        $delStmt = $conn->prepare("DELETE FROM leave_requests WHERE id = ?");
+        $delStmt->bind_param('i', $id);
+        if (!$delStmt->execute()) {
+            json_response(['error' => 'Failed to delete request'], 500);
+        }
+
+        // Notify the affected employee
+        $actorName = $actor['name'] ?? $employee_id_header;
+        $startDateOnly = substr($req['start_date'], 0, 10);
+        $isOTReq = isset($req['reason']) && strpos($req['reason'], '[OT]') === 0;
+        $kindLabel = $isOTReq ? 'รายการ OT' : 'ใบลา';
+        create_notification($conn, $req['employee_id'],
+            "{$kindLabel}ถูกลบโดย HR",
+            "{$kindLabel}ของคุณ (วันที่ {$startDateOnly}) ถูกลบโดย {$actorName} — เหตุผล: {$reason}",
+            'delete_forever',
+            'bg-red-100 dark:bg-red-900/30',
+            'leave',
+            'text-red-600'
+        );
+        safe_send_push($conn, $req['employee_id'],
+            "{$kindLabel}ถูกลบโดย HR",
+            "{$kindLabel}วันที่ {$startDateOnly} ถูกลบ — {$reason}"
+        );
+
+        json_response([
+            'message' => 'Request deleted with audit log',
+            'audit_id' => $auditId,
+        ]);
+    }
+
+    // ─── Owner self-cancel path: own + pending only ───
     if ($req['employee_id'] !== $employee_id_header) {
         json_response(['error' => 'Permission denied: Cannot delete others requests'], 403);
     }
-
     if ($req['status'] !== 'pending') {
         json_response(['error' => 'Cannot delete: Request is already processed'], 400);
     }

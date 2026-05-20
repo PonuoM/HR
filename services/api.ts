@@ -198,6 +198,15 @@ export async function deleteLeaveRequest(id: number) {
     return fetchApi<any>(`leave_requests.php?id=${id}`, { method: 'DELETE' });
 }
 
+// HR/Superadmin only: delete a leave_request in ANY status with audit log.
+// Requires a reason string. Snapshot is saved server-side in leave_request_deletions.
+export async function adminDeleteLeaveRequest(id: number, reason: string) {
+    return fetchApi<any>(`leave_requests.php?id=${id}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ reason }),
+    });
+}
+
 // --- Time Records ---
 export async function getTimeRecords(filters?: { employee_id?: string; status?: string; approver_id?: string }) {
     const params = new URLSearchParams();
