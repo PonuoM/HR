@@ -204,6 +204,39 @@ if ($method === 'POST') {
         if (!in_array($otRate, [1.0, 1.5, 2.0, 3.0], true)) $otRate = 1.0;
     }
 
+    // ── Duplicate prevention ──
+    // For non-OT leave: block insert if employee already has any non-rejected
+    // leave of the SAME type with overlapping dates. Prevents the common case
+    // where employee submits + HR also records (creates 2x quota burn).
+    if (!$isOT) {
+        $sDate = substr($body['start_date'], 0, 10);
+        $eDate = substr($body['end_date'], 0, 10);
+        $dupStmt = $conn->prepare(
+            "SELECT lr.id, lr.start_date, lr.end_date, lr.status, lr.is_bypass,
+                    lt.name AS leave_type_name
+             FROM leave_requests lr
+             LEFT JOIN leave_types lt ON lr.leave_type_id = lt.id
+             WHERE lr.employee_id = ?
+               AND lr.leave_type_id = ?
+               AND lr.status != 'rejected'
+               AND lr.reason NOT LIKE '[OT]%'
+               AND lr.start_date <= ?
+               AND lr.end_date >= ?
+             LIMIT 1"
+        );
+        $dupStmt->bind_param('siss', $employee_id, $leaveTypeId, $eDate, $sDate);
+        $dupStmt->execute();
+        $dup = $dupStmt->get_result()->fetch_assoc();
+        if ($dup) {
+            $existDate = substr($dup['start_date'], 0, 10);
+            json_response([
+                'error' => "มีใบลา{$dup['leave_type_name']}ของพนักงานคนนี้ในช่วงวันที่นี้อยู่แล้ว (วันที่ {$existDate}, สถานะ: {$dup['status']}) — ไม่สามารถลงซ้ำได้",
+                'existing_id' => (int)$dup['id'],
+                'existing_status' => $dup['status'],
+            ], 409);
+        }
+    }
+
     if ($admin_create) {
         // HR-recorded leave: insert as already-approved with is_bypass=1
         // Params: employee_id(s) leave_type_id(i) start(s) end(s) days(s) ot_rate(d) reason(s)
