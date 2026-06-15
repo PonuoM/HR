@@ -32,6 +32,7 @@ const AdminQuotaScreen: React.FC = () => {
         grantTiming: lt.grant_timing || 'next_year',
         prorateFirstYear: lt.prorate_first_year !== undefined ? !!lt.prorate_first_year : true,
         advanceNoticeDays: Number(lt.advance_notice_days ?? 0),
+        autoApprove: lt.auto_approve !== undefined ? !!lt.auto_approve : false,
         seniorityTiers: (lt.seniority_tiers || []).map((t: any) => ({ minYears: Number(t.min_years), days: Number(t.days) })),
     }));
 
@@ -39,7 +40,7 @@ const AdminQuotaScreen: React.FC = () => {
     const emptyForm: Partial<AdminLeaveType | any> = {
         name: '', defaultQuota: '', unit: 'days', type: 'annual', color: 'blue', icon: 'star', iconUrl: null,
         isActive: true, requiresDoc: false, probationMonths: '', grantTiming: 'next_year',
-        prorateFirstYear: true, advanceNoticeDays: '', seniorityTiers: [],
+        prorateFirstYear: true, advanceNoticeDays: '', autoApprove: false, seniorityTiers: [],
     };
     const [formData, setFormData] = useState<Partial<AdminLeaveType>>(emptyForm);
 
@@ -90,6 +91,7 @@ const AdminQuotaScreen: React.FC = () => {
             grant_timing: formData.grantTiming || 'next_year',
             prorate_first_year: formData.prorateFirstYear ? 1 : 0,
             advance_notice_days: Number(formData.advanceNoticeDays) || 0,
+            auto_approve: formData.autoApprove ? 1 : 0,
         };
         if (formData.type === 'seniority') {
             payload.seniority_tiers = (formData.seniorityTiers || []).map((t: any) => ({
@@ -476,6 +478,15 @@ const AdminQuotaScreen: React.FC = () => {
                                     <span className="text-sm font-medium text-gray-700 dark:text-gray-300">ต้องแนบใบรับรองแพทย์/หลักฐาน</span>
                                     <div className={`w-12 h-6 rounded-full p-1 transition-colors ${formData.requiresDoc ? 'bg-primary' : 'bg-gray-300 dark:bg-gray-600'}`} onClick={() => setFormData({ ...formData, requiresDoc: !formData.requiresDoc })}>
                                         <div className={`w-4 h-4 bg-white rounded-full shadow-sm transform transition-transform ${formData.requiresDoc ? 'translate-x-6' : 'translate-x-0'}`}></div>
+                                    </div>
+                                </label>
+                                <label className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-700 cursor-pointer">
+                                    <div className="flex flex-col pr-3">
+                                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">อนุมัติอัตโนมัติ (ไม่ต้องรออนุมัติ)</span>
+                                        <span className="text-[10px] text-gray-400 mt-0.5">พนักงานยื่นแล้วอนุมัติทันที เช่น WFH — ยังตัดโควต้าตามปกติ</span>
+                                    </div>
+                                    <div className={`shrink-0 w-12 h-6 rounded-full p-1 transition-colors ${formData.autoApprove ? 'bg-primary' : 'bg-gray-300 dark:bg-gray-600'}`} onClick={() => setFormData({ ...formData, autoApprove: !formData.autoApprove })}>
+                                        <div className={`w-4 h-4 bg-white rounded-full shadow-sm transform transition-transform ${formData.autoApprove ? 'translate-x-6' : 'translate-x-0'}`}></div>
                                     </div>
                                 </label>
                                 <label className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-700 cursor-pointer">

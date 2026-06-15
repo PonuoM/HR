@@ -275,6 +275,17 @@ if ($method === 'POST') {
         }
     }
 
+    // Auto-approve leave types (e.g. self-service WFH): an employee's own submission
+    // is recorded as already-approved, bypassing tier-1/tier-2. Quota still applies.
+    $autoApprove = false;
+    if (!$isOT && !$admin_create && $leaveTypeId) {
+        $aaStmt = $conn->prepare("SELECT auto_approve FROM leave_types WHERE id = ?");
+        $aaStmt->bind_param('i', $leaveTypeId);
+        $aaStmt->execute();
+        $aaRow = $aaStmt->get_result()->fetch_assoc();
+        $autoApprove = !empty($aaRow['auto_approve']);
+    }
+
     if ($admin_create) {
         // HR-recorded leave: insert as already-approved with is_bypass=1
         // Params: employee_id(s) leave_type_id(i) start(s) end(s) days(s) ot_rate(d) reason(s)
@@ -293,6 +304,25 @@ if ($method === 'POST') {
             $body['total_days'], $otRate, $body['reason'],
             $approver1_id, $approver2_id,
             $admin_actor_id, $admin_actor_id, $admin_actor_id
+        );
+        $stmt->execute();
+    } elseif ($autoApprove) {
+        // Self-service auto-approve (e.g. WFH): employee submits → recorded approved.
+        // approved_by = the employee themselves; is_bypass=1 keeps it auditable.
+        $stmt = $conn->prepare(
+            "INSERT INTO leave_requests
+             (employee_id, leave_type_id, start_date, end_date, total_days, ot_rate, reason,
+              expected_approver1_id, expected_approver2_id,
+              status, tier1_status, tier2_status, is_bypass, approved_by, approved_at,
+              tier1_by, tier1_at, tier2_by, tier2_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', 'skipped', 'skipped', 1, ?, NOW(), ?, NOW(), ?, NOW())"
+        );
+        $stmt->bind_param('sisssdsssss' . 's',
+            $body['employee_id'], $leaveTypeId,
+            $body['start_date'], $body['end_date'],
+            $body['total_days'], $otRate, $body['reason'],
+            $approver1_id, $approver2_id,
+            $employee_id, $employee_id, $employee_id
         );
         $stmt->execute();
     } else {
@@ -336,6 +366,17 @@ if ($method === 'POST') {
             'text-blue-600'
         );
         safe_send_push($conn, $employee_id, 'HR บันทึกการลาให้คุณ', "{$actorName} บันทึก{$requestType} ({$body['total_days']} วัน)");
+    } elseif ($autoApprove) {
+        // ── Self-service auto-approve: confirm to the employee, no approver needed ──
+        create_notification($conn, $employee_id,
+            'บันทึกเรียบร้อย (อนุมัติอัตโนมัติ)',
+            "{$requestType} ({$body['total_days']} วัน) ได้รับการอนุมัติอัตโนมัติแล้ว",
+            'event_available',
+            'bg-green-100 dark:bg-green-900/30',
+            'leave',
+            'text-green-600'
+        );
+        safe_send_push($conn, $employee_id, 'บันทึกเรียบร้อย', "{$requestType} ({$body['total_days']} วัน) อนุมัติอัตโนมัติแล้ว");
     } elseif ($approver1_id) {
         // Notify tier-1 approver
         create_notification($conn, $approver1_id,

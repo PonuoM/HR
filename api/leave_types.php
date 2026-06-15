@@ -23,6 +23,7 @@ if ($method === 'GET') {
         $row['prorate_first_year'] = (bool)($row['prorate_first_year'] ?? true);
         $row['probation_months'] = (int)($row['probation_months'] ?? 0);
         $row['advance_notice_days'] = (int)($row['advance_notice_days'] ?? 0);
+        $row['auto_approve'] = (bool)($row['auto_approve'] ?? false);
         $row['icon_url'] = $row['icon_url'] ?? null;
         $row['seniority_tiers'] = [];
         $types[$row['id']] = $row;
@@ -57,15 +58,16 @@ if ($method === 'POST') {
     $grant_timing = $body['grant_timing'] ?? 'next_year';
     $prorate_first_year = (int)($body['prorate_first_year'] ?? 1);
     $advance_notice_days = (int)($body['advance_notice_days'] ?? 0);
+    $auto_approve = (int)($body['auto_approve'] ?? 0);
     $icon_url = $body['icon_url'] ?? null;
 
-    $stmt = $conn->prepare("INSERT INTO leave_types (company_id, name, default_quota, unit, type, reset_cycle, color, icon, icon_url, is_active, requires_doc, probation_months, grant_timing, prorate_first_year, advance_notice_days) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param('isissssssiiisii',
+    $stmt = $conn->prepare("INSERT INTO leave_types (company_id, name, default_quota, unit, type, reset_cycle, color, icon, icon_url, is_active, requires_doc, probation_months, grant_timing, prorate_first_year, advance_notice_days, auto_approve) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $stmt->bind_param('isissssssiiisiii',
         $company_id,
         $body['name'], $body['default_quota'], $body['unit'], $body['type'],
         $reset_cycle, $body['color'], $body['icon'], $icon_url,
         $body['is_active'], $body['requires_doc'],
-        $probation_months, $grant_timing, $prorate_first_year, $advance_notice_days
+        $probation_months, $grant_timing, $prorate_first_year, $advance_notice_days, $auto_approve
     );
     $stmt->execute();
     $newId = $conn->insert_id;
@@ -91,14 +93,15 @@ if ($method === 'PUT' && isset($_GET['id'])) {
     $grant_timing = $body['grant_timing'] ?? 'next_year';
     $prorate_first_year = (int)($body['prorate_first_year'] ?? 1);
     $advance_notice_days = (int)($body['advance_notice_days'] ?? 0);
+    $auto_approve = (int)($body['auto_approve'] ?? 0);
     $icon_url = $body['icon_url'] ?? null;
 
-    $stmt = $conn->prepare("UPDATE leave_types SET name=?, default_quota=?, unit=?, type=?, reset_cycle=?, color=?, icon=?, icon_url=?, is_active=?, requires_doc=?, probation_months=?, grant_timing=?, prorate_first_year=?, advance_notice_days=? WHERE id=? AND company_id=?");
-    $stmt->bind_param('sissssssiiisiiii',
+    $stmt = $conn->prepare("UPDATE leave_types SET name=?, default_quota=?, unit=?, type=?, reset_cycle=?, color=?, icon=?, icon_url=?, is_active=?, requires_doc=?, probation_months=?, grant_timing=?, prorate_first_year=?, advance_notice_days=?, auto_approve=? WHERE id=? AND company_id=?");
+    $stmt->bind_param('sissssssiiisiiiii',
         $body['name'], $body['default_quota'], $body['unit'], $body['type'],
         $reset_cycle, $body['color'], $body['icon'], $icon_url,
         $body['is_active'], $body['requires_doc'],
-        $probation_months, $grant_timing, $prorate_first_year, $advance_notice_days,
+        $probation_months, $grant_timing, $prorate_first_year, $advance_notice_days, $auto_approve,
         $id, $company_id
     );
     $stmt->execute();

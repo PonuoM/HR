@@ -166,6 +166,7 @@ export interface AdminLeaveType {
   grantTiming: 'immediate' | 'next_year';
   prorateFirstYear: boolean;
   advanceNoticeDays: number;
+  autoApprove: boolean;
   seniorityTiers: { minYears: number; days: number }[];
 }
 
