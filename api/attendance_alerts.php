@@ -12,6 +12,7 @@
  */
 
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/schedule_helper.php';
 
 $company_id = get_company_id();
 $method = get_method();
@@ -37,11 +38,20 @@ if (!$actRow || !$actRow['enabled'] || !$actRow['start_date']) {
 $systemStartDate = $actRow['start_date']; // Company-wide attendance check start
 
 // ── Respect employee hire_date: never alert for days before they were hired ──
-$hireStmt = $conn->prepare("SELECT hire_date FROM employees WHERE id = ?");
+// Load schedule fields too (with dept fallback) so weekend/off-day detection
+// honours per-employee/department schedule_json instead of hardcoded Mon–Fri.
+$hireStmt = $conn->prepare("SELECT e.hire_date, e.schedule_json, e.late_grace_minutes,
+                                   d.schedule_json AS dept_schedule_json,
+                                   d.late_grace_minutes AS dept_late_grace_minutes,
+                                   d.work_start_time, d.work_end_time,
+                                   d.work_start_time AS dept_work_start_time,
+                                   d.work_end_time AS dept_work_end_time
+                            FROM employees e LEFT JOIN departments d ON e.department_id = d.id
+                            WHERE e.id = ?");
 $hireStmt->bind_param('s', $employee_id);
 $hireStmt->execute();
-$hireRow = $hireStmt->get_result()->fetch_assoc();
-$hireDate = $hireRow['hire_date'] ?? null;
+$emp = $hireStmt->get_result()->fetch_assoc();
+$hireDate = $emp['hire_date'] ?? null;
 
 // Effective start = MAX(system start, hire_date) so new hires don't see
 // "missing clock-in" alerts for dates before their first day.
@@ -118,10 +128,12 @@ $startDt = new DateTime($startDate);
 
 while ($workDaysChecked < 7 && $current >= $startDt) {
     $dateStr = $current->format('Y-m-d');
-    $dow = (int)$current->format('N'); // 1=Mon, 7=Sun
 
-    // Skip weekends
-    if ($dow >= 6) {
+    // Skip this employee's non-working days (schedule-aware: weekend, off-week).
+    // For a 6-day Telesale this keeps Saturday in scope; for Mon–Fri staff it
+    // skips Sat/Sun exactly as before.
+    $sched = resolve_schedule_for_date($emp, $dateStr);
+    if (!$sched['active']) {
         $current->modify('-1 day');
         continue;
     }

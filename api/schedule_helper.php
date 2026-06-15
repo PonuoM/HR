@@ -167,6 +167,69 @@ if (!function_exists('calc_effective_work_hours_v2')) {
     }
 }
 
+if (!function_exists('is_active_workday')) {
+    /**
+     * Is $date an actual working day for THIS employee?
+     * True only when the resolved schedule is active AND the date is not a holiday.
+     * Replaces all hardcoded "$dow <= 5" / "$dow > 5" weekend checks so that
+     * 6-day (เสาร์), alternating-week (เสาร์เว้นเสาร์) and per-employee overrides
+     * are all honoured consistently.
+     *
+     * @param array  $emp          employee record (with schedule_json + dept_ fallback fields)
+     * @param string $date         YYYY-MM-DD
+     * @param array  $holidayDates flat list of 'YYYY-MM-DD' strings (company holidays)
+     */
+    function is_active_workday($emp, $date, $holidayDates = []) {
+        if (!empty($holidayDates) && in_array($date, $holidayDates, true)) return false;
+        $sched = resolve_schedule_for_date($emp, $date);
+        return !empty($sched['active']);
+    }
+}
+
+if (!function_exists('count_active_workdays')) {
+    /**
+     * Count this employee's actual working days in [$start, $end] inclusive,
+     * excluding holidays and schedule-inactive days. Schedule-aware replacement
+     * for the old Mon–Fri getWorkingDays()/countLeaveDaysInPeriod() helpers.
+     *
+     * @param array  $holidayDates flat list of 'YYYY-MM-DD' strings
+     */
+    function count_active_workdays($emp, $start, $end, $holidayDates = []) {
+        if ($start > $end) return 0;
+        $hset = array_flip($holidayDates);
+        $count = 0;
+        $cur = new DateTime($start);
+        $endDt = new DateTime($end);
+        while ($cur <= $endDt) {
+            $d = $cur->format('Y-m-d');
+            if (!isset($hset[$d])) {
+                $sched = resolve_schedule_for_date($emp, $d);
+                if (!empty($sched['active'])) $count++;
+            }
+            $cur->modify('+1 day');
+        }
+        return $count;
+    }
+}
+
+if (!function_exists('day_work_hours')) {
+    /**
+     * Work hours for a single day's clock-in/out, schedule-aware.
+     *  - Active scheduled day → effective hours (clamped to window − lunch).
+     *  - Off-schedule day (e.g. an irregular Saturday that was actually worked,
+     *    where there's no defined window to clamp to) → raw elapsed time.
+     * Returns 0 if either timestamp is missing.
+     */
+    function day_work_hours($clockIn, $clockOut, $sched) {
+        if (!$clockIn || !$clockOut) return 0.0;
+        if (!empty($sched['active'])) {
+            return calc_effective_work_hours_v2($clockIn, $clockOut, $sched);
+        }
+        $raw = (strtotime($clockOut) - strtotime($clockIn)) / 3600;
+        return max(0.0, $raw);
+    }
+}
+
 if (!function_exists('is_late')) {
     /**
      * Decide if a clock-in is "late" given a resolved schedule (with grace period).

@@ -197,10 +197,11 @@ if ($action === 'daily' && $employee_id && ($month || $cutoff_month || ($date_fr
         $leaveType = $leaveMap[$dateStr] ?? null;
         $holidayName = $holidayMap[$dateStr] ?? null;
 
-        if (!$sched['active']) {
-            // Per-schedule non-working day (weekend or alternating off-week)
-            $status = 'weekend';
-        } elseif ($holidayName) {
+        // Records-driven precedence: an approved leave or an actual clock-in is
+        // shown even on an off-schedule day, so irregular Saturday shifts/leave
+        // surface instead of being hidden under "วันหยุด". A day with NO record
+        // that is off-schedule stays "weekend" (never falsely "absent").
+        if ($holidayName) {
             $status = 'holiday';
         } elseif ($leaveType) {
             $status = 'leave';
@@ -208,6 +209,8 @@ if ($action === 'daily' && $employee_id && ($month || $cutoff_month || ($date_fr
             [$lateFlag, $lateMin] = is_late($clockIn, $sched);
             $lateMinutes = $lateMin;
             $status = $lateFlag ? 'late' : 'present';
+        } elseif (!$sched['active']) {
+            $status = 'weekend';
         } elseif ($empHireDate && $dateStr < $empHireDate) {
             $status = 'pre_hire';
         } elseif ($dateStr <= $today) {
@@ -216,10 +219,10 @@ if ($action === 'daily' && $employee_id && ($month || $cutoff_month || ($date_fr
             $status = 'future';
         }
 
-        // Work hours for the day — clamped to scheduled window + lunch deducted
+        // Work hours for the day — effective on scheduled days, raw on off-schedule worked days
         $workHours = 0;
         if ($clockIn && $clockOut) {
-            $workHours = round(calc_effective_work_hours_v2($clockIn, $clockOut, $sched), 2);
+            $workHours = round(day_work_hours($clockIn, $clockOut, $sched), 2);
         }
 
         $otForDay = $otByDate[$dateStr] ?? [];
@@ -317,8 +320,13 @@ if ($export === 'csv_specific_day' && $date) {
         $edParams[] = $department_id;
         $edTypes .= 'i';
     }
-    $edStmt = $conn->prepare("SELECT e.id, e.name, d.name AS department, d.work_start_time, d.work_end_time 
-                               FROM employees e LEFT JOIN departments d ON e.department_id = d.id 
+    $edStmt = $conn->prepare("SELECT e.id, e.name, e.schedule_json, e.late_grace_minutes,
+                                      d.name AS department, d.work_start_time, d.work_end_time,
+                                      d.schedule_json AS dept_schedule_json,
+                                      d.late_grace_minutes AS dept_late_grace_minutes,
+                                      d.work_start_time AS dept_work_start_time,
+                                      d.work_end_time AS dept_work_end_time
+                               FROM employees e LEFT JOIN departments d ON e.department_id = d.id
                                WHERE $edWhere ORDER BY d.name, e.name");
     $edStmt->bind_param($edTypes, ...$edParams);
     $edStmt->execute();
@@ -353,34 +361,32 @@ if ($export === 'csv_specific_day' && $date) {
 
     while ($emp = $edResult->fetch_assoc()) {
         $eid = $emp['id'];
-        $workStart = $emp['work_start_time'] ?? '09:00:00';
-        
+        // Schedule-aware: respects per-employee/department schedule_json (6-day,
+        // alternating-week) instead of the old hardcoded "$dow > 5" weekend.
+        $sched = resolve_schedule_for_date($emp, $specificDate);
+        $workStart = $sched['active'] ? ($sched['in'] . ':00') : ($emp['work_start_time'] ?? '09:00:00');
+
         $att = $aMap[$eid] ?? null;
         $clockIn = $att['clock_in'] ?? null;
         $clockOut = $att['clock_out'] ?? null;
         $leaveType = $lMap[$eid] ?? null;
-        
+
         $lateMin = 0;
         $wHours = 0;
         $note = '';
 
-        if ($dow > 5) {
-            $status = 'weekend';
-        } elseif ($hdName) {
+        // Records-driven precedence: leave/attendance surface even on off-schedule days
+        if ($hdName) {
             $status = 'holiday';
             $note = $hdName;
         } elseif ($leaveType) {
             $status = 'leave';
             $note = $leaveType;
         } elseif ($att && $clockIn) {
-            $inMin = floor(strtotime($clockIn) / 60);
-            $startMin = floor(strtotime($workStart) / 60);
-            $lateMin = max(0, $inMin - $startMin);
-            if ($lateMin > 0) {
-                $status = 'late';
-            } else {
-                $status = 'present';
-            }
+            [$lateFlag, $lateMin] = is_late($clockIn, $sched);
+            $status = $lateFlag ? 'late' : 'present';
+        } elseif (!$sched['active']) {
+            $status = 'weekend';
         } elseif ($specificDate <= $todayD) {
             $status = 'absent';
         } else {
@@ -388,7 +394,8 @@ if ($export === 'csv_specific_day' && $date) {
         }
 
         if ($clockIn && $clockOut) {
-            $wHours = round((strtotime($clockOut) - strtotime($clockIn)) / 3600, 2);
+            // Effective hours on scheduled days, raw on off-schedule worked days
+            $wHours = round(day_work_hours($clockIn, $clockOut, $sched), 2);
         }
 
         fputcsv($out, [
@@ -435,30 +442,15 @@ if ($date_from && $date_to) {
 // Cap end date at today for expected-work-days (don't count future days as absent)
 $effectiveEndDate = ($endDate > $today) ? $today : $endDate;
 
-// ─── Helper: Count working days (Mon-Fri) minus holidays ───
+// ─── Helper: generic Mon–Fri working-day count (header baseline only) ───
+// NOTE: This is a company-wide Mon–Fri baseline used solely for the report's
+// top-level "วันทำงาน" header figure. Per-employee expected days are computed
+// schedule-aware below (see $empExpectedWorkDays via resolve_schedule_for_date),
+// and those per-row numbers are authoritative for absence/diligence math.
 function getWorkingDays($start, $end, $holidayDates = []) {
     $count = 0;
     $current = new DateTime($start);
     $endDt = new DateTime($end);
-    while ($current <= $endDt) {
-        $dow = (int)$current->format('N');
-        $dateStr = $current->format('Y-m-d');
-        if ($dow <= 5 && !in_array($dateStr, $holidayDates)) {
-            $count++;
-        }
-        $current->modify('+1 day');
-    }
-    return $count;
-}
-
-// ─── Helper: Count leave days within period (fix overlap) ───
-function countLeaveDaysInPeriod($leaveStart, $leaveEnd, $periodStart, $periodEnd, $holidayDates = []) {
-    $effectiveStart = max($leaveStart, $periodStart);
-    $effectiveEnd = min($leaveEnd, $periodEnd);
-    if ($effectiveStart > $effectiveEnd) return 0;
-    $count = 0;
-    $current = new DateTime($effectiveStart);
-    $endDt = new DateTime($effectiveEnd);
     while ($current <= $endDt) {
         $dow = (int)$current->format('N');
         $dateStr = $current->format('Y-m-d');
@@ -620,12 +612,26 @@ if (!empty($employees)) {
         $empLeaves = $leaveAll[$eid] ?? [];
         $otHours = $otAll[$eid] ?? 0;
 
+        // Date sets for per-day absence: a scheduled working day with neither a
+        // clock-record nor an approved leave is the only thing that counts as absent.
+        // (Robust vs the old subtractive formula, where an off-schedule Saturday leave
+        //  could silently cancel out a real weekday absence in the arithmetic.)
+        $attDateSet = [];
+        foreach ($empAttendance as $att) $attDateSet[$att['date']] = true;
+        $leaveDateSet = [];
+        foreach ($empLeaves as $lv) {
+            $lc = new DateTime($lv['start_date']);
+            $le = new DateTime($lv['end_date']);
+            while ($lc <= $le) { $leaveDateSet[$lc->format('Y-m-d')] = true; $lc->modify('+1 day'); }
+        }
+
         // Per-employee expected work days — counts only days where THIS employee's
         // resolved schedule is "active" (handles weekend variability + alternating-week).
         // Also respects hire_date: pre-hire days never count as expected.
         $empPeriodStart = ($empHireDate && $empHireDate > $startDate) ? $empHireDate : $startDate;
         $empExpectedWorkDays = 0;
         $empFullPeriodWorkDays = 0;
+        $empAbsentDays = 0;
         if ($empPeriodStart <= $endDate) {
             $cur = new DateTime($empPeriodStart);
             $endFull = new DateTime($endDate);
@@ -636,7 +642,13 @@ if (!empty($employees)) {
                     $sched = resolve_schedule_for_date($emp, $dStr);
                     if ($sched['active']) {
                         $empFullPeriodWorkDays++;
-                        if ($cur <= $endEff) $empExpectedWorkDays++;
+                        if ($cur <= $endEff) {
+                            $empExpectedWorkDays++;
+                            // Absent = scheduled working day, already elapsed, no clock + no leave
+                            if (!isset($attDateSet[$dStr]) && !isset($leaveDateSet[$dStr])) {
+                                $empAbsentDays++;
+                            }
+                        }
                     }
                 }
                 $cur->modify('+1 day');
@@ -686,9 +698,12 @@ if (!empty($employees)) {
             $ltId = (int)$lv['leave_type_id'];
             // Fix: count only days within the period, not total_days
             if ($lv['start_date'] >= $startDate && $lv['end_date'] <= $endDate) {
-                $days = (float)$lv['total_days']; // entirely within period
+                $days = (float)$lv['total_days']; // entirely within period (total_days is schedule-correct, recomputed server-side at request time)
             } else {
-                $days = countLeaveDaysInPeriod($lv['start_date'], $lv['end_date'], $startDate, $endDate, $holidayDates);
+                // Leave spans the period boundary → recount only THIS employee's
+                // active working days inside the period (schedule-aware: honours
+                // 6-day / alternating-week schedules, not hardcoded Mon–Fri).
+                $days = count_active_workdays($emp, max($lv['start_date'], $startDate), min($lv['end_date'], $endDate), $holidayDates);
             }
             if (!isset($leaveByTypeMap[$ltId])) {
                 $leaveByTypeMap[$ltId] = [
@@ -705,7 +720,9 @@ if (!empty($employees)) {
             }
         }
 
-        $absentDays = max(0, $empExpectedWorkDays - $actualWorkDays - $totalLeaveDays);
+        // Per-day absence (counted in the expected-days loop above) — accurate even
+        // when off-schedule Saturday leave/attendance is present.
+        $absentDays = $empAbsentDays;
         $diligenceEligible = ($lateDays == 0 && $nonAnnualLeaveDays == 0 && $absentDays == 0);
 
         $report[] = [
@@ -777,8 +794,13 @@ if ($export === 'csv_daily' && ($month || $cutoff_month)) {
         $edParams[] = $department_id;
         $edTypes .= 'i';
     }
-    $edStmt = $conn->prepare("SELECT e.id, e.name, d.name AS department, d.work_start_time, d.work_end_time 
-                               FROM employees e LEFT JOIN departments d ON e.department_id = d.id 
+    $edStmt = $conn->prepare("SELECT e.id, e.name, e.schedule_json, e.late_grace_minutes,
+                                      d.name AS department, d.work_start_time, d.work_end_time,
+                                      d.schedule_json AS dept_schedule_json,
+                                      d.late_grace_minutes AS dept_late_grace_minutes,
+                                      d.work_start_time AS dept_work_start_time,
+                                      d.work_end_time AS dept_work_end_time
+                               FROM employees e LEFT JOIN departments d ON e.department_id = d.id
                                WHERE $edWhere ORDER BY d.name, e.name");
     $edStmt->bind_param($edTypes, ...$edParams);
     $edStmt->execute();
@@ -851,9 +873,12 @@ if ($export === 'csv_daily' && ($month || $cutoff_month)) {
             $wHours = 0;
             $note = '';
 
-            if ($dow > 5) {
-                $status = 'weekend';
-            } elseif ($holidayName) {
+            // Schedule-aware, records-driven precedence (replaces hardcoded "$dow > 5"):
+            // leave/attendance surface even on off-schedule days; off-schedule + no
+            // record stays "weekend".
+            $sched = resolve_schedule_for_date($edEmp, $ds);
+
+            if ($holidayName) {
                 $status = 'holiday';
                 $note = $holidayName;
             } elseif ($leaveType) {
@@ -861,10 +886,8 @@ if ($export === 'csv_daily' && ($month || $cutoff_month)) {
                 $note = $leaveType;
                 $totalLeave++;
             } elseif ($att && $clockIn) {
-                $inMin = floor(strtotime($clockIn) / 60);
-                $startMin = floor(strtotime($workStart) / 60);
-                $lateMin = max(0, $inMin - $startMin);
-                if ($lateMin > 0) {
+                [$lateFlag, $lateMin] = is_late($clockIn, $sched);
+                if ($lateFlag) {
                     $status = 'late';
                     $totalLate++;
                     $totalLateMin += $lateMin;
@@ -872,6 +895,8 @@ if ($export === 'csv_daily' && ($month || $cutoff_month)) {
                     $status = 'present';
                 }
                 $totalPresent++;
+            } elseif (!$sched['active']) {
+                $status = 'weekend';
             } elseif ($ds <= $todayD) {
                 $status = 'absent';
                 $totalAbsent++;
@@ -880,7 +905,8 @@ if ($export === 'csv_daily' && ($month || $cutoff_month)) {
             }
 
             if ($clockIn && $clockOut) {
-                $wHours = round((strtotime($clockOut) - strtotime($clockIn)) / 3600, 2);
+                // Effective hours on scheduled days, raw on off-schedule worked days
+                $wHours = round(day_work_hours($clockIn, $clockOut, $sched), 2);
                 $totalHours += $wHours;
             }
 

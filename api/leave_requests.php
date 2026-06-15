@@ -9,6 +9,7 @@
  * PUT  /api/leave_requests.php?id=X           - Multi-tier approve/reject
  */
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/schedule_helper.php';
 
 // Load push notification helper safely — push failures must never break core functionality
 $_push_available = false;
@@ -234,6 +235,43 @@ if ($method === 'POST') {
                 'existing_id' => (int)$dup['id'],
                 'existing_status' => $dup['status'],
             ], 409);
+        }
+
+        // ── Authoritative server-side total_days (multi-day leave) ──
+        // The client computes leave length as raw calendar days, which ignores the
+        // employee's real schedule (6-day Telesale, alternating weeks, holidays) and
+        // produces wrong quota burn + wrong payroll. Recount actual working days from
+        // the resolved schedule. Same-day leave keeps the client 0.5/1.0 (half-day).
+        if ($sDate !== $eDate) {
+            $schStmt = $conn->prepare(
+                "SELECT e.company_id, e.schedule_json, e.late_grace_minutes,
+                        d.schedule_json AS dept_schedule_json,
+                        d.late_grace_minutes AS dept_late_grace_minutes,
+                        d.work_start_time, d.work_end_time,
+                        d.work_start_time AS dept_work_start_time,
+                        d.work_end_time AS dept_work_end_time
+                 FROM employees e LEFT JOIN departments d ON e.department_id = d.id
+                 WHERE e.id = ?"
+            );
+            $schStmt->bind_param('s', $employee_id);
+            $schStmt->execute();
+            $schEmp = $schStmt->get_result()->fetch_assoc() ?: [];
+
+            $holRange = [];
+            if (!empty($schEmp['company_id'])) {
+                $holStmt = $conn->prepare("SELECT date FROM holidays WHERE company_id = ? AND date BETWEEN ? AND ?");
+                $holStmt->bind_param('iss', $schEmp['company_id'], $sDate, $eDate);
+                $holStmt->execute();
+                $holRes = $holStmt->get_result();
+                while ($hr = $holRes->fetch_assoc()) $holRange[] = $hr['date'];
+            }
+
+            $computed = count_active_workdays($schEmp, $sDate, $eDate, $holRange);
+            // Only override when the schedule yields at least one working day, so a
+            // misconfigured/all-off range never silently zeroes a legitimate request.
+            if ($computed > 0) {
+                $body['total_days'] = $computed;
+            }
         }
     }
 

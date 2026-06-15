@@ -164,21 +164,24 @@ while ($current <= $endDt) {
     $holidayName = $holidayMap[$dateStr] ?? null;
     $status = '';
 
-    if (!$sched['active'])              $status = 'weekend';
-    elseif ($holidayName)                $status = 'holiday';
+    // Records-driven precedence: leave/attendance surface even on off-schedule days;
+    // off-schedule + no record stays "weekend" (never falsely "absent").
+    if ($holidayName)                    $status = 'holiday';
     elseif ($leaveType)                  $status = 'leave';
     elseif ($att && $clockIn) {
         [$lateFlag, $lm] = is_late($clockIn, $sched);
         $lateMin = $lm;
         $status = $lateFlag ? 'late' : 'present';
     }
+    elseif (!$sched['active'])           $status = 'weekend';
     elseif ($empHireDate && $dateStr < $empHireDate) $status = 'pre_hire';
     elseif ($dateStr <= $today)          $status = 'absent';
     else                                  $status = 'future';
 
     $workHours = 0;
     if ($clockIn && $clockOut) {
-        $workHours = round(calc_effective_work_hours_v2($clockIn, $clockOut, $sched), 2);
+        // Effective hours on scheduled days, raw on off-schedule worked days
+        $workHours = round(day_work_hours($clockIn, $clockOut, $sched), 2);
     }
 
     // OT per rate

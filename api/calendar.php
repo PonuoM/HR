@@ -5,6 +5,7 @@
  * Returns holidays, attendance, leaves, missed days, and partial attendance for the given month.
  */
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/schedule_helper.php';
 
 $method = get_method();
 $company_id = get_company_id();
@@ -20,11 +21,21 @@ if ($method === 'GET') {
 
     // Get employee hire_date
     $hireDate = null;
-    $hStmt = $conn->prepare("SELECT hire_date FROM employees WHERE id = ?");
+    $emp = [];
+    // Load schedule fields (with dept fallback) for schedule-aware missed-day detection
+    $hStmt = $conn->prepare("SELECT e.hire_date, e.schedule_json, e.late_grace_minutes,
+                                    d.schedule_json AS dept_schedule_json,
+                                    d.late_grace_minutes AS dept_late_grace_minutes,
+                                    d.work_start_time, d.work_end_time,
+                                    d.work_start_time AS dept_work_start_time,
+                                    d.work_end_time AS dept_work_end_time
+                             FROM employees e LEFT JOIN departments d ON e.department_id = d.id
+                             WHERE e.id = ?");
     $hStmt->bind_param('s', $employee_id);
     $hStmt->execute();
     $hResult = $hStmt->get_result();
     if ($hRow = $hResult->fetch_assoc()) {
+        $emp = $hRow;
         $hireDate = $hRow['hire_date'];
     }
 
@@ -90,10 +101,10 @@ if ($method === 'GET') {
     }
     $cur = $missedStart;
     while ($cur <= $endDate && $cur <= $todayStr) {
-        $dow = (int)date('w', strtotime($cur)); // 0=Sun, 6=Sat
-
-        // Mon-Fri (dow 1-5): flag as missed if no attendance, no holiday, no leave
-        if ($dow >= 1 && $dow <= 5) {
+        // Flag as missed only on THIS employee's active working days (schedule-aware:
+        // honours 6-day / alternating-week schedules instead of hardcoded Mon–Fri).
+        $sched = resolve_schedule_for_date($emp, $cur);
+        if ($sched['active']) {
             if (!isset($attendanceMap[$cur]) && !isset($holidayDates[$cur]) && !isset($leaveDates[$cur])) {
                 $missed[] = $cur;
             }
