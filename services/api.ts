@@ -658,3 +658,50 @@ export async function setSystemStartDate(startDate: string) {
 export async function getSystemStartDate() {
     return fetchApi<{ start_date: string | null }>('activity_settings.php?action=get_start_date');
 }
+
+// --- Extra Working Days (วันทำงานพิเศษ) ---
+export interface WorkDay {
+    id: number;
+    date: string;
+    scope: 'company' | 'department' | 'employee';
+    department_id: number | null;
+    department_name: string | null;
+    employee_id: string | null;
+    employee_name: string | null;
+    note: string | null;
+}
+
+export interface WorkDayDepartment {
+    id: number;
+    name: string;
+}
+
+export interface WorkDayData {
+    work_days: WorkDay[];
+    departments: WorkDayDepartment[];
+    year: number;
+    available_years: number[];
+}
+
+export interface CreateWorkDayPayload {
+    date: string;
+    scope: 'company' | 'department' | 'employee';
+    department_id?: number;
+    employee_id?: string;
+    note?: string;
+}
+
+export async function getWorkDays(year: number) {
+    return fetchApi<WorkDayData>(`work_days.php?year=${year}`);
+}
+
+export async function createWorkDay(payload: CreateWorkDayPayload) {
+    return fetchApi<{ id: number; message: string }>('work_days.php', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    });
+}
+
+export async function deleteWorkDay(id: number) {
+    return fetchApi<{ message: string }>(`work_days.php?id=${id}`, { method: 'DELETE' });
+}

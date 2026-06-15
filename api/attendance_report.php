@@ -87,7 +87,7 @@ if ($action === 'daily' && $employee_id && ($month || $cutoff_month || ($date_fr
     }
 
     // Get employee info + dept fallback fields for schedule resolver
-    $empStmt = $conn->prepare("SELECT e.id, e.name, e.hire_date, e.schedule_json, e.late_grace_minutes,
+    $empStmt = $conn->prepare("SELECT e.id, e.name, e.department_id, e.hire_date, e.schedule_json, e.late_grace_minutes,
                                       d.name AS department,
                                       d.work_start_time, d.work_end_time,
                                       d.schedule_json AS dept_schedule_json,
@@ -156,6 +156,9 @@ if ($action === 'daily' && $employee_id && ($month || $cutoff_month || ($date_fr
         $holidayMap[$h['date']] = $h['name'];
     }
 
+    // Extra-working-day overrides (วันทำงานพิเศษ) for this range
+    $workIdx = fetch_workday_index($conn, $company_id, $startDate, $endDate);
+
     // Get approved leaves with dates
     $leaveMap = []; // date => leave info
     $lvStmt = $conn->prepare(
@@ -188,7 +191,7 @@ if ($action === 'daily' && $employee_id && ($month || $cutoff_month || ($date_fr
         $dateStr = $current->format('Y-m-d');
         $dow = (int)$current->format('N');
         $att = $attMap[$dateStr] ?? null;
-        $sched = resolve_schedule_for_date($emp, $dateStr);
+        $sched = resolve_schedule_for_date($emp, $dateStr, $workIdx);
 
         $status = '';
         $clockIn = $att['clock_in'] ?? null;
@@ -306,6 +309,9 @@ if ($export === 'csv_specific_day' && $date) {
         $hdName = $h['name'];
     }
 
+    // Extra-working-day overrides for this single date
+    $workIdxSpec = fetch_workday_index($conn, $company_id, $specificDate, $specificDate);
+
     // Employees (with department filter)
     $edWhere = "e.is_active = 1 AND e.company_id = ?";
     $edParams = [$company_id];
@@ -320,7 +326,7 @@ if ($export === 'csv_specific_day' && $date) {
         $edParams[] = $department_id;
         $edTypes .= 'i';
     }
-    $edStmt = $conn->prepare("SELECT e.id, e.name, e.schedule_json, e.late_grace_minutes,
+    $edStmt = $conn->prepare("SELECT e.id, e.name, e.department_id, e.schedule_json, e.late_grace_minutes,
                                       d.name AS department, d.work_start_time, d.work_end_time,
                                       d.schedule_json AS dept_schedule_json,
                                       d.late_grace_minutes AS dept_late_grace_minutes,
@@ -363,7 +369,7 @@ if ($export === 'csv_specific_day' && $date) {
         $eid = $emp['id'];
         // Schedule-aware: respects per-employee/department schedule_json (6-day,
         // alternating-week) instead of the old hardcoded "$dow > 5" weekend.
-        $sched = resolve_schedule_for_date($emp, $specificDate);
+        $sched = resolve_schedule_for_date($emp, $specificDate, $workIdxSpec);
         $workStart = $sched['active'] ? ($sched['in'] . ':00') : ($emp['work_start_time'] ?? '09:00:00');
 
         $att = $aMap[$eid] ?? null;
@@ -474,6 +480,10 @@ while ($h = $hRes->fetch_assoc()) {
     $holidayMap[$h['date']] = $h['name'];
 }
 
+// ─── Extra-working-day overrides (วันทำงานพิเศษ) for the whole period ───
+// Used by the per-employee report loop AND the csv_daily export below.
+$workIdx = fetch_workday_index($conn, $company_id, $startDate, $endDate);
+
 // ─── Fetch departments (for filter dropdown) ───
 $departments = [];
 $dStmt = $conn->prepare("SELECT id, name FROM departments WHERE company_id = ? ORDER BY name");
@@ -517,7 +527,7 @@ if ($department_id) {
     $empTypes .= 'i';
 }
 
-$empSql = "SELECT e.id, e.name, e.hire_date, e.base_salary,
+$empSql = "SELECT e.id, e.name, e.department_id, e.hire_date, e.base_salary,
                   e.schedule_json, e.late_grace_minutes,
                   d.name AS department, d.work_start_time, d.work_end_time,
                   d.schedule_json AS dept_schedule_json,
@@ -639,7 +649,7 @@ if (!empty($employees)) {
             while ($cur <= $endFull) {
                 $dStr = $cur->format('Y-m-d');
                 if (!in_array($dStr, $holidayDates)) {
-                    $sched = resolve_schedule_for_date($emp, $dStr);
+                    $sched = resolve_schedule_for_date($emp, $dStr, $workIdx);
                     if ($sched['active']) {
                         $empFullPeriodWorkDays++;
                         if ($cur <= $endEff) {
@@ -664,7 +674,7 @@ if (!empty($employees)) {
 
         foreach ($empAttendance as $att) {
             $actualWorkDays++;
-            $sched = resolve_schedule_for_date($emp, $att['date']);
+            $sched = resolve_schedule_for_date($emp, $att['date'], $workIdx);
             if (!$sched['active']) {
                 // Clocked in on a non-working day (e.g. weekend OT) — don't count
                 // toward late/early/work hours, but actualWorkDays already incremented.
@@ -703,7 +713,7 @@ if (!empty($employees)) {
                 // Leave spans the period boundary → recount only THIS employee's
                 // active working days inside the period (schedule-aware: honours
                 // 6-day / alternating-week schedules, not hardcoded Mon–Fri).
-                $days = count_active_workdays($emp, max($lv['start_date'], $startDate), min($lv['end_date'], $endDate), $holidayDates);
+                $days = count_active_workdays($emp, max($lv['start_date'], $startDate), min($lv['end_date'], $endDate), $holidayDates, $workIdx);
             }
             if (!isset($leaveByTypeMap[$ltId])) {
                 $leaveByTypeMap[$ltId] = [
@@ -794,7 +804,7 @@ if ($export === 'csv_daily' && ($month || $cutoff_month)) {
         $edParams[] = $department_id;
         $edTypes .= 'i';
     }
-    $edStmt = $conn->prepare("SELECT e.id, e.name, e.schedule_json, e.late_grace_minutes,
+    $edStmt = $conn->prepare("SELECT e.id, e.name, e.department_id, e.schedule_json, e.late_grace_minutes,
                                       d.name AS department, d.work_start_time, d.work_end_time,
                                       d.schedule_json AS dept_schedule_json,
                                       d.late_grace_minutes AS dept_late_grace_minutes,
@@ -876,7 +886,7 @@ if ($export === 'csv_daily' && ($month || $cutoff_month)) {
             // Schedule-aware, records-driven precedence (replaces hardcoded "$dow > 5"):
             // leave/attendance surface even on off-schedule days; off-schedule + no
             // record stays "weekend".
-            $sched = resolve_schedule_for_date($edEmp, $ds);
+            $sched = resolve_schedule_for_date($edEmp, $ds, $workIdx);
 
             if ($holidayName) {
                 $status = 'holiday';

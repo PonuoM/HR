@@ -244,7 +244,7 @@ if ($method === 'POST') {
         // the resolved schedule. Same-day leave keeps the client 0.5/1.0 (half-day).
         if ($sDate !== $eDate) {
             $schStmt = $conn->prepare(
-                "SELECT e.company_id, e.schedule_json, e.late_grace_minutes,
+                "SELECT e.id, e.company_id, e.department_id, e.schedule_json, e.late_grace_minutes,
                         d.schedule_json AS dept_schedule_json,
                         d.late_grace_minutes AS dept_late_grace_minutes,
                         d.work_start_time, d.work_end_time,
@@ -258,15 +258,18 @@ if ($method === 'POST') {
             $schEmp = $schStmt->get_result()->fetch_assoc() ?: [];
 
             $holRange = [];
+            $wIdx = null;
             if (!empty($schEmp['company_id'])) {
                 $holStmt = $conn->prepare("SELECT date FROM holidays WHERE company_id = ? AND date BETWEEN ? AND ?");
                 $holStmt->bind_param('iss', $schEmp['company_id'], $sDate, $eDate);
                 $holStmt->execute();
                 $holRes = $holStmt->get_result();
                 while ($hr = $holRes->fetch_assoc()) $holRange[] = $hr['date'];
+                // วันทำงานพิเศษ overrides so a worked-Saturday leave counts correctly
+                $wIdx = fetch_workday_index($conn, $schEmp['company_id'], $sDate, $eDate);
             }
 
-            $computed = count_active_workdays($schEmp, $sDate, $eDate, $holRange);
+            $computed = count_active_workdays($schEmp, $sDate, $eDate, $holRange, $wIdx);
             // Only override when the schedule yields at least one working day, so a
             // misconfigured/all-off range never silently zeroes a legitimate request.
             if ($computed > 0) {

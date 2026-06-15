@@ -47,6 +47,64 @@ if (!function_exists('legacy_schedule')) {
     }
 }
 
+if (!function_exists('build_workday_index')) {
+    /**
+     * Build a fast lookup index from work_day_overrides rows.
+     * Returns ['company'=>[date=>true], 'dept'=>[deptId=>[date=>true]], 'emp'=>[empId=>[date=>true]]].
+     */
+    function build_workday_index($rows) {
+        $idx = ['company' => [], 'dept' => [], 'emp' => []];
+        foreach ($rows as $r) {
+            $d = $r['date'];
+            $scope = $r['scope'] ?? 'company';
+            if ($scope === 'company') {
+                $idx['company'][$d] = true;
+            } elseif ($scope === 'department' && $r['department_id'] !== null) {
+                $idx['dept'][(int)$r['department_id']][$d] = true;
+            } elseif ($scope === 'employee' && $r['employee_id'] !== null) {
+                $idx['emp'][$r['employee_id']][$d] = true;
+            }
+        }
+        return $idx;
+    }
+}
+
+if (!function_exists('is_extra_workday')) {
+    /**
+     * Does an "extra working day" override apply to THIS employee on $date?
+     * Matches a company-wide, this-employee's-department, or this-employee row.
+     * Requires $emp to carry 'department_id' and 'id' for dept/employee scopes.
+     */
+    function is_extra_workday($emp, $date, $idx) {
+        if (!$idx) return false;
+        if (!empty($idx['company'][$date])) return true;
+        $deptId = $emp['department_id'] ?? null;
+        if ($deptId !== null && !empty($idx['dept'][(int)$deptId][$date])) return true;
+        $empId = $emp['id'] ?? null;
+        if ($empId !== null && !empty($idx['emp'][$empId][$date])) return true;
+        return false;
+    }
+}
+
+if (!function_exists('fetch_workday_index')) {
+    /**
+     * Load work_day_overrides for a company within [$start,$end] and return the
+     * lookup index. Safe if the table is missing (returns an empty index) so the
+     * app keeps working before/without the migration.
+     */
+    function fetch_workday_index($conn, $company_id, $start, $end) {
+        $empty = ['company' => [], 'dept' => [], 'emp' => []];
+        $stmt = @$conn->prepare("SELECT date, scope, department_id, employee_id FROM work_day_overrides WHERE company_id = ? AND date BETWEEN ? AND ?");
+        if (!$stmt) return $empty;
+        $stmt->bind_param('iss', $company_id, $start, $end);
+        if (!$stmt->execute()) return $empty;
+        $res = $stmt->get_result();
+        $rows = [];
+        while ($r = $res->fetch_assoc()) $rows[] = $r;
+        return build_workday_index($rows);
+    }
+}
+
 if (!function_exists('resolve_schedule_for_date')) {
     /**
      * Resolve effective schedule entry for a specific date.
@@ -63,7 +121,7 @@ if (!function_exists('resolve_schedule_for_date')) {
      *   source     : 'employee' | 'department' | 'legacy'
      * }
      */
-    function resolve_schedule_for_date($emp, $date) {
+    function resolve_schedule_for_date($emp, $date, $extraIdx = null) {
         $dt = new DateTime($date);
         $dow = (int) $dt->format('N'); // 1..7
         $isoWeek = (int) $dt->format('W'); // 1..53
@@ -88,42 +146,47 @@ if (!function_exists('resolve_schedule_for_date')) {
 
         $entry = $schedArr[(string)$dow] ?? ['active' => false];
 
-        // Apply alternating-week filter
+        // Active by schedule, honouring the alternating-week (เสาร์เว้นเสาร์) filter
         $weeksMode = $entry['weeks'] ?? 'all';
-        if ($weeksMode === 'odd' && $weekParity !== 'odd') {
-            return [
-                'active' => false, 'in' => null, 'out' => null,
-                'lunch_min' => 0, 'late_grace' => 0, 'source' => $source,
-            ];
-        }
-        if ($weeksMode === 'even' && $weekParity !== 'even') {
-            return [
-                'active' => false, 'in' => null, 'out' => null,
-                'lunch_min' => 0, 'late_grace' => 0, 'source' => $source,
-            ];
-        }
-
         $active = !empty($entry['active']);
-        if (!$active) {
-            return [
-                'active' => false, 'in' => null, 'out' => null,
-                'lunch_min' => 0, 'late_grace' => 0, 'source' => $source,
-            ];
-        }
+        if ($weeksMode === 'odd' && $weekParity !== 'odd') $active = false;
+        if ($weeksMode === 'even' && $weekParity !== 'even') $active = false;
 
         // Grace period: emp override > dept default > 0
-        $grace = $emp['late_grace_minutes'];
+        $grace = $emp['late_grace_minutes'] ?? null;
         if ($grace === null || $grace === '') {
             $grace = $emp['dept_late_grace_minutes'] ?? 0;
         }
 
+        if ($active) {
+            return [
+                'active'     => true,
+                'in'         => $entry['in']  ?? '09:00',
+                'out'        => $entry['out'] ?? '17:00',
+                'lunch_min'  => isset($entry['lunch_min']) ? (int)$entry['lunch_min'] : 60,
+                'late_grace' => (int) $grace,
+                'source'     => $source,
+            ];
+        }
+
+        // Not active by schedule — but a manager-assigned "extra working day"
+        // (วันทำงานพิเศษ, e.g. a worked Saturday) forces it active using dept hours.
+        if ($extraIdx && is_extra_workday($emp, $date, $extraIdx)) {
+            $in  = substr($emp['dept_work_start_time'] ?? $emp['work_start_time'] ?? '09:00:00', 0, 5);
+            $out = substr($emp['dept_work_end_time'] ?? $emp['work_end_time'] ?? '17:00:00', 0, 5);
+            return [
+                'active'     => true,
+                'in'         => $in ?: '09:00',
+                'out'        => $out ?: '17:00',
+                'lunch_min'  => 60,
+                'late_grace' => (int) $grace,
+                'source'     => 'override',
+            ];
+        }
+
         return [
-            'active'     => true,
-            'in'         => $entry['in']  ?? '09:00',
-            'out'        => $entry['out'] ?? '17:00',
-            'lunch_min'  => isset($entry['lunch_min']) ? (int)$entry['lunch_min'] : 60,
-            'late_grace' => (int) $grace,
-            'source'     => $source,
+            'active' => false, 'in' => null, 'out' => null,
+            'lunch_min' => 0, 'late_grace' => 0, 'source' => $source,
         ];
     }
 }
@@ -179,9 +242,9 @@ if (!function_exists('is_active_workday')) {
      * @param string $date         YYYY-MM-DD
      * @param array  $holidayDates flat list of 'YYYY-MM-DD' strings (company holidays)
      */
-    function is_active_workday($emp, $date, $holidayDates = []) {
+    function is_active_workday($emp, $date, $holidayDates = [], $extraIdx = null) {
         if (!empty($holidayDates) && in_array($date, $holidayDates, true)) return false;
-        $sched = resolve_schedule_for_date($emp, $date);
+        $sched = resolve_schedule_for_date($emp, $date, $extraIdx);
         return !empty($sched['active']);
     }
 }
@@ -194,7 +257,7 @@ if (!function_exists('count_active_workdays')) {
      *
      * @param array  $holidayDates flat list of 'YYYY-MM-DD' strings
      */
-    function count_active_workdays($emp, $start, $end, $holidayDates = []) {
+    function count_active_workdays($emp, $start, $end, $holidayDates = [], $extraIdx = null) {
         if ($start > $end) return 0;
         $hset = array_flip($holidayDates);
         $count = 0;
@@ -203,7 +266,7 @@ if (!function_exists('count_active_workdays')) {
         while ($cur <= $endDt) {
             $d = $cur->format('Y-m-d');
             if (!isset($hset[$d])) {
-                $sched = resolve_schedule_for_date($emp, $d);
+                $sched = resolve_schedule_for_date($emp, $d, $extraIdx);
                 if (!empty($sched['active'])) $count++;
             }
             $cur->modify('+1 day');

@@ -23,7 +23,7 @@ if ($method === 'GET') {
     $hireDate = null;
     $emp = [];
     // Load schedule fields (with dept fallback) for schedule-aware missed-day detection
-    $hStmt = $conn->prepare("SELECT e.hire_date, e.schedule_json, e.late_grace_minutes,
+    $hStmt = $conn->prepare("SELECT e.id, e.department_id, e.hire_date, e.schedule_json, e.late_grace_minutes,
                                     d.schedule_json AS dept_schedule_json,
                                     d.late_grace_minutes AS dept_late_grace_minutes,
                                     d.work_start_time, d.work_end_time,
@@ -91,7 +91,10 @@ if ($method === 'GET') {
         }
     }
 
-    // 4. Compute missed days (Mon-Fri, no attendance, no holiday, no leave, past dates only)
+    // Extra-working-day overrides (วันทำงานพิเศษ) for the month
+    $workIdx = fetch_workday_index($conn, $company_id, $startDate, $endDate);
+
+    // 4. Compute missed days (schedule-aware, no attendance, no holiday, no leave, past dates only)
     $missed = [];
     $partial = [];
     // Start from hire_date if it's within this month (skip days before employee started)
@@ -102,8 +105,8 @@ if ($method === 'GET') {
     $cur = $missedStart;
     while ($cur <= $endDate && $cur <= $todayStr) {
         // Flag as missed only on THIS employee's active working days (schedule-aware:
-        // honours 6-day / alternating-week schedules instead of hardcoded Mon–Fri).
-        $sched = resolve_schedule_for_date($emp, $cur);
+        // honours 6-day / alternating-week schedules + วันทำงานพิเศษ overrides).
+        $sched = resolve_schedule_for_date($emp, $cur, $workIdx);
         if ($sched['active']) {
             if (!isset($attendanceMap[$cur]) && !isset($holidayDates[$cur]) && !isset($leaveDates[$cur])) {
                 $missed[] = $cur;

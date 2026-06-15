@@ -52,7 +52,7 @@ if ($date_from && $date_to) {
 }
 
 // ─── Fetch employee meta ───
-$empStmt = $conn->prepare("SELECT e.id, e.name, e.hire_date, e.schedule_json, e.late_grace_minutes,
+$empStmt = $conn->prepare("SELECT e.id, e.name, e.department_id, e.hire_date, e.schedule_json, e.late_grace_minutes,
                                   d.name AS department, d.work_start_time, d.work_end_time,
                                   d.schedule_json AS dept_schedule_json,
                                   d.late_grace_minutes AS dept_late_grace_minutes,
@@ -150,11 +150,14 @@ $endDt = new DateTime($endDate);
 $today = date('Y-m-d');
 $dowNames = ['', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์', 'อาทิตย์'];
 
+// Extra-working-day overrides (วันทำงานพิเศษ) for the period
+$workIdx = fetch_workday_index($conn, $company_id, $startDate, $endDate);
+
 while ($current <= $endDt) {
     $dateStr = $current->format('Y-m-d');
     $dow = (int)$current->format('N');
     $att = $attMap[$dateStr] ?? null;
-    $sched = resolve_schedule_for_date($emp, $dateStr);
+    $sched = resolve_schedule_for_date($emp, $dateStr, $workIdx);
 
     $clockIn = $att['clock_in'] ?? null;
     $clockOut = $att['clock_out'] ?? null;

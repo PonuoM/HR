@@ -40,7 +40,7 @@ $systemStartDate = $actRow['start_date']; // Company-wide attendance check start
 // ── Respect employee hire_date: never alert for days before they were hired ──
 // Load schedule fields too (with dept fallback) so weekend/off-day detection
 // honours per-employee/department schedule_json instead of hardcoded Mon–Fri.
-$hireStmt = $conn->prepare("SELECT e.hire_date, e.schedule_json, e.late_grace_minutes,
+$hireStmt = $conn->prepare("SELECT e.id, e.department_id, e.hire_date, e.schedule_json, e.late_grace_minutes,
                                    d.schedule_json AS dept_schedule_json,
                                    d.late_grace_minutes AS dept_late_grace_minutes,
                                    d.work_start_time, d.work_end_time,
@@ -120,6 +120,9 @@ while ($e = $existResult->fetch_assoc()) {
     $existingAlerts[] = $e['message'];
 }
 
+// Extra-working-day overrides (วันทำงานพิเศษ) over the checked range
+$workIdx = fetch_workday_index($conn, $company_id, $startDate, $checkDate);
+
 // ── Check working days (loop backward from yesterday, max 7 working days) ──
 $alerts = [];
 $workDaysChecked = 0;
@@ -132,7 +135,7 @@ while ($workDaysChecked < 7 && $current >= $startDt) {
     // Skip this employee's non-working days (schedule-aware: weekend, off-week).
     // For a 6-day Telesale this keeps Saturday in scope; for Mon–Fri staff it
     // skips Sat/Sun exactly as before.
-    $sched = resolve_schedule_for_date($emp, $dateStr);
+    $sched = resolve_schedule_for_date($emp, $dateStr, $workIdx);
     if (!$sched['active']) {
         $current->modify('-1 day');
         continue;
