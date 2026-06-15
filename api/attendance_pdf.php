@@ -150,8 +150,11 @@ $endDt = new DateTime($endDate);
 $today = date('Y-m-d');
 $dowNames = ['', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์', 'อาทิตย์'];
 
-// Extra-working-day overrides (วันทำงานพิเศษ) for the period
-$workIdx = fetch_workday_index($conn, $company_id, $startDate, $endDate);
+// Working-day overrides for the period: manual วันทำงานพิเศษ ∪ inferred-from-dept-turnout
+$workIdx = merge_workday_index(
+    fetch_workday_index($conn, $company_id, $startDate, $endDate),
+    fetch_inferred_workday_index($conn, $company_id, $startDate, $endDate)
+);
 
 while ($current <= $endDt) {
     $dateStr = $current->format('Y-m-d');

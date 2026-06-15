@@ -105,6 +105,69 @@ if (!function_exists('fetch_workday_index')) {
     }
 }
 
+if (!function_exists('merge_workday_index')) {
+    /** Union two work-day override indexes (manual ∪ inferred). */
+    function merge_workday_index($a, $b) {
+        $out = $a;
+        foreach (($b['company'] ?? []) as $d => $v) $out['company'][$d] = true;
+        foreach (($b['dept'] ?? []) as $dept => $dates) {
+            foreach ($dates as $d => $v) $out['dept'][$dept][$d] = true;
+        }
+        foreach (($b['emp'] ?? []) as $emp => $dates) {
+            foreach ($dates as $d => $v) $out['emp'][$emp][$d] = true;
+        }
+        return $out;
+    }
+}
+
+if (!function_exists('fetch_inferred_workday_index')) {
+    /**
+     * Infer department working-days from turnout: for each (department, date),
+     * if MORE THAN $threshold of the department's active staff clocked in, treat
+     * that date as a department working day. Lets the system tell a real dept
+     * working-Saturday (most of the team came → no-shows = absent) from individual
+     * OT (only a few came → those people = OT candidates) without HR pre-marking.
+     *
+     * Returned as a dept-scoped override index, ready to merge into the manual one.
+     * HR-facing surfaces only (reports/CSV/PDF) — deliberately NOT used for
+     * employee alerts/calendar so nobody gets a false "missing clock-in" alert.
+     */
+    function fetch_inferred_workday_index($conn, $company_id, $start, $end, $threshold = 0.5) {
+        $idx = ['company' => [], 'dept' => [], 'emp' => []];
+
+        // Active headcount per department
+        $head = [];
+        $hStmt = @$conn->prepare("SELECT department_id, COUNT(*) AS n FROM employees
+                                  WHERE company_id = ? AND is_active = 1 AND department_id IS NOT NULL
+                                  GROUP BY department_id");
+        if (!$hStmt) return $idx;
+        $hStmt->bind_param('i', $company_id);
+        if (!$hStmt->execute()) return $idx;
+        $hRes = $hStmt->get_result();
+        while ($r = $hRes->fetch_assoc()) $head[(int)$r['department_id']] = (int)$r['n'];
+
+        // Distinct clock-ins per (department, date)
+        $cStmt = @$conn->prepare("SELECT e.department_id, a.date, COUNT(DISTINCT a.employee_id) AS c
+                                  FROM attendance a JOIN employees e ON a.employee_id = e.id
+                                  WHERE e.company_id = ? AND e.is_active = 1 AND a.clock_in IS NOT NULL
+                                    AND a.date BETWEEN ? AND ? AND e.department_id IS NOT NULL
+                                  GROUP BY e.department_id, a.date");
+        if (!$cStmt) return $idx;
+        $cStmt->bind_param('iss', $company_id, $start, $end);
+        if (!$cStmt->execute()) return $idx;
+        $cRes = $cStmt->get_result();
+        while ($r = $cRes->fetch_assoc()) {
+            $dept = (int)$r['department_id'];
+            $n = $head[$dept] ?? 0;
+            // Strictly MORE than half the department (เกินครึ่ง) = department working day
+            if ($n > 0 && (int)$r['c'] > $n * $threshold) {
+                $idx['dept'][$dept][$r['date']] = true;
+            }
+        }
+        return $idx;
+    }
+}
+
 if (!function_exists('resolve_schedule_for_date')) {
     /**
      * Resolve effective schedule entry for a specific date.

@@ -156,8 +156,11 @@ if ($action === 'daily' && $employee_id && ($month || $cutoff_month || ($date_fr
         $holidayMap[$h['date']] = $h['name'];
     }
 
-    // Extra-working-day overrides (วันทำงานพิเศษ) for this range
-    $workIdx = fetch_workday_index($conn, $company_id, $startDate, $endDate);
+    // Working-day overrides for this range: manual ∪ inferred-from-dept-turnout
+    $workIdx = merge_workday_index(
+        fetch_workday_index($conn, $company_id, $startDate, $endDate),
+        fetch_inferred_workday_index($conn, $company_id, $startDate, $endDate)
+    );
 
     // Get approved leaves with dates
     $leaveMap = []; // date => leave info
@@ -315,8 +318,11 @@ if ($export === 'csv_specific_day' && $date) {
         $hdName = $h['name'];
     }
 
-    // Extra-working-day overrides for this single date
-    $workIdxSpec = fetch_workday_index($conn, $company_id, $specificDate, $specificDate);
+    // Working-day overrides for this single date: manual ∪ inferred-from-dept-turnout
+    $workIdxSpec = merge_workday_index(
+        fetch_workday_index($conn, $company_id, $specificDate, $specificDate),
+        fetch_inferred_workday_index($conn, $company_id, $specificDate, $specificDate)
+    );
 
     // Employees (with department filter)
     $edWhere = "e.is_active = 1 AND e.company_id = ?";
@@ -490,9 +496,13 @@ while ($h = $hRes->fetch_assoc()) {
     $holidayMap[$h['date']] = $h['name'];
 }
 
-// ─── Extra-working-day overrides (วันทำงานพิเศษ) for the whole period ───
-// Used by the per-employee report loop AND the csv_daily export below.
-$workIdx = fetch_workday_index($conn, $company_id, $startDate, $endDate);
+// ─── Working-day overrides for the whole period (used by the report loop AND
+//     the csv_daily export below): manual วันทำงานพิเศษ ∪ inferred-from-turnout
+//     (a date where >50% of a department clocked in counts as that dept's workday). ───
+$workIdx = merge_workday_index(
+    fetch_workday_index($conn, $company_id, $startDate, $endDate),
+    fetch_inferred_workday_index($conn, $company_id, $startDate, $endDate)
+);
 
 // ─── Fetch departments (for filter dropdown) ───
 $departments = [];
