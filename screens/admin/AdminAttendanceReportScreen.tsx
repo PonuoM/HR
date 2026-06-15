@@ -95,6 +95,7 @@ const STATUS_CONFIG: Record<string, { label: string; icon: string; bg: string; t
     absent: { label: 'ขาด', icon: 'event_busy', bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-700 dark:text-red-300' },
     holiday: { label: 'วันหยุด', icon: 'celebration', bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-700 dark:text-blue-300' },
     weekend: { label: 'วันหยุด', icon: 'weekend', bg: 'bg-gray-100 dark:bg-gray-700/50', text: 'text-gray-500 dark:text-gray-400' },
+    offday_work: { label: 'ทำงานวันหยุด (OT?)', icon: 'more_time', bg: 'bg-amber-100 dark:bg-amber-900/30', text: 'text-amber-700 dark:text-amber-300' },
     future: { label: '-', icon: 'schedule', bg: 'bg-gray-50 dark:bg-gray-800/30', text: 'text-gray-400 dark:text-gray-500' },
     pre_hire: { label: 'ก่อนเข้างาน', icon: 'person_add_disabled', bg: 'bg-slate-100 dark:bg-slate-800/40', text: 'text-slate-500 dark:text-slate-400' },
 };
@@ -119,7 +120,7 @@ function buildPrintableReportHtml(
     const statusLabel = (r: DailyRow): string => {
         if (r.status === 'leave' && r.leave_type) return `ลา (${r.leave_type})`;
         if (r.status === 'holiday') return 'หยุดนักขัตฤกษ์';
-        return ({ present: 'มาทำงาน', late: 'สาย', absent: 'ขาดงาน', leave: 'ลา', weekend: 'วันหยุด', future: '-', pre_hire: 'ยังไม่เข้างาน' } as Record<string, string>)[r.status] || r.status;
+        return ({ present: 'มาทำงาน', late: 'สาย', absent: 'ขาดงาน', leave: 'ลา', weekend: 'วันหยุด', offday_work: 'ทำงานวันหยุด (OT?)', future: '-', pre_hire: 'ยังไม่เข้างาน' } as Record<string, string>)[r.status] || r.status;
     };
     const rowBgClass = (r: DailyRow): string => {
         if (r.status === 'absent') return 'absent';

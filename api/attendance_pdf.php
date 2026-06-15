@@ -172,9 +172,13 @@ while ($current <= $endDt) {
     if ($holidayName)                    $status = 'holiday';
     elseif ($leaveType)                  $status = 'leave';
     elseif ($att && $clockIn) {
-        [$lateFlag, $lm] = is_late($clockIn, $sched);
-        $lateMin = $lm;
-        $status = $lateFlag ? 'late' : 'present';
+        if (!$sched['active']) {
+            $status = 'offday_work'; // off-schedule day worked → OT candidate
+        } else {
+            [$lateFlag, $lm] = is_late($clockIn, $sched);
+            $lateMin = $lm;
+            $status = $lateFlag ? 'late' : 'present';
+        }
     }
     elseif (!$sched['active'])           $status = 'weekend';
     elseif ($empHireDate && $dateStr < $empHireDate) $status = 'pre_hire';
@@ -226,7 +230,7 @@ while ($current <= $endDt) {
 $statusLabel = function ($r) {
     if ($r['status'] === 'leave' && $r['leave_type']) return 'ลา (' . $r['leave_type'] . ')';
     if ($r['status'] === 'holiday') return 'หยุดนักขัตฤกษ์';
-    $m = ['present' => 'มาทำงาน', 'late' => 'สาย', 'absent' => 'ขาดงาน', 'leave' => 'ลา', 'weekend' => 'วันหยุด', 'future' => '-', 'pre_hire' => 'ยังไม่เข้างาน'];
+    $m = ['present' => 'มาทำงาน', 'late' => 'สาย', 'absent' => 'ขาดงาน', 'leave' => 'ลา', 'weekend' => 'วันหยุด', 'offday_work' => 'ทำงานวันหยุด (OT?)', 'future' => '-', 'pre_hire' => 'ยังไม่เข้างาน'];
     return $m[$r['status']] ?? $r['status'];
 };
 $rowBg = function ($r) {
@@ -235,6 +239,7 @@ $rowBg = function ($r) {
     if ($r['status'] === 'leave')  return '#ededed';
     if ($r['status'] === 'holiday') return '#f3f4f6';
     if ($r['status'] === 'weekend') return '#f9fafb';
+    if ($r['status'] === 'offday_work') return '#fef3c7'; // amber — OT candidate, draws HR's eye
     if ($r['status'] === 'pre_hire') return '#fafafa';
     return '#ffffff';
 };

@@ -209,9 +209,14 @@ if ($action === 'daily' && $employee_id && ($month || $cutoff_month || ($date_fr
         } elseif ($leaveType) {
             $status = 'leave';
         } elseif ($att && $clockIn) {
-            [$lateFlag, $lateMin] = is_late($clockIn, $sched);
-            $lateMinutes = $lateMin;
-            $status = $lateFlag ? 'late' : 'present';
+            if (!$sched['active']) {
+                // Clocked in on an off-schedule day → flag for HR as OT candidate
+                $status = 'offday_work';
+            } else {
+                [$lateFlag, $lateMin] = is_late($clockIn, $sched);
+                $lateMinutes = $lateMin;
+                $status = $lateFlag ? 'late' : 'present';
+            }
         } elseif (!$sched['active']) {
             $status = 'weekend';
         } elseif ($empHireDate && $dateStr < $empHireDate) {
@@ -286,6 +291,7 @@ if ($export === 'csv_specific_day' && $date) {
         'leave'   => 'ลา',
         'holiday' => 'หยุดนักขัตฤกษ์',
         'weekend' => 'วันหยุด',
+        'offday_work' => 'ทำงานวันหยุด',
         'future'  => '-'
     ];
 
@@ -389,8 +395,12 @@ if ($export === 'csv_specific_day' && $date) {
             $status = 'leave';
             $note = $leaveType;
         } elseif ($att && $clockIn) {
-            [$lateFlag, $lateMin] = is_late($clockIn, $sched);
-            $status = $lateFlag ? 'late' : 'present';
+            if (!$sched['active']) {
+                $status = 'offday_work';
+            } else {
+                [$lateFlag, $lateMin] = is_late($clockIn, $sched);
+                $status = $lateFlag ? 'late' : 'present';
+            }
         } elseif (!$sched['active']) {
             $status = 'weekend';
         } elseif ($specificDate <= $todayD) {
@@ -784,6 +794,7 @@ if ($export === 'csv_daily' && ($month || $cutoff_month)) {
         'leave'   => 'ลา',
         'holiday' => 'หยุดนักขัตฤกษ์',
         'weekend' => 'วันหยุด',
+        'offday_work' => 'ทำงานวันหยุด',
         'future'  => '-',
     ];
 
@@ -896,15 +907,19 @@ if ($export === 'csv_daily' && ($month || $cutoff_month)) {
                 $note = $leaveType;
                 $totalLeave++;
             } elseif ($att && $clockIn) {
-                [$lateFlag, $lateMin] = is_late($clockIn, $sched);
-                if ($lateFlag) {
-                    $status = 'late';
-                    $totalLate++;
-                    $totalLateMin += $lateMin;
+                if (!$sched['active']) {
+                    $status = 'offday_work'; // off-schedule day worked → OT candidate
                 } else {
-                    $status = 'present';
+                    [$lateFlag, $lateMin] = is_late($clockIn, $sched);
+                    if ($lateFlag) {
+                        $status = 'late';
+                        $totalLate++;
+                        $totalLateMin += $lateMin;
+                    } else {
+                        $status = 'present';
+                    }
+                    $totalPresent++;
                 }
-                $totalPresent++;
             } elseif (!$sched['active']) {
                 $status = 'weekend';
             } elseif ($ds <= $todayD) {
