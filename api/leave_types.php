@@ -122,6 +122,15 @@ if ($method === 'PUT' && isset($_GET['id'])) {
 if ($method === 'DELETE' && isset($_GET['id'])) {
     require_admin($conn);
     $id = (int)$_GET['id'];
+
+    // Check if there are active or past leave requests using this leave type
+    $checkStmt = $conn->prepare("SELECT id FROM leave_requests WHERE leave_type_id = ?");
+    $checkStmt->bind_param('i', $id);
+    $checkStmt->execute();
+    if ($checkStmt->get_result()->num_rows > 0) {
+        json_response(['error' => 'Cannot delete leave type because there are historical requests using it. Please deactivate it instead.'], 400);
+    }
+
     $stmt = $conn->prepare("DELETE FROM leave_types WHERE id = ? AND company_id = ?");
     $stmt->bind_param('ii', $id, $company_id);
     $stmt->execute();

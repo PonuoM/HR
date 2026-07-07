@@ -338,7 +338,7 @@ if ($method === 'POST' && $action === 'close_month') {
         $leaveStmt = $conn->prepare(
             "SELECT COALESCE(SUM(total_days), 0) as leave_days FROM leave_requests
              WHERE employee_id = ? AND status = 'approved'
-             AND start_date <= ? AND end_date >= ?"
+             AND DATE(start_date) <= ? AND DATE(end_date) >= ?"
         );
         $leaveStmt->bind_param('sss', $empId, $monthEnd, $monthStart);
         $leaveStmt->execute();

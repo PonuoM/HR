@@ -60,7 +60,7 @@ if ($method === 'GET' && isset($_GET['action']) && $_GET['action'] === 'clock_st
     $lvStmt = $conn->prepare("SELECT lr.employee_id
                               FROM leave_requests lr
                               JOIN employees e ON lr.employee_id = e.id
-                              WHERE lr.status = 'approved' AND lr.start_date <= ? AND lr.end_date >= ? AND e.company_id = ?");
+                              WHERE lr.status = 'approved' AND DATE(lr.start_date) <= ? AND DATE(lr.end_date) >= ? AND e.company_id = ?");
     $lvStmt->bind_param('ssi', $today, $today, $company_id);
     $lvStmt->execute();
     $lvRes = $lvStmt->get_result();
@@ -152,7 +152,7 @@ if ($method === 'GET') {
 
     // On leave today (only employees from this company)
     $today = date('Y-m-d');
-    $stmt = $conn->prepare("SELECT COUNT(*) as c FROM leave_requests lr JOIN employees e ON lr.employee_id = e.id WHERE lr.status = 'approved' AND lr.start_date <= ? AND lr.end_date >= ? AND e.company_id = ?");
+    $stmt = $conn->prepare("SELECT COUNT(*) as c FROM leave_requests lr JOIN employees e ON lr.employee_id = e.id WHERE lr.status = 'approved' AND DATE(lr.start_date) <= ? AND DATE(lr.end_date) >= ? AND e.company_id = ?");
     $stmt->bind_param('ssi', $today, $today, $company_id);
     $stmt->execute();
     $onLeave = $stmt->get_result()->fetch_assoc()['c'];

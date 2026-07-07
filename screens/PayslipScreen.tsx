@@ -4,6 +4,7 @@ import { Payslip } from '../types';
 import { useApi } from '../hooks/useApi';
 import { getPayslips } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import PdfPreview from '../components/PdfPreview';
 
 const SEEN_KEY = 'hr_payslips_seen';
 
@@ -24,6 +25,9 @@ const PayslipScreen: React.FC = () => {
   const navigate = useNavigate();
   const { user: authUser } = useAuth();
   const [selectedSlip, setSelectedSlip] = useState<Payslip | null>(null);
+  const [pdfPreviewDataUrl, setPdfPreviewDataUrl] = useState<string | null>(null);
+  const [isZoomed, setIsZoomed] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState(1);
   const [seenIds, setSeenIds] = useState<Set<string>>(getSeenIds);
   const { data: rawPayslips, loading } = useApi(() => getPayslips(authUser?.id || ''), [authUser?.id]);
 
@@ -42,12 +46,63 @@ const PayslipScreen: React.FC = () => {
 
   const handleSlipClick = useCallback((slip: Payslip) => {
     setSelectedSlip(slip);
+    setPdfPreviewDataUrl(null);
     // Mark as seen in localStorage
     const updated = markSeen(slip.id);
     setSeenIds(new Set(updated));
   }, []);
 
+  const openZoom = () => { setZoomLevel(1); setIsZoomed(true); };
+  const closeZoom = () => setIsZoomed(false);
+  const zoomIn = () => setZoomLevel((z) => Math.min(z + 0.5, 4));
+  const zoomOut = () => setZoomLevel((z) => Math.max(z - 0.5, 1));
+
   const isNew = (slip: Payslip) => !seenIds.has(slip.id);
+
+  const isPdf = (url: string) => /\.pdf($|\?)/i.test(url);
+
+  const dataUrlToFile = (dataUrl: string, filename: string): File => {
+    const [meta, base64] = dataUrl.split(',');
+    const mime = meta.match(/:(.*?);/)?.[1] || 'image/png';
+    const bytes = atob(base64);
+    const arr = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+    return new File([arr], filename, { type: mime });
+  };
+
+  const handleDownload = (slip: Payslip) => {
+    const usingPngPreview = isPdf(slip.imageUrl) && pdfPreviewDataUrl;
+    const a = document.createElement('a');
+    a.href = usingPngPreview ? pdfPreviewDataUrl! : slip.imageUrl;
+    a.download = `สลิปเงินเดือน_${slip.month}_${Number(slip.year) + 543}${usingPngPreview ? '.png' : ''}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  const handleShare = async (slip: Payslip) => {
+    const usingPngPreview = isPdf(slip.imageUrl) && pdfPreviewDataUrl;
+    const title = `สลิปเงินเดือน ${slip.month}`;
+
+    if (usingPngPreview) {
+      const file = dataUrlToFile(pdfPreviewDataUrl!, `payslip_${slip.month}_${slip.year}.png`);
+      if (navigator.canShare?.({ files: [file] })) {
+        try {
+          await navigator.share({ title, files: [file] });
+        } catch { /* user cancelled */ }
+        return;
+      }
+    }
+
+    const shareUrl = new URL(slip.imageUrl, window.location.origin).toString();
+    if (navigator.share) {
+      try {
+        await navigator.share({ title, url: shareUrl });
+      } catch { /* user cancelled */ }
+    } else {
+      await navigator.clipboard.writeText(shareUrl);
+    }
+  };
 
   return (
     <div className="flex flex-col h-full bg-background-light dark:bg-background-dark relative">
@@ -139,17 +194,56 @@ const PayslipScreen: React.FC = () => {
               </button>
             </div>
             <div className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-950 p-4 flex items-center justify-center">
-              <img src={selectedSlip.imageUrl} alt="Payslip" className="w-full h-auto shadow-lg rounded" />
+              <button onClick={openZoom} className="w-full cursor-zoom-in" aria-label="ขยายรูปสลิป">
+                {isPdf(selectedSlip.imageUrl) ? (
+                  <PdfPreview url={selectedSlip.imageUrl} className="w-full h-auto shadow-lg rounded" onRendered={setPdfPreviewDataUrl} />
+                ) : (
+                  <img src={selectedSlip.imageUrl} alt="Payslip" className="w-full h-auto shadow-lg rounded" />
+                )}
+              </button>
             </div>
             <div className="p-4 border-t border-gray-100 dark:border-gray-800 flex gap-3">
-              <button className="flex-1 py-3 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-semibold text-sm flex items-center justify-center gap-2 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
+              <button onClick={() => handleDownload(selectedSlip)} className="flex-1 py-3 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-semibold text-sm flex items-center justify-center gap-2 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
                 <span className="material-icons-round text-lg">download</span>
-                บันทึกรูปภาพ
+                บันทึกไฟล์
               </button>
-              <button className="flex-1 py-3 rounded-xl bg-primary text-white font-semibold text-sm flex items-center justify-center gap-2 hover:bg-blue-600 transition-colors shadow-lg shadow-blue-500/30">
+              <button onClick={() => handleShare(selectedSlip)} className="flex-1 py-3 rounded-xl bg-primary text-white font-semibold text-sm flex items-center justify-center gap-2 hover:bg-blue-600 transition-colors shadow-lg shadow-blue-500/30">
                 <span className="material-icons-round text-lg">share</span>
                 แชร์
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Zoom Overlay */}
+      {isZoomed && selectedSlip && (
+        <div className="fixed inset-0 z-[60] bg-black flex flex-col animate-fade-in">
+          <div className="flex items-center justify-between p-3 bg-black/60 shrink-0">
+            <div className="flex items-center gap-2">
+              <button onClick={zoomOut} disabled={zoomLevel <= 1} className="p-2 rounded-full bg-white/10 text-white disabled:opacity-30">
+                <span className="material-icons-round">remove</span>
+              </button>
+              <span className="text-white text-sm font-semibold w-12 text-center">{Math.round(zoomLevel * 100)}%</span>
+              <button onClick={zoomIn} disabled={zoomLevel >= 4} className="p-2 rounded-full bg-white/10 text-white disabled:opacity-30">
+                <span className="material-icons-round">add</span>
+              </button>
+            </div>
+            <button onClick={closeZoom} className="p-2 rounded-full bg-white/10 text-white">
+              <span className="material-icons-round">close</span>
+            </button>
+          </div>
+          <div className="flex-1 overflow-auto" onDoubleClick={() => setZoomLevel((z) => (z > 1 ? 1 : 2))}>
+            {/* overflow-auto + justify-center clips unreachable scroll on one side once
+                content overflows, so only center while it still fits (zoom === 1). */}
+            <div className={`min-h-full flex p-2 ${zoomLevel > 1 ? 'items-start justify-start' : 'items-center justify-center'}`}>
+              <img
+                src={isPdf(selectedSlip.imageUrl) ? (pdfPreviewDataUrl || selectedSlip.imageUrl) : selectedSlip.imageUrl}
+                alt="Payslip"
+                style={{ width: `${zoomLevel * 100}%` }}
+                className="max-w-none transition-[width] duration-150 select-none"
+                draggable={false}
+              />
             </div>
           </div>
         </div>

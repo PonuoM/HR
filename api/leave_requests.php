@@ -221,8 +221,8 @@ if ($method === 'POST') {
                AND lr.leave_type_id = ?
                AND lr.status != 'rejected'
                AND lr.reason NOT LIKE '[OT]%'
-               AND lr.start_date <= ?
-               AND lr.end_date >= ?
+               AND DATE(lr.start_date) <= ?
+               AND DATE(lr.end_date) >= ?
              LIMIT 1"
         );
         $dupStmt->bind_param('siss', $employee_id, $leaveTypeId, $eDate, $sDate);

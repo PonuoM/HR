@@ -35,51 +35,94 @@ function get_tier_quota($conn, $employee_id, $leave_type_id, $default_quota, $co
     $prorate_first_year = $ltInfoRow ? (int)$ltInfoRow['prorate_first_year'] : 0;
     $probation_months = $ltInfoRow ? (int)$ltInfoRow['probation_months'] : 4;
 
+    if ($leave_category !== 'seniority') {
+        return (int)$default_quota;
+    }
+
     if (!$empRow || empty($empRow['hire_date'])) {
-        return $leave_category === 'seniority' ? 0 : (int)$default_quota;
-    }
-
-    $startDate = new DateTime($empRow['hire_date']);
-    $now = new DateTime();
-    $hireYear = (int)$startDate->format('Y');
-    
-    $diff = $startDate->diff($now);
-    $yearsOfService = (int)$diff->y;
-    $monthsOfService = ($yearsOfService * 12) + (int)$diff->m;
-
-    // Find matching seniority tier (highest min_years that the employee qualifies for)
-    $tierStmt = $conn->prepare(
-        "SELECT days FROM leave_seniority_tiers 
-         WHERE company_id = ? AND leave_type_id = ? AND min_years <= ? 
-         ORDER BY min_years DESC LIMIT 1"
-    );
-    $tierStmt->bind_param('iii', $company_id, $leave_type_id, $yearsOfService);
-    $tierStmt->execute();
-    $tierRow = $tierStmt->get_result()->fetch_assoc();
-
-    if ($tierRow) {
-        return (int)$tierRow['days'];
-    }
-
-    if ($leave_category === 'seniority') {
-        // If they haven't reached 1 year
-        if ($yearsOfService === 0) {
-            // Once they enter a new calendar year after their hire year, they get the full base quota
-            if ($quota_year > $hireYear) {
-                return (int)$default_quota;
-            }
-
-            // Check if prorating is enabled and they passed probation
-            if ($prorate_first_year === 1 && $monthsOfService >= $probation_months) {
-                $prorated = round(($monthsOfService / 12) * $default_quota);
-                return (int)$prorated;
-            }
-        }
-        // Otherwise, 0 days
         return 0;
     }
 
-    return (int)$default_quota;
+    $startDate = new DateTime($empRow['hire_date']);
+    $hireYear = (int)$startDate->format('Y');
+
+    // Flat annual entitlement for a given completed-years count, from the tier table.
+    $tierDaysFor = function (int $years) use ($conn, $company_id, $leave_type_id): ?float {
+        if ($years < 1) return null;
+        $stmt = $conn->prepare(
+            "SELECT days FROM leave_seniority_tiers
+             WHERE company_id = ? AND leave_type_id = ? AND min_years <= ?
+             ORDER BY min_years DESC LIMIT 1"
+        );
+        $stmt->bind_param('iii', $company_id, $leave_type_id, $years);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        return $row ? (float)$row['days'] : null;
+    };
+
+    // Monthly-equivalent entitlement earned for months [1..$uptoMonth] of $quota_year,
+    // for an employee still under 1 year of service throughout — i.e. zero before probation
+    // clears, then $default_quota/12 per month once it has.
+    $preTierValue = function (int $uptoMonth) use ($startDate, $quota_year, $default_quota, $probation_months): float {
+        if ($uptoMonth <= 0) return 0.0;
+        $probationEnd = (clone $startDate)->modify("+{$probation_months} months");
+        $peYear = (int)$probationEnd->format('Y');
+        $peMonth = (int)$probationEnd->format('n');
+        if ($peYear < $quota_year) {
+            return ($default_quota / 12) * $uptoMonth; // already cleared before this year began
+        }
+        if ($peYear > $quota_year) {
+            return 0.0; // won't clear probation within this year at all
+        }
+        $activeMonths = max(0, $uptoMonth - $peMonth);
+        return ($default_quota / 12) * $activeMonths;
+    };
+
+    if ($quota_year === $hireYear) {
+        // Hire year itself: prorate by months already worked so far this year.
+        if ($prorate_first_year !== 1) return 0;
+        $now = new DateTime();
+        $diff = $startDate->diff($now);
+        $monthsOfService = ((int)$diff->y * 12) + (int)$diff->m;
+        if ($monthsOfService < $probation_months) return 0;
+        return round(($monthsOfService / 12) * $default_quota * 2) / 2; // nearest 0.5 day
+    }
+
+    if ($quota_year < $hireYear) {
+        return 0;
+    }
+
+    // quota_year > hireYear: determine years-of-service as of the start and end of quota_year.
+    // This is deterministic per (employee, quota_year) — NOT dependent on "today" — so the
+    // result is stable no matter when during the year the API happens to be called.
+    $jan1 = new DateTime("{$quota_year}-01-01");
+    $dec31 = new DateTime("{$quota_year}-12-31");
+    $yearsAtJan1 = (int)$startDate->diff($jan1)->y;
+    $yearsAtDec31 = (int)$startDate->diff($dec31)->y;
+    $anniversaryMonth = (int)$startDate->format('n');
+
+    if ($prorate_first_year !== 1) {
+        return $tierDaysFor($yearsAtDec31) ?? 0;
+    }
+
+    if ($yearsAtJan1 === $yearsAtDec31) {
+        // No seniority-tier crossing within this calendar year.
+        if ($yearsAtJan1 >= 1) {
+            return $tierDaysFor($yearsAtJan1) ?? (float)$default_quota;
+        }
+        return $preTierValue(12); // still under 1 year of service for the whole year
+    }
+
+    // Exactly one tier crossing this year, at the employee's hire-month anniversary —
+    // blend the pre-anniversary rate with the post-anniversary rate by month, rather than
+    // jumping to the new tier's full annual amount for the whole year.
+    $oldPortion = $yearsAtJan1 >= 1
+        ? (($tierDaysFor($yearsAtJan1) ?? (float)$default_quota) / 12) * $anniversaryMonth
+        : $preTierValue($anniversaryMonth);
+    $newAnnual = $tierDaysFor($yearsAtDec31) ?? (float)$default_quota;
+    $newPortion = ($newAnnual / 12) * (12 - $anniversaryMonth);
+
+    return round(($oldPortion + $newPortion) * 2) / 2;
 }
 
 if ($method === 'GET' && ($_GET['action'] ?? '') === 'summary') {
@@ -251,7 +294,7 @@ if ($method === 'GET') {
         $existsCheck->execute();
         if ($existsCheck->get_result()->num_rows === 0) {
             $lt_total = get_tier_quota($conn, $employee_id, $lt_id, $lt['default_quota'], $emp_company_id, $year);
-            $insertStmt->bind_param('siis', $employee_id, $lt_id, $lt_total, $year);
+            $insertStmt->bind_param('sidi', $employee_id, $lt_id, $lt_total, $year);
             $insertStmt->execute();
             $provisioned = true;
         }
@@ -277,7 +320,7 @@ if ($method === 'GET') {
             // Exception: If current total is exactly the default_quota but they should have 0, fix the incorrect auto-provision.
             if ($correctQuota > (int)$eq['total'] || ($correctQuota === 0 && (int)$eq['total'] === (int)$eq['default_quota'])) {
                 $eqId = (int)$eq['id'];
-                $updateStmt->bind_param('ii', $correctQuota, $eqId);
+                $updateStmt->bind_param('di', $correctQuota, $eqId);
                 $updateStmt->execute();
             }
         }

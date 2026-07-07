@@ -74,9 +74,9 @@ while ($h = $hResult->fetch_assoc()) {
 
 // ── Get approved leaves for this employee ──
 $lvStmt = $conn->prepare(
-    "SELECT lr.start_date, lr.end_date FROM leave_requests lr 
-     WHERE lr.employee_id = ? AND lr.status = 'approved' 
-     AND lr.end_date >= ? AND lr.start_date <= ?"
+    "SELECT lr.start_date, lr.end_date FROM leave_requests lr
+     WHERE lr.employee_id = ? AND lr.status = 'approved'
+     AND DATE(lr.end_date) >= ? AND DATE(lr.start_date) <= ?"
 );
 $lvStmt->bind_param('sss', $employee_id, $startDate, $checkDate);
 $lvStmt->execute();

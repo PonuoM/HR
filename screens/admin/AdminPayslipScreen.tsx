@@ -2,7 +2,7 @@ import React, { useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Payslip } from '../../types';
 import { useApi } from '../../hooks/useApi';
-import { getEmployees, getPayslips } from '../../services/api';
+import { getEmployees, getPayslips, uploadFile, createPayslip } from '../../services/api';
 import { useToast } from '../../components/Toast';
 import CustomSelect from '../../components/CustomSelect';
 
@@ -10,6 +10,7 @@ import CustomSelect from '../../components/CustomSelect';
 interface QueueItem extends Partial<Payslip> {
     isCustomDate?: boolean;
     fileName?: string;
+    file?: File;
 }
 
 // Hoisted to module scope (rendering-hoist-jsx)
@@ -58,16 +59,20 @@ const AdminPayslipScreen: React.FC = () => {
     const [uploadQueue, setUploadQueue] = useState<QueueItem[]>([]);
     const [isDragging, setIsDragging] = useState(false);
     const [uploadSuccess, setUploadSuccess] = useState(false);
+    const [isSending, setIsSending] = useState(false);
 
     // State for History (merged from API + locally sent)
     const [localHistoryItems, setLocalHistoryItems] = useState<Payslip[]>([]);
     const historyItems = [...localHistoryItems, ...historyFromApi];
 
-    // Helper: Try to find Employee ID inside filename
+    // Helper: Try to find Employee ID inside filename.
+    // Picks the longest matching id (most specific) so a short id like "014" doesn't
+    // win over a longer one that contains it as a substring, e.g. "PMW0014".
     const matchEmployeeFromFilename = (filename: string) => {
         const nameUpper = filename.toUpperCase();
-        const matchedEmployee = employees.find((emp: any) => nameUpper.includes(emp.id.toUpperCase()));
-        return matchedEmployee;
+        const candidates = employees.filter((emp: any) => nameUpper.includes(emp.id.toUpperCase()));
+        if (candidates.length === 0) return undefined;
+        return candidates.reduce((best: any, emp: any) => emp.id.length > best.id.length ? emp : best);
     };
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -90,7 +95,8 @@ const AdminPayslipScreen: React.FC = () => {
                 isCustomDate: false,
                 imageUrl: URL.createObjectURL(file),
                 status: 'new' as const,
-                fileName: file.name
+                fileName: file.name,
+                file
             };
         });
         setUploadQueue(prev => [...prev, ...newQueue]);
@@ -151,18 +157,50 @@ const AdminPayslipScreen: React.FC = () => {
             return;
         }
 
-        if (await showConfirm({ message: `ยืนยันการส่งสลิปเงินเดือนจำนวน ${uploadQueue.length} รายการ?`, type: 'info', confirmText: 'ส่งเลย' })) {
-            const sentItems = uploadQueue.map(item => ({
-                ...item,
-                sentAt: new Date().toISOString(),
-                amount: 'xxxxx',
-                status: 'new' as const
-            })) as Payslip[];
+        if (!(await showConfirm({ message: `ยืนยันการส่งสลิปเงินเดือนจำนวน ${uploadQueue.length} รายการ?`, type: 'info', confirmText: 'ส่งเลย' }))) {
+            return;
+        }
 
+        setIsSending(true);
+        const sentItems: Payslip[] = [];
+        const failedFileNames: string[] = [];
+
+        for (const item of uploadQueue) {
+            try {
+                if (!item.file) throw new Error('missing file');
+                const uploaded = await uploadFile(item.file, 'payslip', item.employeeId);
+                const created = await createPayslip({
+                    employee_id: item.employeeId,
+                    month: item.month,
+                    year: item.year,
+                    amount: 'xxxxx',
+                    image_url: uploaded.url,
+                });
+                sentItems.push({
+                    ...item,
+                    id: String(created.id),
+                    sentAt: new Date().toISOString(),
+                    amount: 'xxxxx',
+                    status: 'new' as const,
+                    imageUrl: uploaded.url,
+                } as Payslip);
+            } catch {
+                failedFileNames.push(item.fileName || item.employeeName || 'ไม่ทราบไฟล์');
+            }
+        }
+
+        setIsSending(false);
+
+        if (sentItems.length > 0) {
             setLocalHistoryItems(prev => [...sentItems, ...prev]);
-            setUploadQueue([]);
+            setUploadQueue(prev => prev.filter(item => failedFileNames.includes(item.fileName || '')));
             setUploadSuccess(true);
+            refetchHistory();
             setTimeout(() => setUploadSuccess(false), 3000);
+        }
+
+        if (failedFileNames.length > 0) {
+            toast(`ส่งไม่สำเร็จ ${failedFileNames.length} รายการ: ${failedFileNames.join(', ')}`, 'error');
         }
     };
 
@@ -266,10 +304,11 @@ const AdminPayslipScreen: React.FC = () => {
                                 <h3 className="font-bold text-gray-900 dark:text-white">รายการตรวจสอบ ({uploadQueue.length})</h3>
                                 <button
                                     onClick={handleSendAll}
-                                    className="bg-primary hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-lg shadow-primary/30 flex items-center gap-2"
+                                    disabled={isSending}
+                                    className="bg-primary hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-lg shadow-primary/30 flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
                                 >
-                                    <span className="material-icons-round text-sm">send</span>
-                                    ส่งข้อมูล
+                                    <span className="material-icons-round text-sm">{isSending ? 'hourglass_top' : 'send'}</span>
+                                    {isSending ? 'กำลังส่ง...' : 'ส่งข้อมูล'}
                                 </button>
                             </div>
                             <div className="overflow-y-auto p-2 space-y-3 flex-1">
@@ -279,7 +318,13 @@ const AdminPayslipScreen: React.FC = () => {
                                         <div key={item.id} className={`flex flex-col md:flex-row md:items-center gap-4 p-4 rounded-xl border transition-colors ${isMatched ? 'border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800' : 'border-red-300 dark:border-red-900/50 bg-red-50 dark:bg-red-900/10'}`}>
                                             {/* Preview & Status */}
                                             <div className="flex items-center gap-4">
-                                                <img src={item.imageUrl} className="w-16 h-20 object-cover rounded bg-gray-200 border border-gray-200 dark:border-gray-600" alt="Preview" />
+                                                {item.file?.type === 'application/pdf' ? (
+                                                    <div className="w-16 h-20 rounded bg-gray-200 border border-gray-200 dark:border-gray-600 flex items-center justify-center shrink-0">
+                                                        <span className="material-icons-round text-red-400 text-3xl">picture_as_pdf</span>
+                                                    </div>
+                                                ) : (
+                                                    <img src={item.imageUrl} className="w-16 h-20 object-cover rounded bg-gray-200 border border-gray-200 dark:border-gray-600" alt="Preview" />
+                                                )}
                                                 <div className="md:w-48 overflow-hidden">
                                                     <p className="text-xs text-gray-500 truncate mb-1" title={item.fileName}>{item.fileName}</p>
                                                     {isMatched ? (

@@ -33,6 +33,7 @@ uploads/
 # Agent / IDE config
 .agent/
 .claude/
+.playwright-mcp/
 
 # ─── Sensitive files (NEVER commit) ───
 # Contains production DB credentials
@@ -46,6 +47,15 @@ HR_*.csv
 HR_*.sql
 # Any CSV anywhere — assume employee/customer PII unless proven otherwise
 *.csv
+# Any Excel export/report anywhere — assume employee PII unless proven otherwise
+*.xlsx
+*.xls
+# Payroll / training docs accidentally dropped in repo root
+สลิปเงินเดือน/
+เอกสารฝึกอบรม/
+# Ad-hoc investigation reports referencing real employee cases
+รายงานตรวจสอบ_*.md
+รายงานมาสาย_*.md
 
 # ─── Debug / one-off scripts ───
 # Ad-hoc DB inspection scripts (regenerated as needed)

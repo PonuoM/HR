@@ -169,14 +169,17 @@ if ($action === 'daily' && $employee_id && ($month || $cutoff_month || ($date_fr
          FROM leave_requests lr
          JOIN leave_types lt ON lr.leave_type_id = lt.id
          WHERE lr.employee_id = ? AND lr.status = 'approved'
-           AND ((lr.start_date BETWEEN ? AND ?) OR (lr.end_date BETWEEN ? AND ?))"
+           AND DATE(lr.start_date) <= ? AND DATE(lr.end_date) >= ?"
     );
-    $lvStmt->bind_param('sssss', $employee_id, $startDate, $endDate, $startDate, $endDate);
+    $lvStmt->bind_param('sss', $employee_id, $endDate, $startDate);
     $lvStmt->execute();
     $lvRes = $lvStmt->get_result();
     while ($lv = $lvRes->fetch_assoc()) {
-        $cur = new DateTime(max($lv['start_date'], $startDate));
-        $lvEnd = new DateTime(min($lv['end_date'], $endDate));
+        // Clamp against full-day bounds (not bare date strings) — otherwise PHP's
+        // string-based max()/min() treats "2026-06-30" as earlier than
+        // "2026-06-30 23:59:00" and the leave's last day never gets iterated.
+        $cur = new DateTime(max($lv['start_date'], $startDate . ' 00:00:00'));
+        $lvEnd = new DateTime(min($lv['end_date'], $endDate . ' 23:59:59'));
         while ($cur <= $lvEnd) {
             $d = $cur->format('Y-m-d');
             $leaveMap[$d] = $lv['leave_type_name'];
@@ -358,9 +361,9 @@ if ($export === 'csv_specific_day' && $date) {
         "SELECT lr.employee_id, lt.name AS leave_type_name
          FROM leave_requests lr JOIN leave_types lt ON lr.leave_type_id = lt.id
          WHERE lr.status = 'approved'
-           AND ? BETWEEN lr.start_date AND lr.end_date"
+           AND DATE(lr.start_date) <= ? AND DATE(lr.end_date) >= ?"
     );
-    $lStmt->bind_param('s', $specificDate);
+    $lStmt->bind_param('ss', $specificDate, $specificDate);
     $lStmt->execute();
     $lRes = $lStmt->get_result();
     while ($lv = $lRes->fetch_assoc()) {
@@ -604,10 +607,10 @@ if (!empty($employees)) {
               WHERE lr.employee_id IN ($idPlaceholders)
                 AND lr.status = 'approved'
                 AND lr.reason NOT LIKE '[OT]%'
-                AND ((lr.start_date BETWEEN ? AND ?) OR (lr.end_date BETWEEN ? AND ?))";
+                AND DATE(lr.start_date) <= ? AND DATE(lr.end_date) >= ?";
     $lvStmt = $conn->prepare($lvSql);
-    $lvParams = array_merge($empIds, [$startDate, $endDate, $startDate, $endDate]);
-    $lvStmt->bind_param($idTypes . 'ssss', ...$lvParams);
+    $lvParams = array_merge($empIds, [$endDate, $startDate]);
+    $lvStmt->bind_param($idTypes . 'ss', ...$lvParams);
     $lvStmt->execute();
     $lvRes = $lvStmt->get_result();
     while ($lv = $lvRes->fetch_assoc()) {
@@ -621,11 +624,11 @@ if (!empty($employees)) {
               WHERE lr.employee_id IN ($idPlaceholders)
                 AND lr.status = 'approved'
                 AND lr.reason LIKE '[OT]%'
-                AND ((lr.start_date BETWEEN ? AND ?) OR (lr.end_date BETWEEN ? AND ?))
+                AND DATE(lr.start_date) <= ? AND DATE(lr.end_date) >= ?
               GROUP BY lr.employee_id";
     $otStmt = $conn->prepare($otSql);
-    $otParams = array_merge($empIds, [$startDate, $endDate, $startDate, $endDate]);
-    $otStmt->bind_param($idTypes . 'ssss', ...$otParams);
+    $otParams = array_merge($empIds, [$endDate, $startDate]);
+    $otStmt->bind_param($idTypes . 'ss', ...$otParams);
     $otStmt->execute();
     $otRes = $otStmt->get_result();
     while ($ot = $otRes->fetch_assoc()) {
@@ -727,13 +730,17 @@ if (!empty($employees)) {
         foreach ($empLeaves as $lv) {
             $ltId = (int)$lv['leave_type_id'];
             // Fix: count only days within the period, not total_days
-            if ($lv['start_date'] >= $startDate && $lv['end_date'] <= $endDate) {
+            // Compare DATE-only portions (both 'Y-m-d') — comparing the raw
+            // datetime strings against bare $startDate/$endDate breaks whenever
+            // the leave's time-of-day makes it the "longer" (lexicographically
+            // greater) string even though it falls on the boundary day.
+            if (substr($lv['start_date'], 0, 10) >= $startDate && substr($lv['end_date'], 0, 10) <= $endDate) {
                 $days = (float)$lv['total_days']; // entirely within period (total_days is schedule-correct, recomputed server-side at request time)
             } else {
                 // Leave spans the period boundary → recount only THIS employee's
                 // active working days inside the period (schedule-aware: honours
                 // 6-day / alternating-week schedules, not hardcoded Mon–Fri).
-                $days = count_active_workdays($emp, max($lv['start_date'], $startDate), min($lv['end_date'], $endDate), $holidayDates, $workIdx);
+                $days = count_active_workdays($emp, max($lv['start_date'], $startDate . ' 00:00:00'), min($lv['end_date'], $endDate . ' 23:59:59'), $holidayDates, $workIdx);
             }
             if (!isset($leaveByTypeMap[$ltId])) {
                 $leaveByTypeMap[$ltId] = [
@@ -867,14 +874,14 @@ if ($export === 'csv_daily' && ($month || $cutoff_month)) {
             "SELECT lr.start_date, lr.end_date, lt.name AS leave_type_name
              FROM leave_requests lr JOIN leave_types lt ON lr.leave_type_id = lt.id
              WHERE lr.employee_id = ? AND lr.status = 'approved'
-               AND ((lr.start_date BETWEEN ? AND ?) OR (lr.end_date BETWEEN ? AND ?))"
+               AND DATE(lr.start_date) <= ? AND DATE(lr.end_date) >= ?"
         );
-        $lStmt->bind_param('sssss', $eid, $startDateD, $endDateD, $startDateD, $endDateD);
+        $lStmt->bind_param('sss', $eid, $endDateD, $startDateD);
         $lStmt->execute();
         $lRes = $lStmt->get_result();
         while ($lv = $lRes->fetch_assoc()) {
-            $cur = new DateTime(max($lv['start_date'], $startDateD));
-            $lvEnd = new DateTime(min($lv['end_date'], $endDateD));
+            $cur = new DateTime(max($lv['start_date'], $startDateD . ' 00:00:00'));
+            $lvEnd = new DateTime(min($lv['end_date'], $endDateD . ' 23:59:59'));
             while ($cur <= $lvEnd) {
                 $lMap[$cur->format('Y-m-d')] = $lv['leave_type_name'];
                 $cur->modify('+1 day');

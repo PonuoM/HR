@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { API_BASE, getAuthHeaders, getEmployees, getLeaveTypes, getLeaveQuotas, createLeaveRequestAsAdmin, updateOtRate } from '../../services/api';
+import { API_BASE, getAuthHeaders, getEmployees, getLeaveTypes, getLeaveQuotas, getLeaveRequests, createLeaveRequestAsAdmin, updateOtRate } from '../../services/api';
 import { useApi } from '../../hooks/useApi';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
@@ -387,6 +387,16 @@ const AdminAttendanceReportScreen: React.FC = () => {
     // Modal-local date range — initialized from outer filter when modal opens, but editable inside
     const [detailDateFrom, setDetailDateFrom] = useState('');
     const [detailDateTo, setDetailDateTo] = useState('');
+    // Detail modal tab: daily attendance table vs. leave quota summary
+    const [detailTab, setDetailTab] = useState<'daily' | 'quota'>('daily');
+    const { data: detailQuotas } = useApi<any[]>(
+        () => detailEmpId ? getLeaveQuotas(detailEmpId) : Promise.resolve([]),
+        [detailEmpId]
+    );
+    const { data: detailLeaveReqs } = useApi<any[]>(
+        () => detailEmpId ? getLeaveRequests({ employee_id: detailEmpId }) : Promise.resolve([]),
+        [detailEmpId]
+    );
 
     // Edit daily attendance state
     const [editingDate, setEditingDate] = useState<string | null>(null);
@@ -888,6 +898,7 @@ const AdminAttendanceReportScreen: React.FC = () => {
         setDetailDateTo(outerDateRange.to);
         setDetailEmpId(empId);
         setDetailData(null);
+        setDetailTab('daily');
     };
 
     return (
@@ -1463,7 +1474,7 @@ const AdminAttendanceReportScreen: React.FC = () => {
                             <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0 flex-1">
                                     <h2 className="text-lg font-bold text-gray-900 dark:text-white truncate">
-                                        📅 รายวัน — {detailData?.employee_name || '...'}
+                                        {detailTab === 'daily' ? '📅 รายวัน' : '🏖️ โควต้าวันลา'} — {detailData?.employee_name || '...'}
                                     </h2>
                                     <p className="text-xs text-gray-500 truncate">
                                         {detailData?.department} • เข้างาน {fmtTime(detailData?.work_start_time || null)} – ออกงาน {fmtTime(detailData?.work_end_time || null)}
@@ -1473,28 +1484,47 @@ const AdminAttendanceReportScreen: React.FC = () => {
                                     <span className="material-icons-round">close</span>
                                 </button>
                             </div>
-                            {/* Modal-local date range picker */}
-                            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                                <span className="text-gray-500 font-semibold">ช่วงวันที่:</span>
-                                <input type="date" value={detailDateFrom} max={detailDateTo || undefined}
-                                    onChange={e => setDetailDateFrom(e.target.value)}
-                                    className="px-2 py-1 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary/30 focus:outline-none" />
-                                <span className="text-gray-400">—</span>
-                                <input type="date" value={detailDateTo} min={detailDateFrom || undefined}
-                                    onChange={e => setDetailDateTo(e.target.value)}
-                                    className="px-2 py-1 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary/30 focus:outline-none" />
-                                <button type="button"
-                                    onClick={() => { setDetailDateFrom(outerDateRange.from); setDetailDateTo(outerDateRange.to); }}
-                                    className="ml-auto px-2 py-1 rounded-md text-[11px] font-semibold text-primary hover:bg-primary/10 transition-colors flex items-center gap-1">
-                                    <span className="material-icons-round text-[14px]">restart_alt</span>
-                                    รีเซ็ตเป็นช่วงด้านนอก
+
+                            {/* Tabs */}
+                            <div className="mt-3 flex items-center gap-1.5">
+                                <button type="button" onClick={() => setDetailTab('daily')}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${detailTab === 'daily' ? 'bg-primary text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>
+                                    <span className="material-icons-round text-sm">calendar_month</span>
+                                    รายวัน
+                                </button>
+                                <button type="button" onClick={() => setDetailTab('quota')}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${detailTab === 'quota' ? 'bg-primary text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>
+                                    <span className="material-icons-round text-sm">beach_access</span>
+                                    โควต้าวันลา
                                 </button>
                             </div>
+
+                            {/* Modal-local date range picker — only relevant for daily view */}
+                            {detailTab === 'daily' && (
+                                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                                    <span className="text-gray-500 font-semibold">ช่วงวันที่:</span>
+                                    <input type="date" value={detailDateFrom} max={detailDateTo || undefined}
+                                        onChange={e => setDetailDateFrom(e.target.value)}
+                                        className="px-2 py-1 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary/30 focus:outline-none" />
+                                    <span className="text-gray-400">—</span>
+                                    <input type="date" value={detailDateTo} min={detailDateFrom || undefined}
+                                        onChange={e => setDetailDateTo(e.target.value)}
+                                        className="px-2 py-1 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary/30 focus:outline-none" />
+                                    <button type="button"
+                                        onClick={() => { setDetailDateFrom(outerDateRange.from); setDetailDateTo(outerDateRange.to); }}
+                                        className="ml-auto px-2 py-1 rounded-md text-[11px] font-semibold text-primary hover:bg-primary/10 transition-colors flex items-center gap-1">
+                                        <span className="material-icons-round text-[14px]">restart_alt</span>
+                                        รีเซ็ตเป็นช่วงด้านนอก
+                                    </button>
+                                </div>
+                            )}
                         </div>
 
                         {/* Modal Body — scrollable */}
                         <div className="flex-1 overflow-y-auto p-4">
-                            {detailLoading ? (
+                            {detailTab === 'quota' ? (
+                                <LeaveQuotaPanel quotas={detailQuotas || []} requests={detailLeaveReqs || []} />
+                            ) : detailLoading ? (
                                 <div className="flex justify-center py-12">
                                     <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full"></div>
                                 </div>
@@ -1815,6 +1845,108 @@ const AdminAttendanceReportScreen: React.FC = () => {
                     .grid > div { page-break-inside: avoid; }
                 }
             `}</style>
+        </div>
+    );
+};
+
+// ── Leave quota summary + per-type usage history, shown inside the daily-detail modal ──
+const LeaveQuotaPanel: React.FC<{ quotas: any[]; requests: any[] }> = ({ quotas, requests }) => {
+    const thisYear = new Date().getFullYear();
+
+    const fmtThaiShort = (d: string) => {
+        if (!d) return '-';
+        const dt = new Date(d);
+        return dt.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' });
+    };
+    // Round + trim trailing zeros: 5.00 → "5", 5.50 → "5.5"
+    const fmtNum = (n: number | null | undefined): string => {
+        if (n === null || n === undefined) return '-';
+        const r = Math.round(Number(n) * 100) / 100;
+        return Number.isInteger(r) ? r.toString() : parseFloat(r.toFixed(2)).toString();
+    };
+
+    // Group leave requests by leave_type_id, only this year, excluding rejected/cancelled
+    const reqsByType: Record<string, any[]> = {};
+    (requests || []).forEach((r: any) => {
+        if (r.status === 'rejected' || r.status === 'cancelled') return;
+        const startYear = r.start_date ? new Date(r.start_date).getFullYear() : thisYear;
+        if (startYear !== thisYear) return;
+        const k = String(r.leave_type_id ?? 'ot');
+        if (!reqsByType[k]) reqsByType[k] = [];
+        reqsByType[k].push(r);
+    });
+    Object.values(reqsByType).forEach(list => list.sort((a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime()));
+
+    if (!quotas || quotas.length === 0) {
+        return <div className="text-center py-12 text-gray-500 text-sm">ไม่พบข้อมูลโควต้าวันลา</div>;
+    }
+
+    return (
+        <div className="space-y-2.5">
+            <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
+                <span className="material-icons-round text-sm text-blue-500">info</span>
+                สรุปโควต้าวันลา ปี {thisYear + 543} — กดที่แต่ละประเภทเพื่อดูวันที่ใช้ไป
+            </div>
+            {quotas.map((q: any) => {
+                const isUnlimited = Number(q.remaining) === -1;
+                const total = Number(q.total) || 0;
+                const used = Number(q.used) || 0;
+                const remaining = Number(q.remaining) || 0;
+                const typeReqs = reqsByType[String(q.leave_type_id)] || [];
+                const isOver = !isUnlimited && remaining < 0;
+                return (
+                    <details key={q.leave_type_id} className="bg-white dark:bg-gray-900/50 rounded-xl border border-gray-200 dark:border-gray-700 group" open={typeReqs.length > 0}>
+                        <summary className="cursor-pointer px-3 py-2.5 flex items-center justify-between gap-2 hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl">
+                            <div className="flex items-center gap-2 min-w-0">
+                                <span className={`material-icons-round text-base text-${q.color || 'gray'}-500`}>{q.icon || 'star'}</span>
+                                <span className="text-sm font-semibold text-gray-900 dark:text-white truncate">{q.leave_type_name}</span>
+                                {typeReqs.length > 0 && (
+                                    <span className="text-[10px] text-gray-500 shrink-0">({typeReqs.length} รายการ)</span>
+                                )}
+                                <span className="material-icons-round text-sm text-gray-400 transition-transform group-open:rotate-180 shrink-0">expand_more</span>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0 text-xs">
+                                <span className="text-gray-500">ใช้ <b className="text-purple-600">{fmtNum(used)}</b></span>
+                                <span className="text-gray-400">/</span>
+                                <span className="text-gray-500">
+                                    เหลือ{' '}
+                                    <b className={isOver ? 'text-red-700' : (remaining <= 1 && !isUnlimited ? 'text-red-600' : 'text-green-600')}>
+                                        {isUnlimited ? '∞' : (isOver ? `เกิน ${fmtNum(Math.abs(remaining))}` : fmtNum(remaining))}
+                                    </b>
+                                    {!isUnlimited && !isOver && ` / ${fmtNum(total)}`}
+                                </span>
+                            </div>
+                        </summary>
+                        <div className="px-3 py-2 border-t border-gray-100 dark:border-gray-700">
+                            {typeReqs.length === 0 ? (
+                                <div className="text-[11px] text-gray-400 italic py-1">ยังไม่ได้ใช้</div>
+                            ) : (
+                                <div className="space-y-1">
+                                    {typeReqs.map((r: any) => {
+                                        const isPending = r.status === 'pending';
+                                        return (
+                                            <div key={r.id} className="w-full flex items-center justify-between gap-2 text-xs px-2 py-1.5 rounded bg-gray-50 dark:bg-gray-800/60">
+                                                <span className="text-gray-700 dark:text-gray-300 truncate flex-1">
+                                                    {fmtThaiShort(r.start_date)}
+                                                    {r.end_date && r.end_date !== r.start_date && ` — ${fmtThaiShort(r.end_date)}`}
+                                                </span>
+                                                <span className="text-gray-500 shrink-0">{fmtNum(r.total_days)} วัน</span>
+                                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${
+                                                    isPending ? 'bg-amber-100 text-amber-700' :
+                                                    r.status === 'approved' ? 'bg-green-100 text-green-700' :
+                                                    'bg-gray-100 text-gray-600'
+                                                }`}>
+                                                    {isPending ? 'รออนุมัติ' : r.status === 'approved' ? 'อนุมัติ' : r.status}
+                                                </span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    </details>
+                );
+            })}
         </div>
     );
 };
