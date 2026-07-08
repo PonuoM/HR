@@ -135,7 +135,7 @@ const HomeScreen: React.FC = () => {
     const { data: rawNotifications, refetch: refetchNotifs } = useApi(() => getNotifications(empId), [empId]);
     const { data: rawQuotas } = useApi(() => getLeaveQuotas(empId), [empId]);
     const { data: rawAttendance, refetch: refetchAttendance } = useApi(() => getAttendance(empId), [empId]);
-    const { data: allNews } = useApi(() => getNews(), []);
+    const { data: allNews } = useApi(() => getNews(empId), [empId]);
     const { data: currentUser } = useApi(() => getEmployee(empId), [empId]);
     const { data: pendingRequests, refetch: refetchPending } = useApi(
         () => empId ? getLeaveRequests({ status: 'pending' }) : Promise.resolve([]),

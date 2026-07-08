@@ -121,7 +121,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
                             </button>
                         )}
                         <ul className="space-y-1">
-                            {SIDEBAR_ADMIN_ITEMS.map((item) => {
+                            {SIDEBAR_ADMIN_ITEMS.filter(item => isSuperAdmin || (authUser?.permissions && authUser.permissions.includes(item.path))).map((item) => {
                                 const isActive = location.pathname === item.path;
                                 return (
                                     <li key={item.path}>

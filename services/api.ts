@@ -247,8 +247,11 @@ export async function getLatestNewsId() {
     return fetchApi<{ latest_id: number; categories: Record<string, number> }>('news.php?action=latest_id');
 }
 
-export async function getNews(employeeId?: string) {
-    const qs = employeeId ? `?employee_id=${employeeId}` : '';
+export async function getNews(employeeId?: string, adminView?: boolean) {
+    const params = new URLSearchParams();
+    if (employeeId) params.append('employee_id', employeeId);
+    if (adminView) params.append('admin_view', '1');
+    const qs = params.toString() ? `?${params.toString()}` : '';
     return fetchApi<any[]>(`news.php${qs}`);
 }
 

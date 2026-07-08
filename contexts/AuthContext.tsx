@@ -15,6 +15,7 @@ interface AuthUser {
     company_id: number;
     is_superadmin: number;
     face_registered_at: string | null;
+    permissions: string[] | null;
 }
 
 interface Company {

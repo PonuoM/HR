@@ -111,7 +111,23 @@ if ($action === 'categories') {
 
 if ($action === 'latest_id' && $method === 'GET') {
     $employeeId = $_GET['employee_id'] ?? null;
-    $compFilter = "(a.target_companies IS NULL OR a.target_companies = 'all' OR JSON_CONTAINS(a.target_companies, '" . $company_id . "', '$') OR a.company_id = $company_id)";
+    $adminView = isset($_GET['admin_view']) && $_GET['admin_view'] === '1';
+
+    $is_superadmin = false;
+    $headers = getallheaders();
+    $requesting_emp = $headers['X-Employee-Id'] ?? $headers['x-employee-id'] ?? null;
+    if ($requesting_emp) {
+        $res2 = $conn->query("SELECT is_superadmin FROM employees WHERE id = '" . $conn->real_escape_string($requesting_emp) . "'");
+        if ($res2 && $row2 = $res2->fetch_assoc()) {
+            $is_superadmin = (bool)$row2['is_superadmin'];
+        }
+    }
+
+    if ($adminView && $is_superadmin) {
+        $compFilter = "1=1";
+    } else {
+        $compFilter = "(a.target_companies IS NULL OR a.target_companies = 'all' OR JSON_CONTAINS(a.target_companies, '" . $company_id . "', '$'))";
+    }
     $deptFilter = "1=1";
     
     if ($employeeId) {
@@ -228,8 +244,23 @@ if ($action === 'comment' && $method === 'DELETE' && isset($_GET['id'])) {
 // ---- LIST (with user's liked state) ----
 if ($method === 'GET' && !$action) {
     $employeeId = $_GET['employee_id'] ?? null;
-    
-    $compFilter = "(a.target_companies IS NULL OR a.target_companies = 'all' OR JSON_CONTAINS(a.target_companies, '" . $company_id . "', '$') OR a.company_id = $company_id)";
+    $adminView = isset($_GET['admin_view']) && $_GET['admin_view'] === '1';
+
+    $is_superadmin = false;
+    $headers = getallheaders();
+    $requesting_emp = $headers['X-Employee-Id'] ?? $headers['x-employee-id'] ?? null;
+    if ($requesting_emp) {
+        $res2 = $conn->query("SELECT is_superadmin FROM employees WHERE id = '" . $conn->real_escape_string($requesting_emp) . "'");
+        if ($res2 && $row2 = $res2->fetch_assoc()) {
+            $is_superadmin = (bool)$row2['is_superadmin'];
+        }
+    }
+
+    if ($adminView && $is_superadmin) {
+        $compFilter = "1=1";
+    } else {
+        $compFilter = "(a.target_companies IS NULL OR a.target_companies = 'all' OR JSON_CONTAINS(a.target_companies, '" . $company_id . "', '$'))";
+    }
     $deptFilter = "1=1";
     
     if ($employeeId) {
@@ -291,31 +322,62 @@ if ($method === 'POST' && !$action) {
 
 // ---- UPDATE ----
 if ($method === 'PUT' && !$action) {
-    require_admin($conn);
+    $empId = require_admin($conn);
+    
+    $is_superadmin = false;
+    $res = $conn->query("SELECT is_superadmin FROM employees WHERE id = '" . $conn->real_escape_string($empId) . "'");
+    if ($res && $row = $res->fetch_assoc()) {
+        $is_superadmin = (bool)$row['is_superadmin'];
+    }
+
     $id = (int)$_GET['id'];
     $body = get_json_body();
     
     $target_companies = isset($body['target_companies']) && $body['target_companies'] !== 'all' ? json_encode($body['target_companies']) : 'all';
     $target_departments = isset($body['target_departments']) && $body['target_departments'] !== 'all' ? json_encode($body['target_departments']) : 'all';
     
-    $stmt = $conn->prepare("UPDATE news_articles SET title=?, content=?, image=?, department=?, department_code=?, category=?, is_pinned=?, is_urgent=?, target_companies=?, target_departments=? WHERE id=? AND company_id=?");
-    $stmt->bind_param('ssssssisssii',
-        $body['title'], $body['content'], $body['image'],
-        $body['department'], $body['department_code'], $body['category'],
-        $body['is_pinned'], $body['is_urgent'],
-        $target_companies, $target_departments,
-        $id, $company_id
-    );
+    if ($is_superadmin) {
+        $stmt = $conn->prepare("UPDATE news_articles SET title=?, content=?, image=?, department=?, department_code=?, category=?, is_pinned=?, is_urgent=?, target_companies=?, target_departments=? WHERE id=?");
+        $stmt->bind_param('ssssssisssi',
+            $body['title'], $body['content'], $body['image'],
+            $body['department'], $body['department_code'], $body['category'],
+            $body['is_pinned'], $body['is_urgent'],
+            $target_companies, $target_departments,
+            $id
+        );
+    } else {
+        $stmt = $conn->prepare("UPDATE news_articles SET title=?, content=?, image=?, department=?, department_code=?, category=?, is_pinned=?, is_urgent=?, target_companies=?, target_departments=? WHERE id=? AND company_id=?");
+        $stmt->bind_param('ssssssisssii',
+            $body['title'], $body['content'], $body['image'],
+            $body['department'], $body['department_code'], $body['category'],
+            $body['is_pinned'], $body['is_urgent'],
+            $target_companies, $target_departments,
+            $id, $company_id
+        );
+    }
     $stmt->execute();
     json_response(['message' => 'Updated']);
 }
 
 // ---- DELETE ----
 if ($method === 'DELETE' && isset($_GET['id']) && !$action) {
-    require_admin($conn);
+    $empId = require_admin($conn);
+    
+    $is_superadmin = false;
+    $res = $conn->query("SELECT is_superadmin FROM employees WHERE id = '" . $conn->real_escape_string($empId) . "'");
+    if ($res && $row = $res->fetch_assoc()) {
+        $is_superadmin = (bool)$row['is_superadmin'];
+    }
+
     $id = (int)$_GET['id'];
-    $stmt = $conn->prepare("DELETE FROM news_articles WHERE id = ? AND company_id = ?");
-    $stmt->bind_param('ii', $id, $company_id);
+    
+    if ($is_superadmin) {
+        $stmt = $conn->prepare("DELETE FROM news_articles WHERE id = ?");
+        $stmt->bind_param('i', $id);
+    } else {
+        $stmt = $conn->prepare("DELETE FROM news_articles WHERE id = ? AND company_id = ?");
+        $stmt->bind_param('ii', $id, $company_id);
+    }
     $stmt->execute();
     json_response(['message' => 'Deleted']);
 }

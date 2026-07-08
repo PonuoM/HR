@@ -19,6 +19,12 @@ $company_id = get_company_id();
 // ======================== GET ========================
 if ($method === 'GET') {
     if ($type === 'positions') {
+        // Auto-migration for permissions column
+        $colCheck = $conn->query("SHOW COLUMNS FROM positions LIKE 'permissions'");
+        if ($colCheck && $colCheck->num_rows === 0) {
+            $conn->query("ALTER TABLE positions ADD COLUMN `permissions` TEXT NULL");
+        }
+
         $stmt = $conn->prepare("SELECT * FROM positions WHERE company_id = ? ORDER BY id");
         $stmt->bind_param('i', $company_id);
         $stmt->execute();
@@ -52,11 +58,12 @@ if ($method === 'POST') {
     if ($type === 'positions') {
         $name = $conn->real_escape_string($body['name'] ?? '');
         $can_sub = isset($body['can_have_subordinates']) ? intval($body['can_have_subordinates']) : 0;
+        $permissions = isset($body['permissions']) && is_array($body['permissions']) ? json_encode($body['permissions']) : null;
 
         if (!$name) json_response(['error' => 'Name is required'], 400);
 
-        $stmt = $conn->prepare("INSERT INTO positions (company_id, name, can_have_subordinates) VALUES (?, ?, ?)");
-        $stmt->bind_param('isi', $company_id, $name, $can_sub);
+        $stmt = $conn->prepare("INSERT INTO positions (company_id, name, can_have_subordinates, permissions) VALUES (?, ?, ?, ?)");
+        $stmt->bind_param('isis', $company_id, $name, $can_sub, $permissions);
         $stmt->execute();
         json_response(['id' => $conn->insert_id, 'message' => 'Position created'], 201);
     }
@@ -93,9 +100,10 @@ if ($method === 'PUT' && isset($_GET['id'])) {
     if ($type === 'positions') {
         $name = $conn->real_escape_string($body['name'] ?? '');
         $can_sub = isset($body['can_have_subordinates']) ? intval($body['can_have_subordinates']) : 0;
+        $permissions = isset($body['permissions']) && is_array($body['permissions']) ? json_encode($body['permissions']) : null;
 
-        $stmt = $conn->prepare("UPDATE positions SET name = ?, can_have_subordinates = ? WHERE id = ? AND company_id = ?");
-        $stmt->bind_param('siii', $name, $can_sub, $id, $company_id);
+        $stmt = $conn->prepare("UPDATE positions SET name = ?, can_have_subordinates = ?, permissions = ? WHERE id = ? AND company_id = ?");
+        $stmt->bind_param('sisii', $name, $can_sub, $permissions, $id, $company_id);
         $stmt->execute();
         json_response(['message' => 'Position updated', 'id' => $id]);
     }

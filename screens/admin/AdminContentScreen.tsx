@@ -19,6 +19,8 @@ interface NewsForm {
     target_departments: number[];
 }
 
+type Tab = 'all' | number;
+
 const emptyForm: NewsForm = {
     title: '',
     content: '',
@@ -36,10 +38,12 @@ const emptyForm: NewsForm = {
 const AdminContentScreen: React.FC = () => {
     const navigate = useNavigate();
     const { toast, confirm: showConfirm } = useToast();
-    const { user } = useAuth();
-    const { data: rawNews, loading, refetch } = useApi(() => getNews(), []);
+    const { user, isSuperAdmin } = useAuth();
+    const { data: rawNews, loading, refetch } = useApi(() => getNews(undefined, true), []);
     const { data: departments } = useApi(() => getDepartments(), []);
     const { data: companies } = useApi(() => getCompanies(), []);
+
+    const [tab, setTab] = useState<Tab>('all');
 
     // Modal state
     const [showModal, setShowModal] = useState(false);
@@ -123,16 +127,25 @@ const AdminContentScreen: React.FC = () => {
         category: post.category || 'ประกาศทั่วไป',
         isPinned: !!post.is_pinned,
         isUrgent: !!post.is_urgent,
+        target_companies: post.target_companies ? (post.target_companies === 'all' ? 'all' : JSON.parse(post.target_companies)) : 'all',
+        target_departments: post.target_departments ? (post.target_departments === 'all' ? 'all' : JSON.parse(post.target_departments)) : 'all',
         publishedAt: post.published_at ? new Date(post.published_at).toLocaleDateString('th-TH') : '',
         views: post.views || 0,
         likes: post.likes || 0,
     }));
 
+    // Filter posts by selected tab (company)
+    const filteredPosts = contentPosts.filter((post: any) => {
+        if (tab === 'all') return true;
+        if (post.target_companies === 'all') return true;
+        return Array.isArray(post.target_companies) && post.target_companies.includes(tab);
+    });
+
     // Compute stats from data
     const contentStats = {
-        totalPosts: contentPosts.length,
-        pinnedPosts: contentPosts.filter((p: any) => p.isPinned).length,
-        totalViews: contentPosts.reduce((sum: number, p: any) => sum + (p.views || 0), 0),
+        totalPosts: filteredPosts.length,
+        pinnedPosts: filteredPosts.filter((p: any) => p.isPinned).length,
+        totalViews: filteredPosts.reduce((sum: number, p: any) => sum + (p.views || 0), 0),
     };
 
     // Open create modal
@@ -155,9 +168,9 @@ const AdminContentScreen: React.FC = () => {
             category: post.category || 'ประกาศทั่วไป',
             is_pinned: post.isPinned,
             is_urgent: post.isUrgent,
-            target_companies: post.target_companies ? (post.target_companies === 'all' ? 'all' : JSON.parse(post.target_companies)) : 'all',
-            target_audience: post.target_departments ? (post.target_departments === 'all' ? 'all' : 'specific') : 'all',
-            target_departments: post.target_departments && post.target_departments !== 'all' ? JSON.parse(post.target_departments) : [],
+            target_companies: post.target_companies || 'all',
+            target_audience: post.target_departments === 'all' ? 'all' : 'specific',
+            target_departments: post.target_departments === 'all' ? [] : (post.target_departments || []),
         });
         setImageFiles([]);
         setShowModal(true);
@@ -268,27 +281,72 @@ const AdminContentScreen: React.FC = () => {
     const labelCls = "block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 ml-1 mb-1.5";
 
     return (
-        <div className="pt-6 md:pt-8 pb-8 px-4 md:px-8 max-w-[1600px] mx-auto min-h-full">
-            <header className="mb-6 md:mb-8 flex flex-col md:flex-row md:justify-between md:items-center gap-4">
+        <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
+            {/* Header */}
+            <header className="bg-white dark:bg-[#15202b] pt-4 pb-4 px-4 md:px-6 shadow-sm z-20 flex justify-between items-center sticky top-0 md:bg-white/90 md:backdrop-blur-md">
                 <div className="flex items-center gap-3">
-                    <button onClick={() => navigate('/profile')} className="md:hidden p-2 -ml-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-500">
-                        <span className="material-icons-round">arrow_back</span>
+                    <button onClick={() => navigate('/profile')} className="text-slate-500 dark:text-slate-400 md:hidden active:opacity-70 flex items-center gap-1">
+                        <span className="material-icons-round text-lg">arrow_back</span>
+                        <span className="text-sm font-medium">กลับ</span>
                     </button>
-                    <div>
-                        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">จัดการข่าวสาร</h1>
-                        <p className="text-xs md:text-base text-gray-500 dark:text-gray-400">ประชาสัมพันธ์และประกาศภายในองค์กร</p>
-                    </div>
+                    <h1 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        <span className="material-icons-round text-primary">article</span>
+                        จัดการข่าวสาร
+                    </h1>
                 </div>
-                <button
-                    onClick={handleCreate}
-                    className="w-full md:w-auto bg-primary hover:bg-primary-hover text-white px-4 py-2.5 rounded-xl font-medium flex items-center justify-center gap-2 shadow-lg shadow-primary/30 transition-all active:scale-95"
-                >
-                    <span className="material-icons-round text-xl">post_add</span>
-                    สร้างประกาศ
-                </button>
+                <div className="w-16"></div>
             </header>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
+            {/* Tabs */}
+            <div className="bg-white dark:bg-[#15202b] border-b border-gray-100 dark:border-gray-800 px-4 md:px-6 sticky top-[56px] z-10 overflow-x-auto scrollbar-hide">
+                <div className="flex gap-0 max-w-5xl mx-auto min-w-max">
+                    {([
+                        { key: 'all' as Tab, label: 'ข่าวสารทั้งหมด', icon: 'article', count: contentPosts.length },
+                        ...(companies || []).map((c: any) => ({
+                            key: c.id as Tab,
+                            label: c.name,
+                            icon: 'business',
+                            count: contentPosts.filter((p: any) => p.target_companies === 'all' || (Array.isArray(p.target_companies) && p.target_companies.includes(c.id))).length
+                        }))
+                    ]).map((t) => (
+                        <button
+                            key={t.key}
+                            onClick={() => setTab(t.key)}
+                            className={`flex items-center gap-2 px-5 py-3 text-sm font-semibold border-b-2 transition-all whitespace-nowrap ${tab === t.key
+                                ? 'border-primary text-primary'
+                                : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+                                }`}
+                        >
+                            <span className="material-icons-round text-base">{t.icon}</span>
+                            {t.label}
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${tab === t.key ? 'bg-primary/10 text-primary' : 'bg-gray-100 dark:bg-gray-800 text-gray-400'}`}>{t.count}</span>
+                        </button>
+                    ))}
+                </div>
+            </div>
+
+            <main className="flex-1 overflow-y-auto scrollbar-hide px-4 md:px-6 py-6">
+                <div className="max-w-5xl mx-auto space-y-4">
+                    {/* ==================== POSTS LIST ==================== */}
+                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-2">
+                                <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 border border-blue-100 dark:border-blue-900/30 flex items-start gap-3 flex-1">
+                                    <span className="material-icons-round text-blue-600 text-lg mt-0.5">info</span>
+                                    <div className="text-xs text-blue-700 dark:text-blue-300 leading-relaxed">
+                                        <p className="font-semibold mb-1">ข่าวสาร</p>
+                                        <p>ประชาสัมพันธ์และประกาศภายในองค์กร</p>
+                                    </div>
+                                </div>
+                                <div className="flex justify-end w-full md:w-auto">
+                                    <button
+                                        onClick={handleCreate}
+                                        className="bg-primary hover:bg-primary-hover text-white px-4 py-2.5 rounded-xl text-sm font-medium flex items-center justify-center gap-2 shadow-sm transition-all whitespace-nowrap"
+                                    >
+                                        <span className="material-icons-round text-base">post_add</span>
+                                        สร้างประกาศ
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
                 {/* News List */}
                 <div className="lg:col-span-2 space-y-4">
                     {loading && (
@@ -296,7 +354,7 @@ const AdminContentScreen: React.FC = () => {
                             <span className="material-icons-round animate-spin text-3xl">autorenew</span>
                         </div>
                     )}
-                    {!loading && contentPosts.length === 0 && (
+                    {!loading && filteredPosts.length === 0 && (
                         <div className="text-center py-16">
                             <span className="material-icons-round text-5xl text-gray-300 dark:text-gray-600 mb-3 block">article</span>
                             <p className="text-gray-400">ยังไม่มีข่าวสาร</p>
@@ -305,7 +363,7 @@ const AdminContentScreen: React.FC = () => {
                             </button>
                         </div>
                     )}
-                    {contentPosts.map((post: any) => (
+                    {filteredPosts.map((post: any) => (
                         <div key={post.id} className={`bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border ${post.isPinned ? 'border-l-4 border-l-primary border-y-gray-100 border-r-gray-100 dark:border-y-gray-700 dark:border-r-gray-700' : 'border-gray-100 dark:border-gray-700'} flex flex-col md:flex-row gap-4`}>
                             <div className={`w-full ${post.isPinned ? 'md:w-48 h-32' : 'md:w-32 h-32 md:h-24'} bg-gray-200 rounded-lg overflow-hidden shrink-0`}>
                                 <img src={post.coverImage} className="w-full h-full object-cover" alt="news" />
@@ -383,6 +441,8 @@ const AdminContentScreen: React.FC = () => {
                     </div>
                 </div>
             </div>
+                </div>
+            </main>
 
             {/* Create / Edit Modal */}
             {showModal && (
@@ -445,7 +505,7 @@ const AdminContentScreen: React.FC = () => {
                             </div>
 
                             {/* Target Company */}
-                            {user?.isSuperAdmin && (
+                            {isSuperAdmin && (
                                 <div>
                                     <label className={labelCls}>กลุ่มเป้าหมาย (บริษัท)</label>
                                     <div className="flex flex-col gap-2 mt-1">

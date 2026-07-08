@@ -4,6 +4,8 @@ import { useApi } from '../../hooks/useApi';
 import { getDepartments, createDepartment, updateDepartment, deleteDepartment, getPositions, createPosition, updatePosition, deletePosition } from '../../services/api';
 import { useToast } from '../../components/Toast';
 import ScheduleEditor, { ScheduleJson, parseScheduleJson, defaultWeeklySchedule } from '../../components/ScheduleEditor';
+import { SIDEBAR_ADMIN_ITEMS } from '../../data/navigation';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface Department {
     id: number;
@@ -20,6 +22,7 @@ interface Position {
     id: number;
     name: string;
     can_have_subordinates: number;
+    permissions?: string | string[] | null;
 }
 
 type Tab = 'departments' | 'positions';
@@ -27,6 +30,7 @@ type Tab = 'departments' | 'positions';
 const AdminDepartmentScreen: React.FC = () => {
     const navigate = useNavigate();
     const { toast } = useToast();
+    const { user: authUser } = useAuth();
     const [tab, setTab] = useState<Tab>('departments');
 
     // === Department state ===
@@ -41,7 +45,7 @@ const AdminDepartmentScreen: React.FC = () => {
     const { data: positions, refetch: refetchPos } = useApi(() => getPositions(), []);
     const [posEditId, setPosEditId] = useState<number | null>(null);
     const [showPosAdd, setShowPosAdd] = useState(false);
-    const [posForm, setPosForm] = useState({ name: '', can_have_subordinates: 0 });
+    const [posForm, setPosForm] = useState({ name: '', can_have_subordinates: 0, permissions: [] as string[] });
     const [posSaving, setPosSaving] = useState(false);
     const [deletingPos, setDeletingPos] = useState<number | null>(null);
 
@@ -123,20 +127,26 @@ const AdminDepartmentScreen: React.FC = () => {
     const openPosEdit = (pos: Position) => {
         setPosEditId(pos.id);
         setShowPosAdd(false);
-        setPosForm({ name: pos.name, can_have_subordinates: pos.can_have_subordinates || 0 });
+        let perms: string[] = [];
+        if (typeof pos.permissions === 'string') {
+            try { perms = JSON.parse(pos.permissions); } catch { }
+        } else if (Array.isArray(pos.permissions)) {
+            perms = pos.permissions;
+        }
+        setPosForm({ name: pos.name, can_have_subordinates: pos.can_have_subordinates || 0, permissions: perms });
     };
 
     const openPosAdd = () => {
         setPosEditId(null);
         setShowPosAdd(true);
-        setPosForm({ name: '', can_have_subordinates: 0 });
+        setPosForm({ name: '', can_have_subordinates: 0, permissions: [] });
     };
 
     const handlePosSave = async () => {
         if (!posForm.name.trim()) return;
         setPosSaving(true);
         try {
-            const data = { name: posForm.name.trim(), can_have_subordinates: posForm.can_have_subordinates };
+            const data = { name: posForm.name.trim(), can_have_subordinates: posForm.can_have_subordinates, permissions: posForm.permissions };
             if (showPosAdd) {
                 await createPosition(data);
                 toast('เพิ่มตำแหน่งเรียบร้อย', 'success');
@@ -224,20 +234,6 @@ const AdminDepartmentScreen: React.FC = () => {
                 </div>
             </details>
 
-            {/* Admin system toggle */}
-            <div className="flex items-center justify-between py-1">
-                <div className="flex items-center gap-2">
-                    <span className="material-icons-round text-sm text-amber-500">admin_panel_settings</span>
-                    <span className="text-sm text-slate-700 dark:text-slate-300">จัดการหลังบ้านได้</span>
-                </div>
-                <button
-                    type="button"
-                    onClick={() => setDeptForm({ ...deptForm, is_admin_system: deptForm.is_admin_system ? 0 : 1 })}
-                    className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${deptForm.is_admin_system ? 'bg-primary' : 'bg-gray-300 dark:bg-gray-600'}`}
-                >
-                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${deptForm.is_admin_system ? 'translate-x-5' : ''}`} />
-                </button>
-            </div>
             <div className="flex gap-2 pt-1">
                 <button onClick={tab === 'departments' ? handleDeptSave : undefined} disabled={deptSaving} className="flex-1 bg-primary text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-primary-hover disabled:opacity-50 flex items-center justify-center gap-1.5 transition-all">
                     {deptSaving ? <span className="material-icons-round animate-spin text-sm">autorenew</span> : <span className="material-icons-round text-sm">save</span>}
@@ -270,6 +266,35 @@ const AdminDepartmentScreen: React.FC = () => {
                     <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${posForm.can_have_subordinates ? 'translate-x-5' : ''}`} />
                 </button>
             </div>
+            
+            {/* Permissions list */}
+            <div>
+                <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">สิทธิ์การเข้าถึงเมนู Admin</label>
+                <div className="bg-slate-50 dark:bg-slate-900/50 rounded-lg p-2 grid grid-cols-2 gap-2 border border-slate-200 dark:border-slate-700 max-h-48 overflow-y-auto">
+                    {SIDEBAR_ADMIN_ITEMS.map(item => {
+                        const checked = posForm.permissions.includes(item.path);
+                        return (
+                            <label key={item.path} className="flex items-center gap-2 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 p-1.5 rounded-lg transition-colors">
+                                <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${checked ? 'bg-primary border-primary' : 'border-slate-300 dark:border-slate-600'}`}>
+                                    {checked && <span className="material-icons-round text-white text-[14px]">check</span>}
+                                </div>
+                                <input type="checkbox" className="hidden" checked={checked} onChange={() => {
+                                    setPosForm(prev => {
+                                        if (checked) {
+                                            return { ...prev, permissions: prev.permissions.filter(p => p !== item.path) };
+                                        } else {
+                                            return { ...prev, permissions: [...prev.permissions, item.path] };
+                                        }
+                                    });
+                                }} />
+                                <span className="material-icons-round text-[15px] text-slate-500">{item.icon}</span>
+                                <span className="text-xs text-slate-700 dark:text-slate-300 flex-1">{item.label}</span>
+                            </label>
+                        );
+                    })}
+                </div>
+            </div>
+
             <div className="flex gap-2 pt-1">
                 <button onClick={handlePosSave} disabled={posSaving} className="flex-1 bg-primary text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-primary-hover disabled:opacity-50 flex items-center justify-center gap-1.5 transition-all">
                     {posSaving ? <span className="material-icons-round animate-spin text-sm">autorenew</span> : <span className="material-icons-round text-sm">save</span>}
@@ -302,7 +327,7 @@ const AdminDepartmentScreen: React.FC = () => {
                 <div className="flex gap-0 max-w-3xl mx-auto">
                     {([
                         { key: 'departments' as Tab, label: 'แผนก', icon: 'apartment', count: (departments || []).length },
-                        { key: 'positions' as Tab, label: 'ตำแหน่ง', icon: 'badge', count: (positions || []).length },
+                        ...(authUser?.is_superadmin ? [{ key: 'positions' as Tab, label: 'ตำแหน่ง', icon: 'badge', count: (positions || []).length }] : []),
                     ]).map((t) => (
                         <button
                             key={t.key}
@@ -383,9 +408,6 @@ const AdminDepartmentScreen: React.FC = () => {
                                                             <div className="flex-1 min-w-0">
                                                                 <div className="flex items-center gap-2">
                                                                     <p className="text-sm font-semibold text-slate-800 dark:text-white">{dept.name}</p>
-                                                                    {dept.is_admin_system ? (
-                                                                        <span className="text-[9px] bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded-full font-bold">ADMIN</span>
-                                                                    ) : null}
                                                                 </div>
                                                                 <div className="flex items-center gap-3 mt-0.5">
                                                                     <span className="text-xs text-slate-500 flex items-center gap-1">
@@ -441,17 +463,6 @@ const AdminDepartmentScreen: React.FC = () => {
                                 </button>
                             </div>
 
-                            {/* Add Form */}
-                            {showPosAdd && (
-                                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-primary/30 overflow-hidden p-5">
-                                    <h3 className="text-sm font-bold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
-                                        <span className="material-icons-round text-primary text-base">add_circle</span>
-                                        เพิ่มตำแหน่งใหม่
-                                    </h3>
-                                    {posFormFields}
-                                </div>
-                            )}
-
                             {/* Position List */}
                             <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
                                 <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700">
@@ -469,11 +480,8 @@ const AdminDepartmentScreen: React.FC = () => {
                                 ) : (
                                     <div className="divide-y divide-gray-50 dark:divide-gray-700">
                                         {(positions || []).map((pos: Position) => (
-                                            <div key={pos.id} className="px-5 py-4">
-                                                {posEditId === pos.id ? (
-                                                    posFormFields
-                                                ) : (
-                                                    <div className="flex items-center justify-between group">
+                                            <div key={pos.id} className="px-5 py-4 border-b border-gray-50 dark:border-gray-700 last:border-0">
+                                                <div className="flex items-center justify-between group">
                                                         <div className="flex items-center gap-3 flex-1">
                                                             <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${pos.can_have_subordinates ? 'bg-gradient-to-br from-purple-500/10 to-pink-500/10' : 'bg-gray-100 dark:bg-gray-700'}`}>
                                                                 <span className={`material-icons-round text-lg ${pos.can_have_subordinates ? 'text-purple-600 dark:text-purple-400' : 'text-gray-400'}`}>
@@ -499,8 +507,7 @@ const AdminDepartmentScreen: React.FC = () => {
                                                                 <span className="material-icons-round text-lg">delete_outline</span>
                                                             </button>
                                                         </div>
-                                                    </div>
-                                                )}
+                                                </div>
                                             </div>
                                         ))}
                                     </div>
@@ -510,6 +517,24 @@ const AdminDepartmentScreen: React.FC = () => {
                     )}
                 </div>
             </main>
+
+            {/* Position Modal */}
+            {(showPosAdd || posEditId !== null) && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full shadow-2xl max-h-[90vh] overflow-y-auto">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="font-bold text-lg text-slate-900 dark:text-white flex items-center gap-2">
+                                <span className="material-icons-round text-primary">{showPosAdd ? 'add_circle' : 'edit'}</span>
+                                {showPosAdd ? 'เพิ่มตำแหน่งใหม่' : 'แก้ไขตำแหน่ง'}
+                            </h3>
+                            <button onClick={() => { setPosEditId(null); setShowPosAdd(false); }} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+                                <span className="material-icons-round">close</span>
+                            </button>
+                        </div>
+                        {posFormFields}
+                    </div>
+                </div>
+            )}
 
             {/* Delete Confirmation Modal */}
             {confirmDelete && (
