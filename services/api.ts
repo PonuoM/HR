@@ -243,6 +243,10 @@ export async function deleteNotification(id: number) {
 }
 
 // --- News ---
+export async function getLatestNewsId() {
+    return fetchApi<{ latest_id: number; categories: Record<string, number> }>('news.php?action=latest_id');
+}
+
 export async function getNews(employeeId?: string) {
     const qs = employeeId ? `?employee_id=${employeeId}` : '';
     return fetchApi<any[]>(`news.php${qs}`);
@@ -280,6 +284,18 @@ export async function addNewsComment(articleId: number, employeeId: string, cont
 
 export async function deleteNewsComment(commentId: number) {
     return fetchApi<any>(`news.php?action=comment&id=${commentId}`, { method: 'DELETE' });
+}
+
+export async function getNewsCategories() {
+    return fetchApi<any[]>('news.php?action=categories');
+}
+
+export async function createNewsCategory(name: string) {
+    return fetchApi<any>('news.php?action=categories', { method: 'POST', body: JSON.stringify({ name }) });
+}
+
+export async function deleteNewsCategory(id: number) {
+    return fetchApi<any>(`news.php?action=categories&id=${id}`, { method: 'DELETE' });
 }
 
 // --- Payslips ---

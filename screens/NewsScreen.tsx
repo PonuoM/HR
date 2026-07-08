@@ -1,8 +1,10 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import BottomNav from '../components/BottomNav';
+import ImageLightbox from '../components/ImageLightbox';
+import { useNewsNotification } from '../hooks/useNewsNotification';
 import { useApi } from '../hooks/useApi';
-import { getNews, toggleNewsLike, getNewsComments, addNewsComment, deleteNewsComment } from '../services/api';
+import { getNews, toggleNewsLike, getNewsComments, addNewsComment, deleteNewsComment, getNewsCategories } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../components/Toast';
 
@@ -89,161 +91,7 @@ const EmojiReactionPicker: React.FC<{
   );
 };
 
-// ── Image Lightbox (full-screen viewer with zoom) ──
-const ImageLightbox: React.FC<{
-  urls: string[];
-  startIndex: number;
-  onClose: () => void;
-}> = ({ urls, startIndex, onClose }) => {
-  const [index, setIndex] = useState(startIndex);
-  const [scale, setScale] = useState(1);
-  const [tx, setTx] = useState(0);
-  const [ty, setTy] = useState(0);
 
-  // gesture refs
-  const lastTap = useRef(0);
-  const pinchStart = useRef<{ dist: number; scale: number } | null>(null);
-  const panStart = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
-  const swipeStart = useRef<{ x: number; y: number } | null>(null);
-
-  const resetZoom = useCallback(() => { setScale(1); setTx(0); setTy(0); }, []);
-
-  const goTo = useCallback((next: number) => {
-    if (next < 0 || next >= urls.length) return;
-    setIndex(next);
-    resetZoom();
-  }, [urls.length, resetZoom]);
-
-  // keyboard support (desktop)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-      else if (e.key === 'ArrowLeft') goTo(index - 1);
-      else if (e.key === 'ArrowRight') goTo(index + 1);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [index, goTo, onClose]);
-
-  const dist = (t: TouchList) => {
-    const dx = t[0].clientX - t[1].clientX;
-    const dy = t[0].clientY - t[1].clientY;
-    return Math.hypot(dx, dy);
-  };
-
-  const onTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length === 2) {
-      pinchStart.current = { dist: dist(e.touches), scale };
-      panStart.current = null;
-      swipeStart.current = null;
-    } else if (e.touches.length === 1) {
-      if (scale > 1) {
-        panStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, tx, ty };
-      } else {
-        swipeStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      }
-    }
-  };
-
-  const onTouchMove = (e: React.TouchEvent) => {
-    if (e.touches.length === 2 && pinchStart.current) {
-      const next = Math.min(4, Math.max(1, pinchStart.current.scale * (dist(e.touches) / pinchStart.current.dist)));
-      setScale(next);
-      if (next === 1) { setTx(0); setTy(0); }
-    } else if (e.touches.length === 1 && panStart.current && scale > 1) {
-      setTx(panStart.current.tx + (e.touches[0].clientX - panStart.current.x));
-      setTy(panStart.current.ty + (e.touches[0].clientY - panStart.current.y));
-    }
-  };
-
-  const onTouchEnd = (e: React.TouchEvent) => {
-    pinchStart.current = null;
-    panStart.current = null;
-    // swipe to change image (only when not zoomed)
-    if (swipeStart.current && scale === 1) {
-      const dx = e.changedTouches[0].clientX - swipeStart.current.x;
-      const dy = e.changedTouches[0].clientY - swipeStart.current.y;
-      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) {
-        if (dx < 0) goTo(index + 1); else goTo(index - 1);
-      }
-    }
-    swipeStart.current = null;
-    // double-tap to zoom
-    const now = Date.now();
-    if (now - lastTap.current < 300) {
-      if (scale > 1) resetZoom(); else setScale(2.5);
-    }
-    lastTap.current = now;
-  };
-
-  return (
-    <div
-      className="fixed inset-0 z-[60] bg-black/95 flex items-center justify-center select-none"
-      style={{ animation: 'lightboxFade 0.2s ease-out' }}
-      onClick={onClose}
-    >
-      {/* Top bar */}
-      <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 py-3 z-10 bg-gradient-to-b from-black/60 to-transparent">
-        {urls.length > 1 ? (
-          <span className="text-white/90 text-sm font-medium">{index + 1} / {urls.length}</span>
-        ) : <span />}
-        <button
-          onClick={(e) => { e.stopPropagation(); onClose(); }}
-          className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
-        >
-          <span className="material-icons-round">close</span>
-        </button>
-      </div>
-
-      {/* Image */}
-      <img
-        src={urls[index]}
-        alt=""
-        draggable={false}
-        onClick={(e) => e.stopPropagation()}
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
-        onDoubleClick={(e) => { e.stopPropagation(); if (scale > 1) resetZoom(); else setScale(2.5); }}
-        className="max-w-full max-h-full object-contain"
-        style={{
-          transform: `translate(${tx}px, ${ty}px) scale(${scale})`,
-          transition: pinchStart.current || panStart.current ? 'none' : 'transform 0.2s ease-out',
-          touchAction: 'none',
-          cursor: scale > 1 ? 'grab' : 'zoom-in',
-        }}
-      />
-
-      {/* Prev / Next (desktop / multi-image) */}
-      {urls.length > 1 && (
-        <>
-          {index > 0 && (
-            <button
-              onClick={(e) => { e.stopPropagation(); goTo(index - 1); }}
-              className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 hidden md:flex items-center justify-center text-white transition-colors"
-            >
-              <span className="material-icons-round">chevron_left</span>
-            </button>
-          )}
-          {index < urls.length - 1 && (
-            <button
-              onClick={(e) => { e.stopPropagation(); goTo(index + 1); }}
-              className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 hidden md:flex items-center justify-center text-white transition-colors"
-            >
-              <span className="material-icons-round">chevron_right</span>
-            </button>
-          )}
-          {/* dots */}
-          <div className="absolute bottom-5 left-1/2 -translate-x-1/2 flex items-center gap-1.5">
-            {urls.map((_, i) => (
-              <span key={i} className={`rounded-full transition-all ${i === index ? 'w-2 h-2 bg-white' : 'w-1.5 h-1.5 bg-white/40'}`} />
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
-};
 
 // ── Long Press Hook ──
 function useLongPress(onLongPress: () => void, onClick: () => void, delay = 500) {
@@ -313,13 +161,34 @@ const PostCard: React.FC<{
   pickerOpen, onReaction, onLike, onOpenPicker, onClosePicker,
   onOpenComments, onToggleExpand, isExpanded, onOpenImage
 }) => {
+    const navigate = useNavigate();
     const likeButtonRef = useRef<HTMLButtonElement>(null);
     const longPressHandlers = useLongPress(onOpenPicker, onLike);
+    const { toast } = useToast();
+    const [showOptions, setShowOptions] = useState(false);
 
     const commentCount = article.comments || 0;
     const content = article.content || '';
     const shouldTruncate = content.length > 200;
     const topReactions = Object.entries(reactionSummary).sort((a, b) => (b[1] as number) - (a[1] as number)).slice(0, 3);
+
+    const handleShare = async () => {
+      const shareData = {
+        title: article.title,
+        text: article.content ? article.content.substring(0, 100) + '...' : '',
+        url: window.location.href,
+      };
+      try {
+        if (navigator.share) {
+          await navigator.share(shareData);
+        } else {
+          await navigator.clipboard.writeText(`${shareData.title}\n${window.location.href}`);
+          toast('คัดลอกลิงก์เรียบร้อยแล้ว', 'success');
+        }
+      } catch (err) {
+        console.error('Error sharing:', err);
+      }
+    };
 
     return (
       <article className="bg-white dark:bg-gray-800 rounded-2xl md:rounded-xl shadow-sm border border-gray-100 dark:border-gray-700/60 overflow-hidden">
@@ -336,12 +205,19 @@ const PostCard: React.FC<{
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <p className="text-[15px] font-semibold text-gray-900 dark:text-white truncate">{article.department || 'ฝ่ายบุคคล'}</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 mb-2">
               {isPinned && (
-                <span className="material-icons-round text-primary text-sm -rotate-45">push_pin</span>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-primary/10 text-primary uppercase tracking-wide">ปักหมุด</span>
               )}
               {article.is_urgent && (
-                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500 text-white leading-none">ด่วน</span>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 uppercase tracking-wide flex items-center gap-1">
+                  ด่วน
+                </span>
               )}
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 uppercase tracking-wide">
+                {article.category || 'ประกาศทั่วไป'}
+              </span>
             </div>
             <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
               <span>{timeAgo(article.published_at)}</span>
@@ -349,9 +225,53 @@ const PostCard: React.FC<{
               <span className="material-icons-round text-[13px]">public</span>
             </div>
           </div>
-          <button className="p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 transition-colors">
-            <span className="material-icons-round text-xl">more_horiz</span>
-          </button>
+          <div className="relative">
+            <button 
+              onClick={() => setShowOptions(!showOptions)}
+              className="p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 transition-colors"
+            >
+              <span className="material-icons-round text-xl">more_horiz</span>
+            </button>
+            {showOptions && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowOptions(false)} />
+                <div className="absolute right-0 mt-1 w-48 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700 z-50 overflow-hidden py-1">
+                  <button 
+                    onClick={() => {
+                      navigator.clipboard.writeText(window.location.href);
+                      toast('คัดลอกลิงก์เรียบร้อยแล้ว', 'success');
+                      setShowOptions(false);
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                  >
+                    <span className="material-icons-round text-[18px]">link</span>
+                    คัดลอกลิงก์
+                  </button>
+                  <button 
+                    onClick={() => {
+                      toast('บันทึกประกาศเรียบร้อย', 'success');
+                      setShowOptions(false);
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                  >
+                    <span className="material-icons-round text-[18px]">bookmark_border</span>
+                    บันทึกประกาศ
+                  </button>
+                  <div className="h-px bg-gray-100 dark:bg-gray-700 my-1"></div>
+                  <button 
+                    onClick={() => {
+                      toast('ส่งรายงานให้ผู้ดูแลระบบแล้ว', 'success');
+                      setShowOptions(false);
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                  >
+                    <span className="material-icons-round text-[18px]">report_problem</span>
+                    รายงานปัญหา
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {/* ── Post Content ── */}
@@ -380,30 +300,78 @@ const PostCard: React.FC<{
           try {
               const parsed = JSON.parse(article.image);
               urls = Array.isArray(parsed) ? parsed : [article.image];
-          } catch { urls = [article.image]; }
+          } catch { 
+              if (typeof article.image === 'string' && article.image.startsWith('[')) {
+                  urls = [];
+              } else {
+                  urls = [article.image];
+              }
+          }
           
           if (urls.length === 0) return null;
           
+          const displayUrls = urls.slice(0, 4);
+          
           return (
-            <div className={`w-full bg-gray-100 dark:bg-gray-900 ${urls.length > 1 ? 'grid grid-cols-2 gap-1' : ''}`}>
-              {urls.map((u, i) => (
-                <div
-                  key={i}
-                  className={`relative group ${urls.length > 1 && i === 0 && urls.length % 2 !== 0 ? 'col-span-2' : ''}`}
-                >
-                  <img
-                    alt={`${article.title} - ${i+1}`}
-                    className="w-full max-h-[500px] object-cover cursor-zoom-in group-hover:opacity-95 transition-opacity"
-                    src={u}
-                    loading="lazy"
-                    onClick={() => onOpenImage(urls, i)}
-                  />
-                  {/* zoom affordance — always visible so users know the image is tappable */}
-                  <div className="absolute bottom-2 right-2 w-8 h-8 rounded-full bg-black/45 backdrop-blur-sm flex items-center justify-center text-white pointer-events-none">
-                    <span className="material-icons-round text-[18px]">zoom_in</span>
+            <div className={`w-full bg-gray-100 dark:bg-gray-900 ${displayUrls.length > 1 ? 'grid grid-cols-2 gap-1' : ''}`}>
+              {displayUrls.map((u, i) => {
+                const isPdf = u.toLowerCase().endsWith('.pdf');
+                const isLastItem = i === 3;
+                const hasMore = isLastItem && urls.length > 4;
+                const remainingCount = urls.length - 3;
+                
+                return (
+                  <div
+                    key={i}
+                    className={`relative group ${displayUrls.length > 1 && i === 0 && displayUrls.length % 2 !== 0 ? 'col-span-2' : ''}`}
+                  >
+                    {isPdf ? (
+                      <a
+                        href={u}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex flex-col items-center justify-center w-full h-48 bg-white dark:bg-gray-800 border-t border-b sm:border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
+                      >
+                        <span className="material-icons-round text-5xl text-red-500 mb-2">picture_as_pdf</span>
+                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">เปิดดูเอกสาร PDF</span>
+                      </a>
+                    ) : (
+                      <>
+                        <img
+                          alt={`${article.title} - ${i+1}`}
+                          className={`w-full object-cover cursor-zoom-in group-hover:opacity-95 transition-opacity ${displayUrls.length > 1 ? 'aspect-square h-full' : 'max-h-[500px]'}`}
+                          src={u}
+                          loading="lazy"
+                          onClick={() => {
+                            const imageUrls = urls.filter(url => !url.toLowerCase().endsWith('.pdf'));
+                            const imageIndex = imageUrls.indexOf(u);
+                            if (imageIndex !== -1) {
+                                onOpenImage(imageUrls, imageIndex);
+                            }
+                          }}
+                        />
+                        {!hasMore && (
+                            <div className="absolute bottom-2 right-2 w-8 h-8 rounded-full bg-black/45 backdrop-blur-sm flex items-center justify-center text-white pointer-events-none">
+                              <span className="material-icons-round text-[18px]">zoom_in</span>
+                            </div>
+                        )}
+                      </>
+                    )}
+                    
+                    {hasMore && (
+                        <div 
+                          className="absolute inset-0 bg-black/50 flex items-center justify-center cursor-pointer transition-colors hover:bg-black/40"
+                          onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/news/${article.id}`, { state: { article } });
+                          }}
+                        >
+                            <span className="text-white text-4xl sm:text-5xl font-semibold">+{remainingCount}</span>
+                        </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           );
         })()}
@@ -484,7 +452,10 @@ const PostCard: React.FC<{
             <span>ความคิดเห็น</span>
           </button>
 
-          <button className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors font-medium text-[14px]">
+          <button 
+            onClick={handleShare}
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors font-medium text-[14px]"
+          >
             <span className="material-icons-round text-xl">share</span>
             <span>แชร์</span>
           </button>
@@ -502,6 +473,27 @@ const NewsScreen: React.FC = () => {
   const { user } = useAuth();
   const { toast } = useToast();
   const { data: allNews, loading, refetch } = useApi(() => getNews(user?.id), [user?.id]);
+  const { data: categories } = useApi(() => getNewsCategories(), []);
+
+  // Filter state
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedCategory = searchParams.get('category');
+  const viewMode = searchParams.get('view') || 'select';
+  const { hasNewNews, newCategories, markAsSeen } = useNewsNotification();
+
+  // Split pinned vs regular articles based on filter
+  const filteredNews = React.useMemo(() => {
+    if (!allNews) return [];
+    if (!selectedCategory) return allNews;
+    return allNews.filter((a: any) => (a.category || 'ประกาศทั่วไป') === selectedCategory);
+  }, [allNews, selectedCategory]);
+
+  useEffect(() => {
+    if (viewMode === 'feed' && filteredNews && filteredNews.length > 0) {
+      const maxId = Math.max(...filteredNews.map((n: any) => n.id));
+      markAsSeen(maxId, selectedCategory);
+    }
+  }, [filteredNews, viewMode, selectedCategory, markAsSeen]);
 
   // Local reaction state
   const [reactionMap, setReactionMap] = useState<Record<number, string | null>>({});
@@ -525,9 +517,8 @@ const NewsScreen: React.FC = () => {
   const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
   const openImage = (urls: string[], index: number) => setLightbox({ urls, index });
 
-  // Split pinned vs regular articles
-  const pinnedNews = allNews?.find((a: any) => a.is_pinned) || null;
-  const articles = allNews?.filter((a: any) => !a.is_pinned) || [];
+  const pinnedNews = filteredNews.find((a: any) => a.is_pinned) || null;
+  const articles = filteredNews.filter((a: any) => !a.is_pinned) || [];
 
   // Helpers
   const getUserReaction = (article: any): string | null => {
@@ -633,12 +624,26 @@ const NewsScreen: React.FC = () => {
   return (
     <div className="pt-14 md:pt-8 pb-24 md:pb-8 min-h-full bg-gray-100 dark:bg-gray-950">
 
-      {/* ═══ Header Bar ═══ */}
       <header className="sticky top-0 z-20 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 py-3 md:relative md:border-none md:bg-transparent md:dark:bg-transparent">
         <div className="max-w-2xl mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">ประชาสัมพันธ์</h1>
-            <p className="text-xs text-gray-500 dark:text-gray-400 md:text-sm">ข่าวสารและประกาศจากบริษัท</p>
+          <div className="flex items-center gap-3">
+            {viewMode === 'feed' ? (
+              <>
+                <button onClick={() => { searchParams.delete('category'); setSearchParams({ view: 'select' }); }} className="w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
+                  <span className="material-icons-round text-gray-700 dark:text-gray-300">arrow_back</span>
+                </button>
+                <div>
+                  <h1 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">
+                    {selectedCategory || 'ข่าวสารทั้งหมด'}
+                  </h1>
+                </div>
+              </>
+            ) : (
+              <div>
+                <h1 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">ประชาสัมพันธ์</h1>
+                <p className="text-xs text-gray-500 dark:text-gray-400 md:text-sm">ข่าวสารและประกาศจากบริษัท</p>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button className="w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
@@ -647,6 +652,49 @@ const NewsScreen: React.FC = () => {
           </div>
         </div>
       </header>
+
+      {viewMode === 'select' ? (
+        <div className="max-w-2xl mx-auto px-4 pt-6 pb-12">
+          <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-4 text-center">คุณต้องการดูประกาศหมวดหมู่ไหน?</h2>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <button
+              onClick={() => { searchParams.delete('category'); setSearchParams({ view: 'feed' }); }}
+              className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm hover:shadow-md hover:scale-105 transition-all border border-gray-100 dark:border-gray-700 flex flex-col items-center gap-3"
+            >
+              <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
+                <span className="material-icons-round text-primary text-2xl">dynamic_feed</span>
+              </div>
+              <span className="font-bold text-gray-800 dark:text-gray-200">ทั้งหมด</span>
+            </button>
+            {(categories || []).map((cat: any) => {
+              // Assign a random icon based on category name
+              let icon = 'article';
+              if (cat.name.includes('กิจกรรม')) icon = 'celebration';
+              else if (cat.name.includes('นโยบาย') || cat.name.includes('สวัสดิการ')) icon = 'health_and_safety';
+              else if (cat.name.includes('วันหยุด')) icon = 'event_available';
+              else if (cat.name.includes('ด่วน')) icon = 'campaign';
+              
+              return (
+                <button
+                  key={cat.id}
+                  onClick={() => { setSearchParams({ category: cat.name, view: 'feed' }); }}
+                  className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm hover:shadow-md hover:scale-105 transition-all border border-gray-100 dark:border-gray-700 flex flex-col items-center gap-3 text-center"
+                >
+                  <div className="relative w-12 h-12 rounded-full bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center">
+                    <span className="material-icons-round text-blue-500 dark:text-blue-400 text-2xl">{icon}</span>
+                    {newCategories.includes(cat.name) && (
+                      <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 rounded-full border-2 border-white dark:border-gray-800 animate-pulse"></span>
+                    )}
+                  </div>
+                  <span className="font-bold text-gray-800 dark:text-gray-200 leading-tight">{cat.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <>
+
 
       {/* ═══ Feed Content ═══ */}
       <div className="max-w-2xl mx-auto px-0 md:px-4 pt-3 space-y-3">
@@ -699,11 +747,12 @@ const NewsScreen: React.FC = () => {
         {!loading && !pinnedNews && articles.length === 0 && (
           <div className="text-center py-20 bg-white dark:bg-gray-800 rounded-2xl">
             <span className="material-icons-round text-6xl text-gray-300 dark:text-gray-600 block mb-3">feed</span>
-            <p className="text-gray-500 font-medium">ยังไม่มีข่าวสาร</p>
-            <p className="text-sm text-gray-400 mt-1">ข่าวจากบริษัทจะแสดงที่นี่</p>
+            <p className="text-gray-500 font-medium">ยังไม่มีข่าวสารในหมวดหมู่นี้</p>
           </div>
         )}
       </div>
+      </>
+      )}
 
       {/* ═══ Image Lightbox ═══ */}
       {lightbox && (

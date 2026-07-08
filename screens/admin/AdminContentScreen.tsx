@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApi } from '../../hooks/useApi';
-import { getNews, createNewsArticle, updateNewsArticle, deleteNewsArticle, getDepartments, uploadFile } from '../../services/api';
+import { getNews, createNewsArticle, updateNewsArticle, deleteNewsArticle, getDepartments, getCompanies, uploadFile, getNewsCategories, createNewsCategory, deleteNewsCategory } from '../../services/api';
 import { useToast } from '../../components/Toast';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -11,8 +11,12 @@ interface NewsForm {
     image: string;
     department: string;
     department_code: string;
+    category: string;
     is_pinned: boolean;
     is_urgent: boolean;
+    target_companies: number[] | 'all';
+    target_audience: 'all' | 'specific';
+    target_departments: number[];
 }
 
 const emptyForm: NewsForm = {
@@ -21,8 +25,12 @@ const emptyForm: NewsForm = {
     image: '',
     department: '',
     department_code: '',
+    category: 'ประกาศทั่วไป',
     is_pinned: false,
     is_urgent: false,
+    target_companies: 'all',
+    target_audience: 'all',
+    target_departments: [],
 };
 
 const AdminContentScreen: React.FC = () => {
@@ -31,6 +39,7 @@ const AdminContentScreen: React.FC = () => {
     const { user } = useAuth();
     const { data: rawNews, loading, refetch } = useApi(() => getNews(), []);
     const { data: departments } = useApi(() => getDepartments(), []);
+    const { data: companies } = useApi(() => getCompanies(), []);
 
     // Modal state
     const [showModal, setShowModal] = useState(false);
@@ -39,6 +48,46 @@ const AdminContentScreen: React.FC = () => {
     const [saving, setSaving] = useState(false);
     const [imageFiles, setImageFiles] = useState<File[]>([]);
     const imageRef = React.useRef<HTMLInputElement>(null);
+
+    // Category Modal state
+    const { data: categories, refetch: refetchCategories } = useApi(() => getNewsCategories(), []);
+    const [showCategoryModal, setShowCategoryModal] = useState(false);
+    const [newCategoryName, setNewCategoryName] = useState('');
+    const [addingCategory, setAddingCategory] = useState(false);
+
+    const handleAddCategory = async () => {
+        if (!newCategoryName.trim()) return;
+        setAddingCategory(true);
+        try {
+            await createNewsCategory(newCategoryName.trim());
+            setNewCategoryName('');
+            refetchCategories();
+            toast('เพิ่มหมวดหมู่สำเร็จ', 'success');
+        } catch {
+            toast('ไม่สามารถเพิ่มหมวดหมู่ได้', 'error');
+        } finally {
+            setAddingCategory(false);
+        }
+    };
+
+    const handleDeleteCategory = async (id: number) => {
+        const confirmed = await showConfirm({
+            title: 'ลบหมวดหมู่?',
+            message: 'ยืนยันการลบหมวดหมู่นี้หรือไม่?',
+            type: 'danger',
+            confirmText: 'ลบ',
+        });
+        
+        if (!confirmed) return;
+
+        try {
+            await deleteNewsCategory(id);
+            refetchCategories();
+            toast('ลบหมวดหมู่สำเร็จ', 'success');
+        } catch {
+            toast('ไม่สามารถลบหมวดหมู่ได้', 'error');
+        }
+    };
 
     const getCoverImage = (img: any, id: any) => {
         if (!img) return `https://picsum.photos/600/400?random=${id}`;
@@ -54,7 +103,11 @@ const AdminContentScreen: React.FC = () => {
         try {
             const parsed = JSON.parse(img);
             if (Array.isArray(parsed)) return parsed;
-        } catch { }
+        } catch { 
+            if (typeof img === 'string' && img.startsWith('[')) {
+                return [];
+            }
+        }
         return [img];
     };
 
@@ -67,6 +120,7 @@ const AdminContentScreen: React.FC = () => {
         coverImage: getCoverImage(post.image, post.id),
         department: post.department || '',
         department_code: post.department_code || '',
+        category: post.category || 'ประกาศทั่วไป',
         isPinned: !!post.is_pinned,
         isUrgent: !!post.is_urgent,
         publishedAt: post.published_at ? new Date(post.published_at).toLocaleDateString('th-TH') : '',
@@ -98,8 +152,12 @@ const AdminContentScreen: React.FC = () => {
             image: post.image || '',
             department: post.department || '',
             department_code: post.department_code || '',
+            category: post.category || 'ประกาศทั่วไป',
             is_pinned: post.isPinned,
             is_urgent: post.isUrgent,
+            target_companies: post.target_companies ? (post.target_companies === 'all' ? 'all' : JSON.parse(post.target_companies)) : 'all',
+            target_audience: post.target_departments ? (post.target_departments === 'all' ? 'all' : 'specific') : 'all',
+            target_departments: post.target_departments && post.target_departments !== 'all' ? JSON.parse(post.target_departments) : [],
         });
         setImageFiles([]);
         setShowModal(true);
@@ -150,8 +208,11 @@ const AdminContentScreen: React.FC = () => {
                 image: imageUrl,
                 department: form.department,
                 department_code: form.department_code,
+                category: form.category,
                 is_pinned: form.is_pinned ? 1 : 0,
                 is_urgent: form.is_urgent ? 1 : 0,
+                target_companies: form.target_companies,
+                target_departments: form.target_audience === 'all' ? 'all' : form.target_departments,
             };
 
             if (editingId) {
@@ -257,7 +318,13 @@ const AdminContentScreen: React.FC = () => {
                                             {post.isUrgent && (
                                                 <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 uppercase tracking-wide">ด่วน</span>
                                             )}
+                                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 uppercase tracking-wide">{post.category}</span>
                                             <span className="text-xs text-gray-400">{post.publishedAt}</span>
+                                        </div>
+                                    )}
+                                    {!post.isPinned && (
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 uppercase tracking-wide">{post.category}</span>
                                         </div>
                                     )}
                                     <h3 className={`${post.isPinned ? 'text-lg' : 'text-base'} font-bold text-gray-900 dark:text-white line-clamp-1`}>{post.title}</h3>
@@ -377,14 +444,144 @@ const AdminContentScreen: React.FC = () => {
                                 </select>
                             </div>
 
+                            {/* Target Company */}
+                            {user?.isSuperAdmin && (
+                                <div>
+                                    <label className={labelCls}>กลุ่มเป้าหมาย (บริษัท)</label>
+                                    <div className="flex flex-col gap-2 mt-1">
+                                        <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                                            <input 
+                                                type="radio" 
+                                                checked={form.target_companies === 'all'} 
+                                                onChange={() => setForm(f => ({ ...f, target_companies: 'all' }))}
+                                                className="w-4 h-4 text-primary focus:ring-primary border-gray-300"
+                                            />
+                                            ทุกบริษัท
+                                        </label>
+                                        <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                                            <input 
+                                                type="radio" 
+                                                checked={form.target_companies !== 'all'} 
+                                                onChange={() => setForm(f => ({ ...f, target_companies: [] }))}
+                                                className="w-4 h-4 text-primary focus:ring-primary border-gray-300"
+                                            />
+                                            ระบุบริษัท
+                                        </label>
+                                    </div>
+                                    {form.target_companies !== 'all' && (
+                                        <div className="mt-2 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col gap-2 max-h-40 overflow-y-auto">
+                                            {(companies || []).map((c: any) => (
+                                                <label key={c.id} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                                                    <input 
+                                                        type="checkbox"
+                                                        checked={(form.target_companies as number[]).includes(c.id)}
+                                                        onChange={(e) => {
+                                                            const checked = e.target.checked;
+                                                            setForm(f => {
+                                                                const tc = Array.isArray(f.target_companies) ? [...f.target_companies] : [];
+                                                                if (checked) {
+                                                                    if (!tc.includes(c.id)) tc.push(c.id);
+                                                                } else {
+                                                                    const idx = tc.indexOf(c.id);
+                                                                    if (idx > -1) tc.splice(idx, 1);
+                                                                }
+                                                                return { ...f, target_companies: tc };
+                                                            });
+                                                        }}
+                                                        className="w-4 h-4 text-primary rounded border-gray-300 focus:ring-primary"
+                                                    />
+                                                    {c.name}
+                                                </label>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Target Departments */}
+                            <div>
+                                <label className={labelCls}>กลุ่มเป้าหมาย (พนักงานที่เห็นโพสต์นี้)</label>
+                                <div className="flex flex-col gap-2 mt-1">
+                                    <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                                        <input 
+                                            type="radio" 
+                                            checked={form.target_audience === 'all'} 
+                                            onChange={() => setForm(f => ({ ...f, target_audience: 'all', target_departments: [] }))}
+                                            className="w-4 h-4 text-primary focus:ring-primary border-gray-300"
+                                        />
+                                        พนักงานทุกคน
+                                    </label>
+                                    <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                                        <input 
+                                            type="radio" 
+                                            checked={form.target_audience === 'specific'} 
+                                            onChange={() => setForm(f => ({ ...f, target_audience: 'specific' }))}
+                                            className="w-4 h-4 text-primary focus:ring-primary border-gray-300"
+                                        />
+                                        ระบุแผนก
+                                    </label>
+                                </div>
+                                {form.target_audience === 'specific' && (
+                                    <div className="mt-2 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col gap-2 max-h-40 overflow-y-auto">
+                                        {(departments || []).map((d: any) => (
+                                            <label key={d.id} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                                                <input 
+                                                    type="checkbox"
+                                                    checked={form.target_departments.includes(d.id)}
+                                                    onChange={(e) => {
+                                                        const checked = e.target.checked;
+                                                        setForm(f => {
+                                                            const td = [...f.target_departments];
+                                                            if (checked) {
+                                                                if (!td.includes(d.id)) td.push(d.id);
+                                                            } else {
+                                                                const idx = td.indexOf(d.id);
+                                                                if (idx > -1) td.splice(idx, 1);
+                                                            }
+                                                            return { ...f, target_departments: td };
+                                                        });
+                                                    }}
+                                                    className="w-4 h-4 text-primary rounded border-gray-300 focus:ring-primary"
+                                                />
+                                                {d.name}
+                                            </label>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Category */}
+                            <div>
+                                <div className="flex justify-between items-center mb-1">
+                                    <label className={labelCls.replace('mb-1', '')}>หมวดหมู่ *</label>
+                                    <button 
+                                        type="button" 
+                                        onClick={() => setShowCategoryModal(true)}
+                                        className="text-xs font-semibold text-primary hover:underline flex items-center gap-1"
+                                    >
+                                        <span className="material-icons-round text-sm">settings</span>
+                                        จัดการหมวดหมู่
+                                    </button>
+                                </div>
+                                <select
+                                    value={form.category}
+                                    onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+                                    className={inputCls}
+                                >
+                                    {(categories || []).map((c: any) => (
+                                        <option key={c.id} value={c.name}>{c.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+
                             {/* Image */}
                             <div>
-                                <label className={labelCls}>รูปภาพ (หลายรูปได้)</label>
+                                <label className={labelCls}>ไฟล์แนบ (รูปภาพ หรือ PDF)</label>
                                 <input
                                     ref={imageRef}
                                     type="file"
                                     multiple
-                                    accept="image/*"
+                                    accept="image/*,application/pdf"
                                     className="hidden"
                                     onChange={handleImageFile}
                                 />
@@ -393,15 +590,22 @@ const AdminContentScreen: React.FC = () => {
                                 {getAllImages(form.image).length > 0 && (
                                     <div className="grid grid-cols-2 gap-2 mb-2">
                                         {getAllImages(form.image).map((imgUrl, i) => (
-                                            <div key={i} className="relative rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 h-24">
-                                                <img src={imgUrl} alt="Preview" className="w-full h-full object-cover" />
+                                            <div key={i} className="relative rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 h-24 bg-gray-50 dark:bg-gray-800">
+                                                {imgUrl.toLowerCase().endsWith('.pdf') ? (
+                                                    <div className="flex flex-col items-center justify-center w-full h-full p-2">
+                                                        <span className="material-icons-round text-3xl text-red-500">picture_as_pdf</span>
+                                                        <span className="text-[10px] text-gray-500 text-center w-full truncate mt-1">เอกสาร PDF</span>
+                                                    </div>
+                                                ) : (
+                                                    <img src={imgUrl} alt="Preview" className="w-full h-full object-cover" />
+                                                )}
                                                 <button
                                                     onClick={() => {
                                                         const urls = getAllImages(form.image);
                                                         urls.splice(i, 1);
                                                         setForm(f => ({ ...f, image: JSON.stringify(urls) }));
                                                     }}
-                                                    className="absolute top-1 right-1 bg-white/90 dark:bg-black/70 rounded-full p-1 shadow-sm hover:bg-white text-red-500"
+                                                    className="absolute top-1 right-1 bg-white/90 dark:bg-black/70 rounded-full p-1 shadow-sm hover:bg-white text-red-500 z-10"
                                                 >
                                                     <span className="material-icons-round text-sm">close</span>
                                                 </button>
@@ -414,13 +618,20 @@ const AdminContentScreen: React.FC = () => {
                                 {imageFiles.length > 0 && (
                                     <div className="grid grid-cols-2 gap-2 mb-2">
                                         {imageFiles.map((file, i) => (
-                                            <div key={`new-${i}`} className="relative rounded-xl overflow-hidden border-2 border-primary border-dashed h-24">
-                                                <img src={URL.createObjectURL(file)} alt="New Preview" className="w-full h-full object-cover opacity-80" />
+                                            <div key={`new-${i}`} className="relative rounded-xl overflow-hidden border-2 border-primary border-dashed h-24 bg-gray-50 dark:bg-gray-800">
+                                                {file.type === 'application/pdf' ? (
+                                                    <div className="flex flex-col items-center justify-center w-full h-full p-2">
+                                                        <span className="material-icons-round text-3xl text-red-500">picture_as_pdf</span>
+                                                        <span className="text-[10px] text-gray-500 text-center w-full truncate mt-1">{file.name}</span>
+                                                    </div>
+                                                ) : (
+                                                    <img src={URL.createObjectURL(file)} alt="New Preview" className="w-full h-full object-cover opacity-80" />
+                                                )}
                                                 <button
                                                     onClick={() => {
                                                         setImageFiles(prev => prev.filter((_, idx) => idx !== i));
                                                     }}
-                                                    className="absolute top-1 right-1 bg-white/90 dark:bg-black/70 rounded-full p-1 shadow-sm hover:bg-white text-red-500"
+                                                    className="absolute top-1 right-1 bg-white/90 dark:bg-black/70 rounded-full p-1 shadow-sm hover:bg-white text-red-500 z-10"
                                                 >
                                                     <span className="material-icons-round text-sm">close</span>
                                                 </button>
@@ -433,8 +644,8 @@ const AdminContentScreen: React.FC = () => {
                                     onClick={() => imageRef.current?.click()}
                                     className="w-full border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl py-4 flex flex-col items-center justify-center gap-1 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group"
                                 >
-                                    <span className="material-icons-round text-2xl text-gray-400 group-hover:text-primary">add_photo_alternate</span>
-                                    <span className="text-sm text-gray-500 group-hover:text-primary">เพิ่มรูปภาพ (ไม่เกินรูปละ 20MB)</span>
+                                    <span className="material-icons-round text-2xl text-gray-400 group-hover:text-primary">upload_file</span>
+                                    <span className="text-sm text-gray-500 group-hover:text-primary">เพิ่มรูปภาพหรือ PDF (ไม่เกิน 20MB)</span>
                                 </button>
                             </div>
 
@@ -490,6 +701,54 @@ const AdminContentScreen: React.FC = () => {
                                     </>
                                 )}
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Manage Categories Modal */}
+            {showCategoryModal && (
+                <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[80vh]">
+                        <div className="flex justify-between items-center px-6 py-4 border-b border-gray-100 dark:border-gray-700">
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-white">จัดการหมวดหมู่</h3>
+                            <button onClick={() => setShowCategoryModal(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                                <span className="material-icons-round">close</span>
+                            </button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-6">
+                            <div className="flex gap-2 mb-6">
+                                <input 
+                                    type="text" 
+                                    value={newCategoryName}
+                                    onChange={e => setNewCategoryName(e.target.value)}
+                                    placeholder="ชื่อหมวดหมู่ใหม่..."
+                                    className="flex-1 px-4 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-sm dark:text-white"
+                                />
+                                <button 
+                                    onClick={handleAddCategory}
+                                    disabled={!newCategoryName.trim() || addingCategory}
+                                    className="px-4 py-2 bg-primary text-white rounded-xl font-medium text-sm hover:bg-primary-dark transition-colors disabled:opacity-50"
+                                >
+                                    เพิ่ม
+                                </button>
+                            </div>
+                            <div className="space-y-2">
+                                {(categories || []).map((c: any) => (
+                                    <div key={c.id} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl border border-gray-100 dark:border-gray-700">
+                                        <span className="font-medium text-gray-800 dark:text-gray-200 text-sm">{c.name}</span>
+                                        <button 
+                                            onClick={() => handleDeleteCategory(c.id)}
+                                            className="w-8 h-8 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 dark:bg-red-900/30 dark:hover:bg-red-900/50 transition-colors flex items-center justify-center"
+                                        >
+                                            <span className="material-icons-round text-sm">delete</span>
+                                        </button>
+                                    </div>
+                                ))}
+                                {(!categories || categories.length === 0) && (
+                                    <p className="text-center text-gray-400 text-sm py-4">ไม่มีหมวดหมู่</p>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>

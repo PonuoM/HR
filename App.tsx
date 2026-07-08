@@ -12,6 +12,7 @@ import StatusScreen from './screens/StatusScreen';
 import ApprovalHistoryScreen from './screens/ApprovalHistoryScreen';
 import LeaveApprovalScreen from './screens/LeaveApprovalScreen';
 import NewsScreen from './screens/NewsScreen';
+import NewsDetailScreen from './screens/NewsDetailScreen';
 import VoteScreen from './screens/VoteScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import PayslipScreen from './screens/PayslipScreen';
@@ -134,6 +135,7 @@ const App: React.FC = () => {
                     <Routes>
                       <Route path="/" element={<HomeScreen />} />
                       <Route path="/news" element={<NewsScreen />} />
+                      <Route path="/news/:id" element={<NewsDetailScreen />} />
                       <Route path="/request/create" element={<CreateRequestScreen />} />
                       <Route path="/request/status/:id" element={<StatusScreen />} />
                       <Route path="/approval/history" element={<ApprovalHistoryScreen />} />

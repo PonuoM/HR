@@ -1407,9 +1407,11 @@ const HomeScreen: React.FC = () => {
                                 </button>
                             </div>
                         </div>
-                        {/* Content */}
                         <div className="p-5">
                             <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 uppercase tracking-wide">
+                                    {featuredNews?.category || 'ประกาศทั่วไป'}
+                                </span>
                                 <span className="font-semibold text-primary">{featuredNews?.department || ''}</span>
                                 <span className="w-1 h-1 rounded-full bg-gray-300"></span>
                                 <span>{featuredNews?.published_at ? new Date(featuredNews.published_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}</span>

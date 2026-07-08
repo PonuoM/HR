@@ -31,6 +31,28 @@ if ($colCheck && $colCheck->num_rows === 0) {
     $conn->query("ALTER TABLE news_likes ADD COLUMN `reaction_type` VARCHAR(10) NOT NULL DEFAULT 'like' AFTER `employee_id`");
 }
 
+// Auto-add category column to news_articles if missing
+$colCheck2 = $conn->query("SHOW COLUMNS FROM news_articles LIKE 'category'");
+if ($colCheck2 && $colCheck2->num_rows === 0) {
+    $conn->query("ALTER TABLE news_articles ADD COLUMN `category` VARCHAR(50) DEFAULT 'ประกาศทั่วไป' AFTER `department_code`");
+}
+
+// Auto-modify image column to TEXT if it's currently varchar
+$colCheck3 = $conn->query("SHOW COLUMNS FROM news_articles LIKE 'image'");
+if ($colCheck3) {
+    $col = $colCheck3->fetch_assoc();
+    if (strpos(strtolower($col['Type']), 'varchar') !== false) {
+        $conn->query("ALTER TABLE news_articles MODIFY COLUMN `image` TEXT");
+    }
+}
+
+// Auto-add target_companies and target_departments columns to news_articles if missing
+$colCheck4 = $conn->query("SHOW COLUMNS FROM news_articles LIKE 'target_companies'");
+if ($colCheck4 && $colCheck4->num_rows === 0) {
+    $conn->query("ALTER TABLE news_articles ADD COLUMN `target_companies` TEXT NULL AFTER `category`");
+    $conn->query("ALTER TABLE news_articles ADD COLUMN `target_departments` TEXT NULL AFTER `target_companies`");
+}
+
 $conn->query("CREATE TABLE IF NOT EXISTS `news_comments` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `article_id` INT NOT NULL,
@@ -39,8 +61,81 @@ $conn->query("CREATE TABLE IF NOT EXISTS `news_comments` (
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
+$conn->query("CREATE TABLE IF NOT EXISTS `news_categories` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `company_id` INT NOT NULL,
+  `name` VARCHAR(50) NOT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uq_company_name` (`company_id`, `name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+$catCheck = $conn->query("SELECT COUNT(*) as cnt FROM news_categories WHERE company_id=$company_id")->fetch_assoc();
+if ($catCheck && $catCheck['cnt'] == 0) {
+    $defaults = ['ประกาศทั่วไป', 'ข่าวประชาสัมพันธ์', 'กิจกรรม', 'นโยบายและสวัสดิการ', 'ประกาศวันหยุด', 'อื่นๆ'];
+    $stmt = $conn->prepare("INSERT INTO news_categories (company_id, name) VALUES (?, ?)");
+    foreach ($defaults as $name) {
+        $stmt->bind_param('is', $company_id, $name);
+        $stmt->execute();
+    }
+}
+
 $method = get_method();
 $action = $_GET['action'] ?? null;
+
+// ---- CATEGORIES ----
+if ($action === 'categories') {
+    if ($method === 'GET') {
+        $res = $conn->query("SELECT id, name FROM news_categories WHERE company_id=$company_id ORDER BY id ASC");
+        $cats = [];
+        while ($row = $res->fetch_assoc()) $cats[] = $row;
+        json_response($cats);
+    }
+    if ($method === 'POST') {
+        require_admin($conn);
+        $body = get_json_body();
+        $name = trim($body['name'] ?? '');
+        if (!$name) json_response(['error' => 'Name is required'], 400);
+        $stmt = $conn->prepare("INSERT IGNORE INTO news_categories (company_id, name) VALUES (?, ?)");
+        $stmt->bind_param('is', $company_id, $name);
+        $stmt->execute();
+        json_response(['id' => $conn->insert_id, 'name' => $name, 'message' => 'Created'], 201);
+    }
+    if ($method === 'DELETE' && isset($_GET['id'])) {
+        require_admin($conn);
+        $id = (int)$_GET['id'];
+        $stmt = $conn->prepare("DELETE FROM news_categories WHERE id=? AND company_id=?");
+        $stmt->bind_param('ii', $id, $company_id);
+        $stmt->execute();
+        json_response(['message' => 'Deleted']);
+    }
+}
+
+if ($action === 'latest_id' && $method === 'GET') {
+    $employeeId = $_GET['employee_id'] ?? null;
+    $compFilter = "(a.target_companies IS NULL OR a.target_companies = 'all' OR JSON_CONTAINS(a.target_companies, '" . $company_id . "', '$') OR a.company_id = $company_id)";
+    $deptFilter = "1=1";
+    
+    if ($employeeId) {
+        $emp = $conn->query("SELECT department_id FROM employees WHERE id = '" . $conn->real_escape_string($employeeId) . "'")->fetch_assoc();
+        $employeeDepartmentId = $emp ? $emp['department_id'] : null;
+        if ($employeeDepartmentId) {
+            $deptFilter = "(a.target_departments IS NULL OR a.target_departments = 'all' OR JSON_CONTAINS(a.target_departments, '" . $employeeDepartmentId . "', '$'))";
+        }
+    }
+
+    $res = $conn->query("SELECT MAX(a.id) as max_id FROM news_articles a WHERE $compFilter AND $deptFilter");
+    $row = $res->fetch_assoc();
+    $globalMax = $row['max_id'] ? (int)$row['max_id'] : 0;
+    
+    $cats = $conn->query("SELECT IFNULL(a.category, 'ประกาศทั่วไป') as cat_name, MAX(a.id) as max_id FROM news_articles a WHERE $compFilter AND $deptFilter GROUP BY IFNULL(a.category, 'ประกาศทั่วไป')");
+    $catLatest = [];
+    if ($cats) {
+        while($r = $cats->fetch_assoc()) {
+            $catLatest[$r['cat_name']] = (int)$r['max_id'];
+        }
+    }
+    
+    json_response(['latest_id' => $globalMax, 'categories' => $catLatest]);
+}
 
 // ---- LIKES / REACTIONS ----
 if ($action === 'like' && $method === 'POST' && isset($_GET['id'])) {
@@ -133,11 +228,23 @@ if ($action === 'comment' && $method === 'DELETE' && isset($_GET['id'])) {
 // ---- LIST (with user's liked state) ----
 if ($method === 'GET' && !$action) {
     $employeeId = $_GET['employee_id'] ?? null;
+    
+    $compFilter = "(a.target_companies IS NULL OR a.target_companies = 'all' OR JSON_CONTAINS(a.target_companies, '" . $company_id . "', '$') OR a.company_id = $company_id)";
+    $deptFilter = "1=1";
+    
+    if ($employeeId) {
+        $emp = $conn->query("SELECT department_id FROM employees WHERE id = '" . $conn->real_escape_string($employeeId) . "'")->fetch_assoc();
+        $employeeDepartmentId = $emp ? $emp['department_id'] : null;
+        if ($employeeDepartmentId) {
+            $deptFilter = "(a.target_departments IS NULL OR a.target_departments = 'all' OR JSON_CONTAINS(a.target_departments, '" . $employeeDepartmentId . "', '$'))";
+        }
+    }
+    
     $sql = "SELECT a.*,
         (SELECT COUNT(*) FROM news_likes WHERE article_id = a.id) as like_count,
         (SELECT COUNT(*) FROM news_comments WHERE article_id = a.id) as comment_count"
         . ($employeeId ? ", (SELECT reaction_type FROM news_likes WHERE article_id = a.id AND employee_id = '" . $conn->real_escape_string($employeeId) . "' LIMIT 1) as user_reaction" : ", NULL as user_reaction")
-        . " FROM news_articles a WHERE a.company_id = $company_id ORDER BY a.is_pinned DESC, a.published_at DESC";
+        . " FROM news_articles a WHERE $compFilter AND $deptFilter ORDER BY a.is_pinned DESC, a.published_at DESC";
     $result = $conn->query($sql);
     $articles = [];
     while ($row = $result->fetch_assoc()) {
@@ -166,27 +273,38 @@ if ($method === 'GET' && !$action) {
 if ($method === 'POST' && !$action) {
     require_admin($conn);
     $body = get_json_body();
-    $stmt = $conn->prepare("INSERT INTO news_articles (company_id, title, content, image, department, department_code, is_pinned, is_urgent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param('isssssis',
+    
+    $target_companies = isset($body['target_companies']) && $body['target_companies'] !== 'all' ? json_encode($body['target_companies']) : 'all';
+    $target_departments = isset($body['target_departments']) && $body['target_departments'] !== 'all' ? json_encode($body['target_departments']) : 'all';
+    
+    $stmt = $conn->prepare("INSERT INTO news_articles (company_id, title, content, image, department, department_code, category, is_pinned, is_urgent, target_companies, target_departments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $stmt->bind_param('issssssisss',
         $company_id,
         $body['title'], $body['content'], $body['image'],
-        $body['department'], $body['department_code'],
-        $body['is_pinned'], $body['is_urgent']
+        $body['department'], $body['department_code'], $body['category'],
+        $body['is_pinned'], $body['is_urgent'],
+        $target_companies, $target_departments
     );
     $stmt->execute();
     json_response(['id' => $conn->insert_id, 'message' => 'Created'], 201);
 }
 
 // ---- UPDATE ----
-if ($method === 'PUT' && isset($_GET['id']) && !$action) {
+if ($method === 'PUT' && !$action) {
     require_admin($conn);
     $id = (int)$_GET['id'];
     $body = get_json_body();
-    $stmt = $conn->prepare("UPDATE news_articles SET title=?, content=?, image=?, department=?, department_code=?, is_pinned=?, is_urgent=? WHERE id=? AND company_id=?");
-    $stmt->bind_param('sssssiiii',
+    
+    $target_companies = isset($body['target_companies']) && $body['target_companies'] !== 'all' ? json_encode($body['target_companies']) : 'all';
+    $target_departments = isset($body['target_departments']) && $body['target_departments'] !== 'all' ? json_encode($body['target_departments']) : 'all';
+    
+    $stmt = $conn->prepare("UPDATE news_articles SET title=?, content=?, image=?, department=?, department_code=?, category=?, is_pinned=?, is_urgent=?, target_companies=?, target_departments=? WHERE id=? AND company_id=?");
+    $stmt->bind_param('ssssssisssii',
         $body['title'], $body['content'], $body['image'],
-        $body['department'], $body['department_code'],
-        $body['is_pinned'], $body['is_urgent'], $id, $company_id
+        $body['department'], $body['department_code'], $body['category'],
+        $body['is_pinned'], $body['is_urgent'],
+        $target_companies, $target_departments,
+        $id, $company_id
     );
     $stmt->execute();
     json_response(['message' => 'Updated']);

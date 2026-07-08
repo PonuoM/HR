@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { SIDEBAR_NAV_ITEMS, SIDEBAR_ADMIN_ITEMS } from '../data';
 import { useAuth } from '../contexts/AuthContext';
+import { useNewsNotification } from '../hooks/useNewsNotification';
 
 interface SidebarProps {
     isCollapsed: boolean;
@@ -12,6 +13,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
     const navigate = useNavigate();
     const location = useLocation();
     const { user: authUser, isAdmin, isSuperAdmin, company, logout } = useAuth();
+    const { hasNewNews } = useNewsNotification();
 
     const toggle = () => {
         onToggle();
@@ -75,7 +77,12 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
                                             : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
                                         }`}
                                 >
-                                    <span className="material-icons-round text-xl shrink-0">{item.icon}</span>
+                                    <div className="relative shrink-0 flex items-center justify-center">
+                                        <span className="material-icons-round text-xl">{item.icon}</span>
+                                        {item.path === '/news' && hasNewNews && (
+                                            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white dark:border-gray-900 animate-pulse"></span>
+                                        )}
+                                    </div>
                                     {!isCollapsed && <span className="text-sm whitespace-nowrap">{item.label}</span>}
                                 </button>
                             </li>

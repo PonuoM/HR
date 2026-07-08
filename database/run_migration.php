@@ -64,16 +64,21 @@ foreach ($files as $file) {
         if (empty($stmt)) continue;
         $preview = htmlspecialchars(substr($stmt, 0, 100));
         
-        if ($conn->query($stmt)) {
-            $ok++;
-            echo "<p class='ok'>✅ $preview...</p>";
-        } else {
-            $errMsg = $conn->error;
+        try {
+            if ($conn->query($stmt)) {
+                $ok++;
+                echo "<p class='ok'>✅ $preview...</p>";
+            } else {
+                throw new Exception($conn->error);
+            }
+        } catch (Exception $e) {
+            $errMsg = $e->getMessage();
             // "Duplicate column" or "already exists" = ข้ามได้ (migration รันแล้ว)
             if (
                 stripos($errMsg, 'Duplicate column') !== false ||
                 stripos($errMsg, 'already exists') !== false ||
-                stripos($errMsg, 'Duplicate entry') !== false
+                stripos($errMsg, 'Duplicate entry') !== false ||
+                stripos($errMsg, 'Duplicate key name') !== false
             ) {
                 echo "<p class='skip'>⏭️ (already exists) $preview...</p>";
                 $totalSkip++;
