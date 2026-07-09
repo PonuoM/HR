@@ -25,6 +25,12 @@ if ($method === 'GET') {
             $conn->query("ALTER TABLE positions ADD COLUMN `permissions` TEXT NULL");
         }
 
+        // Auto-migration for is_admin column
+        $colCheckAdmin = $conn->query("SHOW COLUMNS FROM positions LIKE 'is_admin'");
+        if ($colCheckAdmin && $colCheckAdmin->num_rows === 0) {
+            $conn->query("ALTER TABLE positions ADD COLUMN `is_admin` TINYINT(1) DEFAULT 0");
+        }
+
         $stmt = $conn->prepare("SELECT * FROM positions WHERE company_id = ? ORDER BY id");
         $stmt->bind_param('i', $company_id);
         $stmt->execute();
@@ -32,6 +38,7 @@ if ($method === 'GET') {
         $items = [];
         while ($row = $result->fetch_assoc()) {
             $row['can_have_subordinates'] = (int)($row['can_have_subordinates'] ?? 0);
+            $row['is_admin'] = (int)($row['is_admin'] ?? 0);
             $items[] = $row;
         }
         json_response($items);
@@ -58,12 +65,13 @@ if ($method === 'POST') {
     if ($type === 'positions') {
         $name = $conn->real_escape_string($body['name'] ?? '');
         $can_sub = isset($body['can_have_subordinates']) ? intval($body['can_have_subordinates']) : 0;
+        $is_admin = isset($body['is_admin']) ? intval($body['is_admin']) : 0;
         $permissions = isset($body['permissions']) && is_array($body['permissions']) ? json_encode($body['permissions']) : null;
 
         if (!$name) json_response(['error' => 'Name is required'], 400);
 
-        $stmt = $conn->prepare("INSERT INTO positions (company_id, name, can_have_subordinates, permissions) VALUES (?, ?, ?, ?)");
-        $stmt->bind_param('isis', $company_id, $name, $can_sub, $permissions);
+        $stmt = $conn->prepare("INSERT INTO positions (company_id, name, can_have_subordinates, is_admin, permissions) VALUES (?, ?, ?, ?, ?)");
+        $stmt->bind_param('isiis', $company_id, $name, $can_sub, $is_admin, $permissions);
         $stmt->execute();
         json_response(['id' => $conn->insert_id, 'message' => 'Position created'], 201);
     }
@@ -100,10 +108,11 @@ if ($method === 'PUT' && isset($_GET['id'])) {
     if ($type === 'positions') {
         $name = $conn->real_escape_string($body['name'] ?? '');
         $can_sub = isset($body['can_have_subordinates']) ? intval($body['can_have_subordinates']) : 0;
+        $is_admin = isset($body['is_admin']) ? intval($body['is_admin']) : 0;
         $permissions = isset($body['permissions']) && is_array($body['permissions']) ? json_encode($body['permissions']) : null;
 
-        $stmt = $conn->prepare("UPDATE positions SET name = ?, can_have_subordinates = ?, permissions = ? WHERE id = ? AND company_id = ?");
-        $stmt->bind_param('sisii', $name, $can_sub, $permissions, $id, $company_id);
+        $stmt = $conn->prepare("UPDATE positions SET name = ?, can_have_subordinates = ?, is_admin = ?, permissions = ? WHERE id = ? AND company_id = ?");
+        $stmt->bind_param('siisii', $name, $can_sub, $is_admin, $permissions, $id, $company_id);
         $stmt->execute();
         json_response(['message' => 'Position updated', 'id' => $id]);
     }

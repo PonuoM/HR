@@ -22,6 +22,7 @@ interface Position {
     id: number;
     name: string;
     can_have_subordinates: number;
+    is_admin?: number;
     permissions?: string | string[] | null;
 }
 
@@ -45,7 +46,7 @@ const AdminDepartmentScreen: React.FC = () => {
     const { data: positions, refetch: refetchPos } = useApi(() => getPositions(), []);
     const [posEditId, setPosEditId] = useState<number | null>(null);
     const [showPosAdd, setShowPosAdd] = useState(false);
-    const [posForm, setPosForm] = useState({ name: '', can_have_subordinates: 0, permissions: [] as string[] });
+    const [posForm, setPosForm] = useState({ name: '', can_have_subordinates: 0, is_admin: 0, permissions: [] as string[] });
     const [posSaving, setPosSaving] = useState(false);
     const [deletingPos, setDeletingPos] = useState<number | null>(null);
 
@@ -133,20 +134,20 @@ const AdminDepartmentScreen: React.FC = () => {
         } else if (Array.isArray(pos.permissions)) {
             perms = pos.permissions;
         }
-        setPosForm({ name: pos.name, can_have_subordinates: pos.can_have_subordinates || 0, permissions: perms });
+        setPosForm({ name: pos.name, can_have_subordinates: pos.can_have_subordinates || 0, is_admin: pos.is_admin || 0, permissions: perms });
     };
 
     const openPosAdd = () => {
         setPosEditId(null);
         setShowPosAdd(true);
-        setPosForm({ name: '', can_have_subordinates: 0, permissions: [] });
+        setPosForm({ name: '', can_have_subordinates: 0, is_admin: 0, permissions: [] });
     };
 
     const handlePosSave = async () => {
         if (!posForm.name.trim()) return;
         setPosSaving(true);
         try {
-            const data = { name: posForm.name.trim(), can_have_subordinates: posForm.can_have_subordinates, permissions: posForm.permissions };
+            const data = { name: posForm.name.trim(), can_have_subordinates: posForm.can_have_subordinates, is_admin: posForm.is_admin, permissions: posForm.permissions };
             if (showPosAdd) {
                 await createPosition(data);
                 toast('เพิ่มตำแหน่งเรียบร้อย', 'success');
@@ -264,6 +265,20 @@ const AdminDepartmentScreen: React.FC = () => {
                     className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${posForm.can_have_subordinates ? 'bg-primary' : 'bg-gray-300 dark:bg-gray-600'}`}
                 >
                     <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${posForm.can_have_subordinates ? 'translate-x-5' : ''}`} />
+                </button>
+            </div>
+            
+            <div className="flex items-center justify-between py-1 border-t border-slate-100 dark:border-slate-800 pt-3 mt-1">
+                <div className="flex items-center gap-2">
+                    <span className="material-icons-round text-sm text-red-500">admin_panel_settings</span>
+                    <span className="text-sm text-slate-700 dark:text-slate-300">เปิดสิทธิ์ Admin <span className="text-[10px] text-slate-400 font-normal">(ทุกคนในตำแหน่งนี้เป็นแอดมิน)</span></span>
+                </div>
+                <button
+                    type="button"
+                    onClick={() => setPosForm({ ...posForm, is_admin: posForm.is_admin ? 0 : 1 })}
+                    className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${posForm.is_admin ? 'bg-primary' : 'bg-gray-300 dark:bg-gray-600'}`}
+                >
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${posForm.is_admin ? 'translate-x-5' : ''}`} />
                 </button>
             </div>
             

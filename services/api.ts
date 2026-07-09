@@ -433,11 +433,11 @@ export async function getPositions() {
     return fetchApi<any[]>('departments.php?type=positions');
 }
 
-export async function createPosition(data: { name: string; can_have_subordinates?: number }) {
+export async function createPosition(data: { name: string; can_have_subordinates?: number; is_admin?: number; permissions?: string[] }) {
     return fetchApi<any>('departments.php?type=positions', { method: 'POST', body: JSON.stringify(data) });
 }
 
-export async function updatePosition(id: number, data: { name: string; can_have_subordinates?: number }) {
+export async function updatePosition(id: number, data: { name: string; can_have_subordinates?: number; is_admin?: number; permissions?: string[] }) {
     return fetchApi<any>(`departments.php?type=positions&id=${id}`, { method: 'PUT', body: JSON.stringify(data) });
 }
 

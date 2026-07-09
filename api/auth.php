@@ -20,7 +20,7 @@ if ($method === 'POST') {
     }
 
     // Look up user
-    $stmt = $conn->prepare("SELECT e.*, CONCAT(e.name, IF(IFNULL(e.nickname, '') != '', CONCAT(' (', e.nickname, ')'), '')) AS name, d.name AS department, p.name AS position, p.permissions AS position_permissions, c.id AS company_id, c.code AS company_code, c.name AS company_name, c.logo_url AS company_logo FROM employees e LEFT JOIN departments d ON e.department_id = d.id LEFT JOIN positions p ON e.position_id = p.id LEFT JOIN companies c ON e.company_id = c.id WHERE e.id = ?");
+    $stmt = $conn->prepare("SELECT e.*, CONCAT(e.name, IF(IFNULL(e.nickname, '') != '', CONCAT(' (', e.nickname, ')'), '')) AS name, d.name AS department, p.name AS position, p.permissions AS position_permissions, p.is_admin AS position_is_admin, c.id AS company_id, c.code AS company_code, c.name AS company_name, c.logo_url AS company_logo FROM employees e LEFT JOIN departments d ON e.department_id = d.id LEFT JOIN positions p ON e.position_id = p.id LEFT JOIN companies c ON e.company_id = c.id WHERE e.id = ?");
     $stmt->bind_param('s', $employee_id);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -101,7 +101,9 @@ if ($method === 'POST') {
     
     // Parse permissions if any
     $user['permissions'] = $user['position_permissions'] ? json_decode($user['position_permissions'], true) : null;
+    $user['is_admin'] = (int)($user['is_admin'] ?? 0) | (int)($user['position_is_admin'] ?? 0);
     unset($user['position_permissions']);
+    unset($user['position_is_admin']);
 
     $response = [
         'message' => 'เข้าสู่ระบบสำเร็จ',
