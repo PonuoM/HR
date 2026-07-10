@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { HashRouter as Router, Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import { ToastProvider } from './components/Toast';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -55,7 +55,7 @@ const PageTransition: React.FC<{ children: React.ReactNode }> = ({ children }) =
 const RequireAuth: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (isAuthenticated) {
       import('./services/faceModelLoader').then(({ preloadFaceModels }) => {
         preloadFaceModels();
@@ -84,6 +84,13 @@ const RequireAuth: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const location = useLocation();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = 0;
+    }
+  }, [location.pathname]);
 
   // Hide mobile bottom nav on create/status pages, admin pages, and settings sub-pages
   const hideBottomNavRoutes = [
@@ -104,7 +111,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       >
 
         {/* Scrollable Content Container */}
-        <div className="flex-1 overflow-y-auto scrollbar-hide w-full">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-hide w-full">
           {children}
         </div>
 
