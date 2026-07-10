@@ -129,13 +129,13 @@ const ProfileScreen: React.FC = () => {
             <div className="px-6 py-6 space-y-6">
 
                 {/* Admin Section (Mobile Only Access Point) */}
-                {user?.is_admin == 1 && (
+                {(user?.is_admin === 1 || (Array.isArray(user?.permissions) && user.permissions.length > 0)) && (
                     <section>
                         <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider mb-3 ml-1">
                             ผู้ดูแลระบบ (Admin)
                         </h3>
                         <div className="bg-white dark:bg-gray-800 rounded-2xl p-2 shadow-sm border border-gray-100 dark:border-gray-700">
-                            {PROFILE_ADMIN_ITEMS.filter(item => (!item.superadminOnly || authUser?.is_superadmin) && (authUser?.is_superadmin || (authUser?.permissions && authUser.permissions.includes(item.path)))).map((item, index) => (
+                            {PROFILE_ADMIN_ITEMS.filter(item => (!item.superadminOnly || authUser?.is_superadmin) && (authUser?.is_superadmin || authUser?.is_admin === 1 || (authUser?.permissions && authUser.permissions.includes(item.path)))).map((item, index) => (
                                 <button
                                     key={index}
                                     onClick={() => navigate(item.path)}

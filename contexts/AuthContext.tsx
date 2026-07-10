@@ -192,7 +192,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             user,
             company,
             isAuthenticated: !!user,
-            isAdmin: !!user && user.is_admin === 1,
+            isAdmin: !!user && (user.is_admin === 1 || (Array.isArray(user.permissions) && user.permissions.length > 0)),
             isSuperAdmin: !!user && (user.is_superadmin === 1 || user.is_superadmin === (1 as any)),
             loading,
             login,
