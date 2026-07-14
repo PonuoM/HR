@@ -131,11 +131,22 @@ if ($method === 'GET') {
     $params = [];
     $types = '';
 
-    // Non-superadmin: scope to their company only
+    // Non-superadmin: scope to their company, plus any request tied to the caller
+    // personally as approver/actor — approvees may be in another company
     if (!$is_superadmin) {
-        $where[] = 'e.company_id = ?';
-        $params[] = $company_id;
-        $types .= 'i';
+        if ($employee_id_header !== '') {
+            $where[] = '(e.company_id = ? OR tr.expected_approver1_id = ? OR tr.expected_approver2_id = ? OR tr.tier1_by = ? OR tr.tier2_by = ?)';
+            $params[] = $company_id;
+            $params[] = $employee_id_header;
+            $params[] = $employee_id_header;
+            $params[] = $employee_id_header;
+            $params[] = $employee_id_header;
+            $types .= 'issss';
+        } else {
+            $where[] = 'e.company_id = ?';
+            $params[] = $company_id;
+            $types .= 'i';
+        }
     }
 
     if (isset($_GET['employee_id'])) {
