@@ -37,7 +37,8 @@ if ($DB_HOST === '' || $DB_USER === '' || $DB_PASS === false || $DB_NAME === '')
     }
 }
 
-if ($DB_HOST === '' || $DB_USER === '' || $DB_PASS === '' || $DB_NAME === '') {
+if ($DB_HOST === '' || $DB_USER === '' || $DB_PASS === false || $DB_NAME === '') {
+    file_put_contents(__DIR__ . '/debug.log', "HOST: $DB_HOST, USER: $DB_USER, PASS: " . var_export($DB_PASS, true) . ", NAME: $DB_NAME\n");
     http_response_code(500);
     echo json_encode([
         'error' => 'Database credentials not configured.',
@@ -98,15 +99,67 @@ function get_employee_id() {
  * Require that the caller is an admin (is_admin = 1).
  * Returns a 403 error if not an admin.
  */
-function require_admin($conn) {
+function require_admin($conn, $required_permission = null) {
     $empId = get_employee_id();
     if (!$empId) json_response(['error' => 'Unauthorized: missing employee ID'], 403);
-    $stmt = $conn->prepare("SELECT is_admin FROM employees WHERE id = ? AND is_active = 1");
+    
+    $stmt = $conn->prepare("SELECT e.is_admin, e.is_superadmin, p.is_admin AS position_is_admin, p.permissions 
+                            FROM employees e 
+                            LEFT JOIN positions p ON e.position_id = p.id 
+                            WHERE e.id = ? AND e.is_active = 1");
     $stmt->bind_param('s', $empId);
     $stmt->execute();
     $row = $stmt->get_result()->fetch_assoc();
-    if (!$row || !$row['is_admin']) {
+    
+    if (!$row) {
         json_response(['error' => 'Forbidden: admin access required'], 403);
     }
-    return $empId;
+
+    $is_global_admin = (int)($row['is_superadmin'] ?? 0);
+    
+    if ($is_global_admin) {
+        return $empId;
+    }
+
+    if ($required_permission) {
+        $permissions = $row['permissions'] ? json_decode($row['permissions'], true) : [];
+        if (is_array($permissions) && in_array($required_permission, $permissions)) {
+            return $empId;
+        }
+    } else {
+        // If no specific permission required, just being an admin is enough
+        $is_admin = ((int)($row['is_admin'] ?? 0)) | ((int)($row['position_is_admin'] ?? 0));
+        if ($is_admin) {
+            return $empId;
+        }
+    }
+
+    json_response(['error' => 'Forbidden: admin access required'], 403);
+}
+
+/**
+ * Check if the user is an admin or has the required permission without throwing an error
+ * Returns boolean
+ */
+function is_admin_user($conn, $empId, $required_permission = null) {
+    if (!$empId) return false;
+    $stmt = $conn->prepare("SELECT e.is_admin, e.is_superadmin, p.is_admin AS position_is_admin, p.permissions 
+                            FROM employees e 
+                            LEFT JOIN positions p ON e.position_id = p.id 
+                            WHERE e.id = ? AND e.is_active = 1");
+    $stmt->bind_param('s', $empId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    if (!$row) return false;
+
+    $is_global_admin = (int)($row['is_superadmin'] ?? 0);
+    if ($is_global_admin) return true;
+
+    if ($required_permission) {
+        $permissions = $row['permissions'] ? json_decode($row['permissions'], true) : [];
+        return is_array($permissions) && in_array($required_permission, $permissions);
+    } else {
+        $is_admin = ((int)($row['is_admin'] ?? 0)) | ((int)($row['position_is_admin'] ?? 0));
+        return (bool)$is_admin;
+    }
 }

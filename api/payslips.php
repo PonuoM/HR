@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Payslips API
  * GET  /api/payslips.php?employee_id=X  - List payslips for employee
@@ -12,7 +13,7 @@ $method = get_method();
 if ($method === 'GET') {
     $employee_id = $conn->real_escape_string($_GET['employee_id'] ?? '');
     $caller_id = get_employee_id();
-    
+
     // Non-admin users can only see their own payslips
     if ($employee_id && $caller_id && $employee_id !== $caller_id) {
         // Check if caller is admin
@@ -24,7 +25,7 @@ if ($method === 'GET') {
             json_response(['error' => 'ไม่มีสิทธิ์ดูข้อมูลเงินเดือนของผู้อื่น'], 403);
         }
     }
-    
+
     $where = $employee_id ? "WHERE p.employee_id = '$employee_id'" : '';
     $sql = "SELECT p.*, CONCAT(e.name, IF(IFNULL(e.nickname, '') != '', CONCAT(' (', e.nickname, ')'), '')) AS employee_name
             FROM payslips p
@@ -43,9 +44,13 @@ if ($method === 'POST') {
     require_admin($conn);
     $body = get_json_body();
     $stmt = $conn->prepare("INSERT INTO payslips (employee_id, month, year, amount, image_url) VALUES (?, ?, ?, ?, ?)");
-    $stmt->bind_param('sssss',
-        $body['employee_id'], $body['month'], $body['year'],
-        $body['amount'], $body['image_url']
+    $stmt->bind_param(
+        'sssss',
+        $body['employee_id'],
+        $body['month'],
+        $body['year'],
+        $body['amount'],
+        $body['image_url']
     );
     $stmt->execute();
     json_response(['id' => $conn->insert_id, 'message' => 'Created'], 201);
@@ -58,4 +63,3 @@ if ($method === 'PUT' && isset($_GET['id'])) {
 }
 
 json_response(['error' => 'Method not allowed'], 405);
-

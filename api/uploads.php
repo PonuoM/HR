@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Uploads API — Centralized file upload system
  * POST   /api/uploads.php              - Upload a file

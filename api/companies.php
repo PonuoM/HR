@@ -13,17 +13,28 @@ $method = get_method();
 // --- Auth check: Only superadmin can access this API ---
 // We check via X-Employee-Id header or fallback
 function require_superadmin($conn) {
+    global $method;
     $headers = getallheaders();
     $employeeId = $headers['X-Employee-Id'] ?? $headers['x-employee-id'] ?? null;
     if (!$employeeId) {
         json_response(['error' => 'Unauthorized'], 401);
     }
-    $stmt = $conn->prepare("SELECT is_superadmin FROM employees WHERE id = ?");
+    $stmt = $conn->prepare("SELECT e.is_superadmin, p.permissions FROM employees e LEFT JOIN positions p ON e.position_id = p.id WHERE e.id = ?");
     $stmt->bind_param('s', $employeeId);
     $stmt->execute();
     $result = $stmt->get_result();
     $row = $result->fetch_assoc();
-    if (!$row || !$row['is_superadmin']) {
+    
+    $is_superadmin = $row && $row['is_superadmin'];
+    
+    if (!$is_superadmin) {
+        $perms = ($row && $row['permissions']) ? json_decode($row['permissions'], true) : [];
+        $has_cms = is_array($perms) && in_array('/admin/cms', $perms);
+        
+        // Allow GET if they have CMS permission (acts as global news admin)
+        if ($method === 'GET' && $has_cms) {
+            return;
+        }
         json_response(['error' => 'Access denied: Superadmin only'], 403);
     }
 }

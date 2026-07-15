@@ -1,4 +1,5 @@
 <?php
+
 /**
  * HR Mobile Connect - API Configuration (PRODUCTION)
  * Database connection and utility functions
@@ -64,18 +65,21 @@ if ($conn->connect_error) {
 }
 
 // --- Utilities ---
-function json_response($data, $status = 200) {
+function json_response($data, $status = 200)
+{
     http_response_code($status);
     echo json_encode($data, JSON_UNESCAPED_UNICODE);
     exit;
 }
 
-function get_json_body() {
+function get_json_body()
+{
     $raw = file_get_contents('php://input');
     return json_decode($raw, true) ?? [];
 }
 
-function get_method() {
+function get_method()
+{
     return $_SERVER['REQUEST_METHOD'];
 }
 
@@ -83,7 +87,8 @@ function get_method() {
  * Get the company_id from the X-Company-Id header.
  * Falls back to 1 (default company) if not set.
  */
-function get_company_id() {
+function get_company_id()
+{
     $headers = getallheaders();
     $companyId = $headers['X-Company-Id'] ?? $headers['x-company-id'] ?? null;
     if ($companyId) return (int)$companyId;
@@ -94,7 +99,8 @@ function get_company_id() {
 /**
  * Get the employee_id from the X-Employee-Id header.
  */
-function get_employee_id() {
+function get_employee_id()
+{
     $headers = getallheaders();
     return $headers['X-Employee-Id'] ?? $headers['x-employee-id'] ?? '';
 }
@@ -103,15 +109,68 @@ function get_employee_id() {
  * Require that the caller is an admin (is_admin = 1).
  * Returns a 403 error if not an admin.
  */
-function require_admin($conn) {
+function require_admin($conn, $required_permission = null)
+{
     $empId = get_employee_id();
     if (!$empId) json_response(['error' => 'Unauthorized: missing employee ID'], 403);
-    $stmt = $conn->prepare("SELECT is_admin FROM employees WHERE id = ? AND is_active = 1");
+    
+    $stmt = $conn->prepare("SELECT e.is_admin, e.is_superadmin, p.is_admin AS position_is_admin, p.permissions 
+                            FROM employees e 
+                            LEFT JOIN positions p ON e.position_id = p.id 
+                            WHERE e.id = ? AND e.is_active = 1");
     $stmt->bind_param('s', $empId);
     $stmt->execute();
     $row = $stmt->get_result()->fetch_assoc();
-    if (!$row || !$row['is_admin']) {
+    
+    if (!$row) {
         json_response(['error' => 'Forbidden: admin access required'], 403);
     }
-    return $empId;
+
+    $is_global_admin = (int)($row['is_superadmin'] ?? 0);
+    
+    if ($is_global_admin) {
+        return $empId;
+    }
+
+    if ($required_permission) {
+        $permissions = $row['permissions'] ? json_decode($row['permissions'], true) : [];
+        if (is_array($permissions) && in_array($required_permission, $permissions)) {
+            return $empId;
+        }
+    } else {
+        // If no specific permission required, just being an admin is enough
+        $is_admin = ((int)($row['is_admin'] ?? 0)) | ((int)($row['position_is_admin'] ?? 0));
+        if ($is_admin) {
+            return $empId;
+        }
+    }
+
+    json_response(['error' => 'Forbidden: admin access required'], 403);
+}
+
+/**
+ * Check if the user is an admin or has the required permission without throwing an error
+ * Returns boolean
+ */
+function is_admin_user($conn, $empId, $required_permission = null) {
+    if (!$empId) return false;
+    $stmt = $conn->prepare("SELECT e.is_admin, e.is_superadmin, p.is_admin AS position_is_admin, p.permissions 
+                            FROM employees e 
+                            LEFT JOIN positions p ON e.position_id = p.id 
+                            WHERE e.id = ? AND e.is_active = 1");
+    $stmt->bind_param('s', $empId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    if (!$row) return false;
+
+    $is_global_admin = (int)($row['is_superadmin'] ?? 0);
+    if ($is_global_admin) return true;
+
+    if ($required_permission) {
+        $permissions = $row['permissions'] ? json_decode($row['permissions'], true) : [];
+        return is_array($permissions) && in_array($required_permission, $permissions);
+    } else {
+        $is_admin = ((int)($row['is_admin'] ?? 0)) | ((int)($row['position_is_admin'] ?? 0));
+        return (bool)$is_admin;
+    }
 }

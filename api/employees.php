@@ -128,7 +128,7 @@ if ($method === 'GET') {
 
 // ======================== POST (Create) ========================
 if ($method === 'POST') {
-    require_admin($conn);
+    require_admin($conn, '/admin/employees');
     $body = get_json_body();
     $id = $conn->real_escape_string($body['id'] ?? '');
     $name = $conn->real_escape_string($body['name'] ?? '');
@@ -193,11 +193,13 @@ if ($method === 'PUT' && isset($_GET['id'])) {
     $empId = get_employee_id();
     if (!$empId) json_response(['error' => 'Unauthorized: missing employee ID'], 403);
     
-    $stmtAdmin = $conn->prepare("SELECT is_admin, is_superadmin FROM employees WHERE id = ? AND is_active = 1");
+    $is_admin = is_admin_user($conn, $empId, '/admin/employees');
+    
+    // We still need to know if caller is superadmin to allow setting 'is_admin' field
+    $stmtAdmin = $conn->prepare("SELECT is_superadmin FROM employees WHERE id = ?");
     $stmtAdmin->bind_param('s', $empId);
     $stmtAdmin->execute();
     $adminRow = $stmtAdmin->get_result()->fetch_assoc();
-    $is_admin = $adminRow && $adminRow['is_admin'];
     $is_caller_superadmin = $adminRow && $adminRow['is_superadmin'];
 
     // Require admin if not updating self
@@ -308,7 +310,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
 
 // ======================== DELETE ========================
 if ($method === 'DELETE' && isset($_GET['id'])) {
-    require_admin($conn);
+    require_admin($conn, '/admin/employees');
     $id = $_GET['id'];
     $stmt = $conn->prepare("DELETE FROM employees WHERE id = ? AND company_id = ?");
     $stmt->bind_param('si', $id, $company_id);

@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Face Recognition API
  * POST   /api/face.php                  - Register face descriptor

@@ -13,6 +13,7 @@ export default defineConfig(({ mode }) => {
         '/hr-mobile-connect/api': {
           target: 'http://localhost:80',
           changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/hr-mobile-connect\/api/, '/HR/api'),
         },
       },
     },

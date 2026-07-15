@@ -39,6 +39,7 @@ const AdminContentScreen: React.FC = () => {
     const navigate = useNavigate();
     const { toast, confirm: showConfirm } = useToast();
     const { user, isSuperAdmin } = useAuth();
+    const hasFullAccess = isSuperAdmin || (user?.permissions && user.permissions.includes('/admin/cms'));
     const { data: rawNews, loading, refetch } = useApi(() => getNews(undefined, true), []);
     const { data: departments } = useApi(() => getDepartments(), []);
     const { data: companies } = useApi(() => getCompanies(), []);
@@ -302,7 +303,7 @@ const AdminContentScreen: React.FC = () => {
                 <div className="flex gap-0 max-w-5xl mx-auto min-w-max">
                     {([
                         { key: 'all' as Tab, label: 'ข่าวสารทั้งหมด', icon: 'article', count: contentPosts.length },
-                        ...(companies || []).map((c: any) => ({
+                        ...(hasFullAccess ? (companies || []) : []).map((c: any) => ({
                             key: c.id as Tab,
                             label: c.name,
                             icon: 'business',
@@ -505,7 +506,7 @@ const AdminContentScreen: React.FC = () => {
                             </div>
 
                             {/* Target Company */}
-                            {isSuperAdmin && (
+                            {hasFullAccess && (
                                 <div>
                                     <label className={labelCls}>กลุ่มเป้าหมาย (บริษัท)</label>
                                     <div className="flex flex-col gap-2 mt-1">

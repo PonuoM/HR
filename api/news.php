@@ -15,6 +15,22 @@ require_once __DIR__ . '/config.php';
 
 $company_id = get_company_id();
 
+function get_full_access($conn, $empId) {
+    $is_superadmin = false;
+    $is_admin = false;
+    $has_cms = false;
+    if ($empId) {
+        $res = $conn->query("SELECT e.is_admin, e.is_superadmin, p.permissions FROM employees e LEFT JOIN positions p ON e.position_id = p.id WHERE e.id = '" . $conn->real_escape_string($empId) . "'");
+        if ($res && $row = $res->fetch_assoc()) {
+            $is_superadmin = (bool)$row['is_superadmin'];
+            $is_admin = (bool)$row['is_admin'];
+            $perms = $row['permissions'] ? json_decode($row['permissions'], true) : [];
+            $has_cms = is_array($perms) && in_array('/admin/cms', $perms);
+        }
+    }
+    return ['superadmin' => $is_superadmin, 'admin' => $is_admin, 'cms' => $has_cms];
+}
+
 // Auto-create supporting tables if they don't exist
 $conn->query("CREATE TABLE IF NOT EXISTS `news_likes` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -113,17 +129,12 @@ if ($action === 'latest_id' && $method === 'GET') {
     $employeeId = $_GET['employee_id'] ?? null;
     $adminView = isset($_GET['admin_view']) && $_GET['admin_view'] === '1';
 
-    $is_superadmin = false;
     $headers = getallheaders();
     $requesting_emp = $headers['X-Employee-Id'] ?? $headers['x-employee-id'] ?? null;
-    if ($requesting_emp) {
-        $res2 = $conn->query("SELECT is_superadmin FROM employees WHERE id = '" . $conn->real_escape_string($requesting_emp) . "'");
-        if ($res2 && $row2 = $res2->fetch_assoc()) {
-            $is_superadmin = (bool)$row2['is_superadmin'];
-        }
-    }
+    $access = get_full_access($conn, $requesting_emp);
+    $full_access = $access['superadmin'] || $access['cms'];
 
-    if ($adminView && $is_superadmin) {
+    if ($adminView && $full_access) {
         $compFilter = "1=1";
     } else {
         $compFilter = "(a.target_companies IS NULL OR a.target_companies = 'all' OR JSON_CONTAINS(a.target_companies, '" . $company_id . "', '$'))";
@@ -246,17 +257,12 @@ if ($method === 'GET' && !$action) {
     $employeeId = $_GET['employee_id'] ?? null;
     $adminView = isset($_GET['admin_view']) && $_GET['admin_view'] === '1';
 
-    $is_superadmin = false;
     $headers = getallheaders();
     $requesting_emp = $headers['X-Employee-Id'] ?? $headers['x-employee-id'] ?? null;
-    if ($requesting_emp) {
-        $res2 = $conn->query("SELECT is_superadmin FROM employees WHERE id = '" . $conn->real_escape_string($requesting_emp) . "'");
-        if ($res2 && $row2 = $res2->fetch_assoc()) {
-            $is_superadmin = (bool)$row2['is_superadmin'];
-        }
-    }
+    $access = get_full_access($conn, $requesting_emp);
+    $full_access = $access['superadmin'] || $access['cms'];
 
-    if ($adminView && $is_superadmin) {
+    if ($adminView && $full_access) {
         $compFilter = "1=1";
     } else {
         $compFilter = "(a.target_companies IS NULL OR a.target_companies = 'all' OR JSON_CONTAINS(a.target_companies, '" . $company_id . "', '$'))";
@@ -302,10 +308,20 @@ if ($method === 'GET' && !$action) {
 
 // ---- CREATE ----
 if ($method === 'POST' && !$action) {
-    require_admin($conn);
+    $empId = get_employee_id();
+    $access = get_full_access($conn, $empId);
+    if (!$access['superadmin'] && !$access['admin'] && !$access['cms']) {
+        json_response(['error' => 'Forbidden'], 403);
+    }
+    $full_access = $access['superadmin'] || $access['cms'];
     $body = get_json_body();
     
-    $target_companies = isset($body['target_companies']) && $body['target_companies'] !== 'all' ? json_encode($body['target_companies']) : 'all';
+    if ($full_access) {
+        $target_companies = isset($body['target_companies']) && $body['target_companies'] !== 'all' ? json_encode($body['target_companies']) : 'all';
+    } else {
+        $target_companies = json_encode([$company_id]);
+    }
+    
     $target_departments = isset($body['target_departments']) && $body['target_departments'] !== 'all' ? json_encode($body['target_departments']) : 'all';
     
     $stmt = $conn->prepare("INSERT INTO news_articles (company_id, title, content, image, department, department_code, category, is_pinned, is_urgent, target_companies, target_departments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
@@ -322,21 +338,25 @@ if ($method === 'POST' && !$action) {
 
 // ---- UPDATE ----
 if ($method === 'PUT' && !$action) {
-    $empId = require_admin($conn);
-    
-    $is_superadmin = false;
-    $res = $conn->query("SELECT is_superadmin FROM employees WHERE id = '" . $conn->real_escape_string($empId) . "'");
-    if ($res && $row = $res->fetch_assoc()) {
-        $is_superadmin = (bool)$row['is_superadmin'];
+    $empId = get_employee_id();
+    $access = get_full_access($conn, $empId);
+    if (!$access['superadmin'] && !$access['admin'] && !$access['cms']) {
+        json_response(['error' => 'Forbidden'], 403);
     }
+    $full_access = $access['superadmin'] || $access['cms'];
 
     $id = (int)$_GET['id'];
     $body = get_json_body();
     
-    $target_companies = isset($body['target_companies']) && $body['target_companies'] !== 'all' ? json_encode($body['target_companies']) : 'all';
+    if ($full_access) {
+        $target_companies = isset($body['target_companies']) && $body['target_companies'] !== 'all' ? json_encode($body['target_companies']) : 'all';
+    } else {
+        $target_companies = json_encode([$company_id]);
+    }
+    
     $target_departments = isset($body['target_departments']) && $body['target_departments'] !== 'all' ? json_encode($body['target_departments']) : 'all';
     
-    if ($is_superadmin) {
+    if ($full_access) {
         $stmt = $conn->prepare("UPDATE news_articles SET title=?, content=?, image=?, department=?, department_code=?, category=?, is_pinned=?, is_urgent=?, target_companies=?, target_departments=? WHERE id=?");
         $stmt->bind_param('ssssssisssi',
             $body['title'], $body['content'], $body['image'],
@@ -361,17 +381,16 @@ if ($method === 'PUT' && !$action) {
 
 // ---- DELETE ----
 if ($method === 'DELETE' && isset($_GET['id']) && !$action) {
-    $empId = require_admin($conn);
-    
-    $is_superadmin = false;
-    $res = $conn->query("SELECT is_superadmin FROM employees WHERE id = '" . $conn->real_escape_string($empId) . "'");
-    if ($res && $row = $res->fetch_assoc()) {
-        $is_superadmin = (bool)$row['is_superadmin'];
+    $empId = get_employee_id();
+    $access = get_full_access($conn, $empId);
+    if (!$access['superadmin'] && !$access['admin'] && !$access['cms']) {
+        json_response(['error' => 'Forbidden'], 403);
     }
+    $full_access = $access['superadmin'] || $access['cms'];
 
     $id = (int)$_GET['id'];
     
-    if ($is_superadmin) {
+    if ($full_access) {
         $stmt = $conn->prepare("DELETE FROM news_articles WHERE id = ?");
         $stmt->bind_param('i', $id);
     } else {
