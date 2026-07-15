@@ -24,6 +24,7 @@ export const SIDEBAR_NAV_ITEMS: NavItem[] = [
 export const SIDEBAR_ADMIN_ITEMS: NavItem[] = [
     { path: '/admin/dashboard', icon: 'admin_panel_settings', label: 'ภาพรวมระบบ' },
     { path: '/admin/companies', icon: 'domain', label: 'จัดการบริษัท' },
+    { path: 'switch_company', icon: 'swap_horiz', label: 'สลับบริษัท', hideFromSidebar: true },
     { path: '/admin/employees', icon: 'people', label: 'จัดการพนักงาน' },
     { path: '/admin/leave-list', icon: 'event_note', label: 'รายการใบลาทั้งหมด' },
     { path: '/admin/quotas', icon: 'timelapse', label: 'ตั้งค่าโควต้า' },
@@ -53,6 +54,7 @@ export const PROFILE_MENU_ITEMS: ProfileMenuItem[] = [
 export const PROFILE_ADMIN_ITEMS: ProfileMenuItem[] = [
     { icon: 'dashboard', label: 'Admin Dashboard', path: '/admin/dashboard', color: 'bg-blue-100 text-blue-600' },
     { icon: 'domain', label: 'จัดการบริษัท', path: '/admin/companies', color: 'bg-amber-100 text-amber-600', superadminOnly: true },
+    { icon: 'swap_horiz', label: 'สลับบริษัท', path: '/admin/companies', color: 'bg-amber-100 text-amber-600', permission: 'switch_company' },
     { icon: 'people', label: 'จัดการพนักงาน', path: '/admin/employees', color: 'bg-purple-100 text-purple-600' },
     { icon: 'event_note', label: 'รายการใบลาทั้งหมด', path: '/admin/leave-list', color: 'bg-sky-100 text-sky-600' },
     { icon: 'timelapse', label: 'ตั้งค่าโควต้า', path: '/admin/quotas', color: 'bg-pink-100 text-pink-600' },

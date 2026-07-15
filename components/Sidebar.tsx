@@ -101,7 +101,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
                             )}
                         </div>
                         {/* Company Context Badge */}
-                        {isSuperAdmin && !isCollapsed && company && (
+                        {(isSuperAdmin || (authUser?.permissions && authUser.permissions.includes('switch_company'))) && !isCollapsed && company && (
                             <button
                                 onClick={() => navigate('/admin/companies')}
                                 className="mx-2 mb-2 flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors text-left"
@@ -111,7 +111,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
                                 <span className="material-icons-round text-amber-400 text-sm">swap_horiz</span>
                             </button>
                         )}
-                        {isSuperAdmin && isCollapsed && (
+                        {(isSuperAdmin || (authUser?.permissions && authUser.permissions.includes('switch_company'))) && isCollapsed && (
                             <button
                                 onClick={() => navigate('/admin/companies')}
                                 className="mx-auto mb-1 w-9 h-9 flex items-center justify-center rounded-xl bg-amber-50 dark:bg-amber-900/20 text-amber-600 hover:bg-amber-100 transition-colors"
@@ -121,7 +121,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle }) => {
                             </button>
                         )}
                         <ul className="space-y-1">
-                            {SIDEBAR_ADMIN_ITEMS.filter(item => isSuperAdmin || (authUser?.permissions && authUser.permissions.includes(item.path))).map((item) => {
+                            {SIDEBAR_ADMIN_ITEMS.filter(item => !item.hideFromSidebar && (isSuperAdmin || (authUser?.permissions && authUser.permissions.includes(item.path)))).map((item) => {
                                 const isActive = location.pathname === item.path;
                                 return (
                                     <li key={item.path}>

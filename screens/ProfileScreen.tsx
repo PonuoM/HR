@@ -135,7 +135,12 @@ const ProfileScreen: React.FC = () => {
                             ผู้ดูแลระบบ (Admin)
                         </h3>
                         <div className="bg-white dark:bg-gray-800 rounded-2xl p-2 shadow-sm border border-gray-100 dark:border-gray-700">
-                            {PROFILE_ADMIN_ITEMS.filter(item => (!item.superadminOnly || authUser?.is_superadmin) && (authUser?.is_superadmin || authUser?.is_admin === 1 || (authUser?.permissions && authUser.permissions.includes(item.path)))).map((item, index) => (
+                            {PROFILE_ADMIN_ITEMS.filter(item => {
+                                if (authUser?.is_superadmin) return true;
+                                if (item.superadminOnly) return false;
+                                if (item.permission) return authUser?.permissions?.includes(item.permission);
+                                return authUser?.is_admin === 1 || authUser?.permissions?.includes(item.path);
+                            }).map((item, index) => (
                                 <button
                                     key={index}
                                     onClick={() => navigate(item.path)}

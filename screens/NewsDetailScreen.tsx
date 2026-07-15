@@ -118,7 +118,7 @@ const NewsDetailScreen: React.FC = () => {
                                             src={u}
                                             alt={`รูปภาพ ${i + 1}`}
                                             onClick={() => setLightbox({ urls, index: i })}
-                                            className="w-full max-w-2xl max-h-[600px] h-auto rounded-xl object-contain shadow-sm cursor-pointer hover:opacity-95 transition-opacity"
+                                            className="w-full max-w-2xl h-auto rounded-xl object-contain shadow-sm cursor-pointer hover:opacity-95 transition-opacity"
                                             loading="lazy"
                                         />
                                     </div>

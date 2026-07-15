@@ -17,7 +17,9 @@ interface Company {
 
 const AdminCompanyScreen: React.FC = () => {
     const navigate = useNavigate();
-    const { isSuperAdmin, company: activeCompany, setActiveCompany } = useAuth();
+    const { isSuperAdmin, user, company: activeCompany, setActiveCompany } = useAuth();
+    const canManage = isSuperAdmin;
+    const canSwitch = isSuperAdmin || (user?.permissions && user.permissions.includes('switch_company'));
     const { toast, confirm: showConfirm } = useToast();
     const { data: companies, loading, refetch } = useApi(() => getCompanies(), []);
 
@@ -26,8 +28,8 @@ const AdminCompanyScreen: React.FC = () => {
     const [form, setForm] = useState({ code: '', name: '', logo_url: '' });
     const [saving, setSaving] = useState(false);
 
-    // Only superadmin can access
-    if (!isSuperAdmin) {
+    // Check access
+    if (!canSwitch && !canManage) {
         return (
             <div className="pt-6 md:pt-8 pb-24 md:pb-8 px-4 md:px-8 max-w-5xl mx-auto min-h-full font-display flex items-center justify-center">
                 <div className="text-center">
@@ -110,18 +112,20 @@ const AdminCompanyScreen: React.FC = () => {
                 </button>
                 <div className="flex items-center justify-between">
                     <div>
-                        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">จัดการบริษัท</h1>
+                        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{canManage ? 'จัดการบริษัท' : 'สลับบริษัท'}</h1>
                         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                             กำลังดูข้อมูลบริษัท: <span className="font-semibold text-primary">{activeCompany?.name || '-'}</span>
                         </p>
                     </div>
-                    <button
-                        onClick={openCreate}
-                        className="bg-primary hover:bg-blue-600 text-white px-4 py-2.5 rounded-xl font-semibold text-sm flex items-center gap-2 shadow-lg shadow-primary/20 transition-all active:scale-[0.97]"
-                    >
-                        <span className="material-icons-round text-lg">add_business</span>
-                        สร้างบริษัท
-                    </button>
+                    {canManage && (
+                        <button
+                            onClick={openCreate}
+                            className="bg-primary hover:bg-blue-600 text-white px-4 py-2.5 rounded-xl font-semibold text-sm flex items-center gap-2 shadow-lg shadow-primary/20 transition-all active:scale-[0.97]"
+                        >
+                            <span className="material-icons-round text-lg">add_business</span>
+                            สร้างบริษัท
+                        </button>
+                    )}
                 </div>
             </header>
 
@@ -196,24 +200,28 @@ const AdminCompanyScreen: React.FC = () => {
                                         เปลี่ยนเป็นบริษัทนี้
                                     </button>
                                 )}
-                                <button
-                                    onClick={() => openEdit(c)}
-                                    className="p-2 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 text-gray-400 hover:text-primary transition-colors"
-                                    title="แก้ไข"
-                                >
-                                    <span className="material-icons-round text-base">edit</span>
-                                </button>
-                                {c.id !== 1 && (
-                                    <button
-                                        onClick={() => handleToggleActive(c)}
-                                        className={`p-2 rounded-lg transition-colors ${c.is_active
-                                            ? 'hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-400 hover:text-red-500'
-                                            : 'hover:bg-green-50 dark:hover:bg-green-900/20 text-gray-400 hover:text-green-500'
-                                            }`}
-                                        title={c.is_active ? 'ปิดการใช้งาน' : 'เปิดการใช้งาน'}
-                                    >
-                                        <span className="material-icons-round text-base">{c.is_active ? 'block' : 'check_circle'}</span>
-                                    </button>
+                                {canManage && (
+                                    <>
+                                        <button
+                                            onClick={() => openEdit(c)}
+                                            className="p-2 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 text-gray-400 hover:text-primary transition-colors"
+                                            title="แก้ไข"
+                                        >
+                                            <span className="material-icons-round text-base">edit</span>
+                                        </button>
+                                        {c.id !== 1 && (
+                                            <button
+                                                onClick={() => handleToggleActive(c)}
+                                                className={`p-2 rounded-lg transition-colors ${c.is_active
+                                                    ? 'hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-400 hover:text-red-500'
+                                                    : 'hover:bg-green-50 dark:hover:bg-green-900/20 text-gray-400 hover:text-green-500'
+                                                    }`}
+                                                title={c.is_active ? 'ปิดการใช้งาน' : 'เปิดการใช้งาน'}
+                                            >
+                                                <span className="material-icons-round text-base">{c.is_active ? 'block' : 'check_circle'}</span>
+                                            </button>
+                                        )}
+                                    </>
                                 )}
                             </div>
                         </div>

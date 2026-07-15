@@ -339,7 +339,7 @@ const PostCard: React.FC<{
                       <>
                         <img
                           alt={`${article.title} - ${i+1}`}
-                          className={`w-full object-cover cursor-zoom-in group-hover:opacity-95 transition-opacity ${displayUrls.length > 1 ? 'aspect-square h-full' : 'max-h-[500px]'}`}
+                          className={`w-full object-cover cursor-zoom-in group-hover:opacity-95 transition-opacity ${displayUrls.length > 1 ? 'aspect-square h-full' : 'h-auto max-h-none'}`}
                           src={u}
                           loading="lazy"
                           onClick={() => {

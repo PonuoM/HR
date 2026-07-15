@@ -76,6 +76,7 @@ export interface NavItem {
   icon: string;
   label: string;
   hasNotif?: boolean;
+  hideFromSidebar?: boolean;
 }
 
 export interface QuickMenuItem {
@@ -143,6 +144,7 @@ export interface ProfileMenuItem {
   color: string;
   path: string;
   superadminOnly?: boolean;
+  permission?: string;
 }
 
 export interface FAQItem {
