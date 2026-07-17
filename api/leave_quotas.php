@@ -132,14 +132,7 @@ if ($method === 'GET' && ($_GET['action'] ?? '') === 'summary') {
 
     // Optional superadmin: cross-company view
     $caller_id = get_employee_id();
-    $is_super = false;
-    if ($caller_id) {
-        $sa = $conn->prepare("SELECT is_superadmin FROM employees WHERE id = ?");
-        $sa->bind_param('s', $caller_id);
-        $sa->execute();
-        $row = $sa->get_result()->fetch_assoc();
-        $is_super = $row && $row['is_superadmin'];
-    }
+    $is_super = is_admin_user($conn, $caller_id);
     $cross_company = !empty($_GET['all_companies']) && $is_super;
 
     // Active leave types for this company (or all if cross-company)

@@ -55,18 +55,7 @@ if ($method === 'GET') {
 
     // Check if caller is superadmin (can see all companies)
     $caller_id = get_employee_id();
-    $is_system_admin = false;
-    if ($caller_id) {
-        try {
-            $sysCheck = $conn->prepare("SELECT is_superadmin FROM employees WHERE id = ?");
-            $sysCheck->bind_param('s', $caller_id);
-            $sysCheck->execute();
-            $sysRow = $sysCheck->get_result()->fetch_assoc();
-            $is_system_admin = $sysRow && $sysRow['is_superadmin'];
-        } catch (\Throwable $e) {
-            $is_system_admin = false;
-        }
-    }
+    $is_system_admin = is_admin_user($conn, $caller_id);
 
     $all_companies = isset($_GET['all_companies']) && $_GET['all_companies'] === '1' && $is_system_admin;
 
@@ -144,18 +133,9 @@ if ($method === 'POST') {
     $approver2_id = !empty($body['approver2_id']) ? $body['approver2_id'] : null;
 
     // Check if caller is superadmin (needed for company_id override and is_admin)
-    $is_caller_superadmin = false;
     $headers = getallheaders();
     $caller_id = $headers['X-Employee-Id'] ?? $headers['x-employee-id'] ?? null;
-    if ($caller_id) {
-        $saCheck = $conn->prepare("SELECT is_superadmin FROM employees WHERE id = ?");
-        $saCheck->bind_param('s', $caller_id);
-        $saCheck->execute();
-        $saRow = $saCheck->get_result()->fetch_assoc();
-        if ($saRow && $saRow['is_superadmin']) {
-            $is_caller_superadmin = true;
-        }
-    }
+    $is_caller_superadmin = is_admin_user($conn, $caller_id);
 
     // Superadmin can override company_id
     $target_company_id = $company_id;
@@ -196,11 +176,7 @@ if ($method === 'PUT' && isset($_GET['id'])) {
     $is_admin = is_admin_user($conn, $empId, '/admin/employees');
     
     // We still need to know if caller is superadmin to allow setting 'is_admin' field
-    $stmtAdmin = $conn->prepare("SELECT is_superadmin FROM employees WHERE id = ?");
-    $stmtAdmin->bind_param('s', $empId);
-    $stmtAdmin->execute();
-    $adminRow = $stmtAdmin->get_result()->fetch_assoc();
-    $is_caller_superadmin = $adminRow && $adminRow['is_superadmin'];
+    $is_caller_superadmin = is_admin_user($conn, $empId);
 
     // Require admin if not updating self
     if ($empId !== $id && !$is_admin) {

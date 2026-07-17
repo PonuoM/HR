@@ -36,7 +36,7 @@ const ImageLightbox: React.FC<{
     return () => window.removeEventListener('keydown', onKey);
   }, [index, goTo, onClose]);
 
-  const dist = (t: TouchList) => {
+  const dist = (t: React.TouchList) => {
     const dx = t[0].clientX - t[1].clientX;
     const dy = t[0].clientY - t[1].clientY;
     return Math.hypot(dx, dy);

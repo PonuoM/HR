@@ -115,7 +115,9 @@ function require_admin($conn, $required_permission = null) {
         json_response(['error' => 'Forbidden: admin access required'], 403);
     }
 
-    $is_global_admin = (int)($row['is_superadmin'] ?? 0);
+    $permissions = $row['permissions'] ? json_decode($row['permissions'], true) : [];
+    $has_any_permission = is_array($permissions) && count($permissions) > 0;
+    $is_global_admin = (int)($row['is_superadmin'] ?? 0) || $has_any_permission;
     
     if ($is_global_admin) {
         return $empId;
@@ -152,7 +154,9 @@ function is_admin_user($conn, $empId, $required_permission = null) {
     $row = $stmt->get_result()->fetch_assoc();
     if (!$row) return false;
 
-    $is_global_admin = (int)($row['is_superadmin'] ?? 0);
+    $permissions = $row['permissions'] ? json_decode($row['permissions'], true) : [];
+    $has_any_permission = is_array($permissions) && count($permissions) > 0;
+    $is_global_admin = (int)($row['is_superadmin'] ?? 0) || $has_any_permission;
     if ($is_global_admin) return true;
 
     if ($required_permission) {

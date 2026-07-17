@@ -117,11 +117,7 @@ if ($method === 'DELETE' && isset($_GET['id'])) {
     // Only admin can delete uploads
     $caller_id = get_employee_id();
     if ($caller_id) {
-        $adminCheck = $conn->prepare("SELECT is_admin, is_superadmin FROM employees WHERE id = ?");
-        $adminCheck->bind_param('s', $caller_id);
-        $adminCheck->execute();
-        $adminRow = $adminCheck->get_result()->fetch_assoc();
-        if (!$adminRow || (!$adminRow['is_admin'] && !$adminRow['is_superadmin'])) {
+        if (!is_admin_user($conn, $caller_id)) {
             json_response(['error' => 'ไม่มีสิทธิ์ลบไฟล์'], 403);
         }
     } else {

@@ -80,14 +80,7 @@ if ($method === 'GET' && isset($_GET['action']) && $_GET['action'] === 'types') 
 if ($method === 'GET') {
     // Check if caller is superadmin (cross-company access)
     $employee_id_header = get_employee_id();
-    $is_superadmin = false;
-    if ($employee_id_header) {
-        $saCheck = $conn->prepare("SELECT is_superadmin FROM employees WHERE id = ?");
-        $saCheck->bind_param('s', $employee_id_header);
-        $saCheck->execute();
-        $saRow = $saCheck->get_result()->fetch_assoc();
-        $is_superadmin = $saRow && $saRow['is_superadmin'];
-    }
+    $is_superadmin = is_admin_user($conn, $employee_id_header);
 
     $where = [];
     $params = [];
@@ -275,9 +268,9 @@ if ($method === 'PUT' && isset($_GET['id'])) {
     }
 
     // Get actor name
-    $actorRow = $conn->query("SELECT CONCAT(name, IF(IFNULL(nickname, '') != '', CONCAT(' (', nickname, ')'), '')) AS name, is_admin FROM employees WHERE id = '$actorId'")->fetch_assoc();
+    $actorRow = $conn->query("SELECT CONCAT(name, IF(IFNULL(nickname, '') != '', CONCAT(' (', nickname, ')'), '')) AS name FROM employees WHERE id = '$actorId'")->fetch_assoc();
     $actorName = $actorRow['name'] ?? $actorId;
-    $isHR = (int)($actorRow['is_admin'] ?? 0) === 1;
+    $isHR = is_admin_user($conn, $actorId);
 
     $tier1Approver = $req['expected_approver1_id'];
     $tier2Approver = $req['expected_approver2_id'];

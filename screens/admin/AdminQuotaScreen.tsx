@@ -360,7 +360,7 @@ const AdminQuotaScreen: React.FC = () => {
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">จำนวนมาตรฐาน (ต่อปี)</label>
-                                    <input type="number" value={formData.defaultQuota ?? ''} onChange={(e) => setFormData({ ...formData, defaultQuota: e.target.value === '' ? '' : Number(e.target.value) })} className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 outline-none dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                                    <input type="number" value={formData.defaultQuota ?? ''} onChange={(e) => setFormData({ ...formData, defaultQuota: e.target.value === '' ? ('' as any) : Number(e.target.value) })} className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 outline-none dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">หน่วยนับ</label>
@@ -432,7 +432,7 @@ const AdminQuotaScreen: React.FC = () => {
                                         <div className="grid grid-cols-2 gap-3">
                                             <div>
                                                 <label className="block text-xs font-medium text-orange-700 dark:text-orange-400 mb-1">ทดลองงาน (เดือน)</label>
-                                                <input type="number" min={0} value={formData.probationMonths ?? ''} onChange={(e) => setFormData({ ...formData, probationMonths: e.target.value === '' ? '' : Number(e.target.value) })} className="w-full bg-white dark:bg-gray-800 border border-orange-200 dark:border-orange-800 rounded-lg px-3 py-2 text-sm outline-none dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" placeholder="0 = ไม่มี" />
+                                                <input type="number" min={0} value={formData.probationMonths ?? ''} onChange={(e) => setFormData({ ...formData, probationMonths: e.target.value === '' ? ('' as any) : Number(e.target.value) })} className="w-full bg-white dark:bg-gray-800 border border-orange-200 dark:border-orange-800 rounded-lg px-3 py-2 text-sm outline-none dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" placeholder="0 = ไม่มี" />
                                             </div>
                                             <div>
                                                 <label className="block text-xs font-medium text-orange-700 dark:text-orange-400 mb-1">ได้สิทธิ์เมื่อ</label>
@@ -468,7 +468,7 @@ const AdminQuotaScreen: React.FC = () => {
                             {/* Advance Notice */}
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">ต้องลาล่วงหน้า (วัน)</label>
-                                <input type="number" min={0} value={formData.advanceNoticeDays ?? ''} onChange={(e) => setFormData({ ...formData, advanceNoticeDays: e.target.value === '' ? '' : Number(e.target.value) })} placeholder="0 = ไม่ต้อง" className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 outline-none dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                                <input type="number" min={0} value={formData.advanceNoticeDays ?? ''} onChange={(e) => setFormData({ ...formData, advanceNoticeDays: e.target.value === '' ? ('' as any) : Number(e.target.value) })} placeholder="0 = ไม่ต้อง" className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 outline-none dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
                                 <p className="text-[10px] text-gray-400 mt-1">0 = ไม่ต้องลาล่วงหน้า</p>
                             </div>
 

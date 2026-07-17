@@ -10,12 +10,12 @@ interface AuthUser {
     department: string | null;
     position: string | null;
     employment_type: string | null;
-    is_admin: number;
+    is_admin: number | string;
     is_active: number;
     company_id: number;
-    is_superadmin: number;
+    is_superadmin: number | string;
     face_registered_at: string | null;
-    permissions: string[] | null;
+    permissions: string[] | string | null;
 }
 
 interface Company {
@@ -192,8 +192,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             user,
             company,
             isAuthenticated: !!user,
-            isAdmin: !!user && (user.is_admin === 1 || (Array.isArray(user.permissions) && user.permissions.length > 0)),
-            isSuperAdmin: !!user && (user.is_superadmin === 1 || user.is_superadmin === (1 as any)),
+            isAdmin: !!user && (
+                user.is_admin === 1 || 
+                user.is_admin === '1' || 
+                (typeof user.permissions === 'string' ? user.permissions !== '[]' && user.permissions.length > 2 : Array.isArray(user.permissions) && user.permissions.length > 0)
+            ),
+            isSuperAdmin: !!user && (
+                user.is_superadmin === 1 ||
+                user.is_superadmin === '1'
+            ),
             loading,
             login,
             logout,

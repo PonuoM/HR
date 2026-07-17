@@ -1541,7 +1541,7 @@ const HomeScreen: React.FC = () => {
                 showLocationModal && locationResult && (
                     <LocationCheckModal
                         result={locationResult}
-                        action={pendingAction}
+                        action={pendingAction === 'clock_out_only' ? 'clock_out' : pendingAction}
                         loading={confirmLoading}
                         onConfirm={handleConfirmClock}
                         onClose={() => setShowLocationModal(false)}

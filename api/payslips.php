@@ -17,11 +17,7 @@ if ($method === 'GET') {
     // Non-admin users can only see their own payslips
     if ($employee_id && $caller_id && $employee_id !== $caller_id) {
         // Check if caller is admin
-        $adminCheck = $conn->prepare("SELECT is_admin, is_superadmin FROM employees WHERE id = ?");
-        $adminCheck->bind_param('s', $caller_id);
-        $adminCheck->execute();
-        $adminRow = $adminCheck->get_result()->fetch_assoc();
-        if (!$adminRow || (!$adminRow['is_admin'] && !$adminRow['is_superadmin'])) {
+        if (!is_admin_user($conn, $caller_id)) {
             json_response(['error' => 'ไม่มีสิทธิ์ดูข้อมูลเงินเดือนของผู้อื่น'], 403);
         }
     }

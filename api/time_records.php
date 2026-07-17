@@ -118,14 +118,7 @@ $company_id = get_company_id();
 if ($method === 'GET') {
     // Check if caller is superadmin (cross-company access)
     $employee_id_header = get_employee_id();
-    $is_superadmin = false;
-    if ($employee_id_header) {
-        $saCheck = $conn->prepare("SELECT is_superadmin FROM employees WHERE id = ?");
-        $saCheck->bind_param('s', $employee_id_header);
-        $saCheck->execute();
-        $saRow = $saCheck->get_result()->fetch_assoc();
-        $is_superadmin = $saRow && $saRow['is_superadmin'];
-    }
+    $is_superadmin = is_admin_user($conn, $employee_id_header);
 
     $where = [];
     $params = [];
@@ -308,11 +301,11 @@ if ($method === 'PUT' && isset($_GET['id'])) {
     }
 
     // Check if actor is HR/admin
-    $actorStmt = $conn->prepare("SELECT is_admin, name FROM employees WHERE id = ?");
+    $actorStmt = $conn->prepare("SELECT name FROM employees WHERE id = ?");
     $actorStmt->bind_param('s', $actorId);
     $actorStmt->execute();
     $actor = $actorStmt->get_result()->fetch_assoc();
-    $isHR = $actor && $actor['is_admin'];
+    $isHR = is_admin_user($conn, $actorId);
     $isSelfRequest = ($actorId === $req['employee_id']); // Prevent self-approval
     $actorName = $actor['name'] ?? $actorId;
 

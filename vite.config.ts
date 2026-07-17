@@ -11,7 +11,7 @@ export default defineConfig(({ mode }) => {
       host: '0.0.0.0',
       proxy: {
         '/hr-mobile-connect/api': {
-          target: 'http://localhost:80',
+          target: 'http://127.0.0.1:80',
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/hr-mobile-connect\/api/, '/HR/api'),
         },

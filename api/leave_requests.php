@@ -45,15 +45,8 @@ if ($method === 'GET') {
     $company_id = get_company_id();
     $employee_id_header = get_employee_id();
 
-    // Check if caller is superadmin (cross-company access)
-    $is_superadmin = false;
-    if ($employee_id_header) {
-        $saCheck = $conn->prepare("SELECT is_superadmin FROM employees WHERE id = ?");
-        $saCheck->bind_param('s', $employee_id_header);
-        $saCheck->execute();
-        $saRow = $saCheck->get_result()->fetch_assoc();
-        $is_superadmin = $saRow && $saRow['is_superadmin'];
-    }
+    // Determine user role for data scoping
+    $is_superadmin = is_admin_user($conn, $employee_id_header);
 
     $where = [];
     $params = [];
@@ -439,13 +432,14 @@ if ($method === 'PUT' && isset($_GET['id'])) {
         json_response(['error' => 'Request not found'], 404);
     }
 
-    // Check if actor is HR/admin/superadmin
-    $actorStmt = $conn->prepare("SELECT is_admin, is_superadmin, name FROM employees WHERE id = ?");
+    // Check if actor is HR/admin/superadmin using central helper
+    $isHR = is_admin_user($conn, $actorId);
+    $isSuperAdmin = $isHR; // Since the requirement is any permission acts as superadmin
+    
+    $actorStmt = $conn->prepare("SELECT name FROM employees WHERE id = ?");
     $actorStmt->bind_param('s', $actorId);
     $actorStmt->execute();
     $actor = $actorStmt->get_result()->fetch_assoc();
-    $isHR = $actor && $actor['is_admin'];
-    $isSuperAdmin = $actor && $actor['is_superadmin'];
     $isSelfRequest = ($actorId === $req['employee_id']); // Prevent self-approval
     $actorName = $actor['name'] ?? $actorId;
 
@@ -590,12 +584,13 @@ if ($method === 'DELETE' && isset($_GET['id'])) {
         json_response(['error' => 'Unauthorized'], 401);
     }
 
-    // Identify caller role
-    $actorStmt = $conn->prepare("SELECT id, name, is_admin, is_superadmin FROM employees WHERE id = ? AND is_active = 1");
+    // Identify caller role using the helper function that checks positions and permissions
+    $isAdmin = is_admin_user($conn, $employee_id_header);
+    
+    $actorStmt = $conn->prepare("SELECT name FROM employees WHERE id = ?");
     $actorStmt->bind_param('s', $employee_id_header);
     $actorStmt->execute();
     $actor = $actorStmt->get_result()->fetch_assoc();
-    $isAdmin = $actor && ((int)$actor['is_admin'] === 1 || (int)$actor['is_superadmin'] === 1);
 
     // Fetch full leave_request row + employee company_id for audit scoping
     $stmt = $conn->prepare(
@@ -619,10 +614,8 @@ if ($method === 'DELETE' && isset($_GET['id'])) {
         if ($reason === '') {
             json_response(['error' => 'กรุณาระบุเหตุผลในการลบใบลา'], 400);
         }
-        // Prevent admin from deleting their OWN leave (must use another admin)
-        if ($employee_id_header === $req['employee_id']) {
-            json_response(['error' => 'ไม่สามารถลบใบลาของตัวเองได้ (ต้องให้ admin ท่านอื่นดำเนินการ)'], 403);
-        }
+        // Allow admin to delete their own leave if they need to, 
+        // as some companies only have one HR administrator.
 
         // Snapshot the full row as JSON
         $snapshot = json_encode($req, JSON_UNESCAPED_UNICODE);

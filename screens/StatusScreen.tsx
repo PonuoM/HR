@@ -69,7 +69,7 @@ function getTierIcon(tierStatus: string): { icon: string; style: string; animate
 const StatusScreen: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const { user: authUser } = useAuth();
+  const { user: authUser, isAdmin, isSuperAdmin } = useAuth();
   const { confirm, toast } = useToast();
   const empId = authUser?.id || '';
   const [request, setRequest] = useState<LeaveRequest | null>(null);
@@ -78,7 +78,6 @@ const StatusScreen: React.FC = () => {
   const [adminDeleteOpen, setAdminDeleteOpen] = useState(false);
   const [adminDeleteReason, setAdminDeleteReason] = useState('');
   const [adminDeleteBusy, setAdminDeleteBusy] = useState(false);
-  const isAdmin = !!authUser && (authUser.is_admin === 1 || authUser.is_superadmin === 1);
 
   useEffect(() => {
     if (!id) return;
@@ -343,7 +342,7 @@ const StatusScreen: React.FC = () => {
       </main>
 
       {/* Bottom action buttons */}
-      {(request.status === 'pending' || (isAdmin && request.employee_id !== empId)) && (
+      {(request.status === 'pending' || isAdmin) && (
         <div className="absolute bottom-0 w-full bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800 p-4 pb-8 backdrop-blur-lg bg-opacity-95 dark:bg-opacity-95 z-30 md:bg-transparent md:border-none md:pointer-events-none">
           <div className="grid grid-cols-1 gap-3 max-w-2xl mx-auto md:pointer-events-auto">
             {/* Owner self-cancel — only for own pending requests */}
@@ -378,7 +377,7 @@ const StatusScreen: React.FC = () => {
             )}
 
             {/* Admin destructive delete — any status, NOT own. Audit-logged with reason. */}
-            {isAdmin && request.employee_id !== empId && (
+            {isAdmin && (request.employee_id !== empId || request.status !== 'pending') && (
               <button
                 type="button"
                 onClick={(e) => {

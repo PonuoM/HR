@@ -17,11 +17,7 @@ function require_superadmin($conn) {
     if (!$caller_id) {
         json_response(['error' => 'Unauthorized'], 401);
     }
-    $stmt = $conn->prepare("SELECT is_superadmin FROM employees WHERE id = ?");
-    $stmt->bind_param('s', $caller_id);
-    $stmt->execute();
-    $row = $stmt->get_result()->fetch_assoc();
-    if (!$row || !$row['is_superadmin']) {
+    if (!is_admin_user($conn, $caller_id)) {
         json_response(['error' => 'ต้องเป็น Superadmin เท่านั้น'], 403);
     }
     return $caller_id;

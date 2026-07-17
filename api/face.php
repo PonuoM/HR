@@ -25,11 +25,7 @@ if ($method === 'POST') {
     // Only self or admin can register face
     $caller_id = get_employee_id();
     if ($caller_id && $caller_id !== $employee_id) {
-        $adminCheck = $conn->prepare("SELECT is_admin, is_superadmin FROM employees WHERE id = ?");
-        $adminCheck->bind_param('s', $caller_id);
-        $adminCheck->execute();
-        $adminRow = $adminCheck->get_result()->fetch_assoc();
-        if (!$adminRow || (!$adminRow['is_admin'] && !$adminRow['is_superadmin'])) {
+        if (!is_admin_user($conn, $caller_id)) {
             json_response(['error' => 'ไม่มีสิทธิ์ลงทะเบียนใบหน้าให้ผู้อื่น'], 403);
         }
     }
@@ -112,11 +108,7 @@ if ($method === 'DELETE') {
     $headers = getallheaders();
     $caller_id = $headers['X-Employee-Id'] ?? $headers['x-employee-id'] ?? null;
     if ($caller_id) {
-        $adminCheck = $conn->prepare("SELECT is_admin, is_superadmin FROM employees WHERE id = ?");
-        $adminCheck->bind_param('s', $caller_id);
-        $adminCheck->execute();
-        $adminRow = $adminCheck->get_result()->fetch_assoc();
-        if (!$adminRow || (!$adminRow['is_admin'] && !$adminRow['is_superadmin'])) {
+        if (!is_admin_user($conn, $caller_id)) {
             json_response(['error' => 'ต้องเป็น Admin เท่านั้น'], 403);
         }
     }

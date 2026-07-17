@@ -49,7 +49,7 @@ self.addEventListener('fetch', (event) => {
     const url = new URL(event.request.url);
 
     // Skip non-GET and API calls — always go to network
-    if (event.request.method !== 'GET' || url.pathname.startsWith('/api/')) {
+    if (event.request.method !== 'GET' || url.pathname.startsWith('/api/') || url.pathname.startsWith('/hr-mobile-connect/api/')) {
         return;
     }
 

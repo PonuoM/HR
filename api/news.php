@@ -16,13 +16,12 @@ require_once __DIR__ . '/config.php';
 $company_id = get_company_id();
 
 function get_full_access($conn, $empId) {
-    $is_superadmin = false;
+    $is_superadmin = is_admin_user($conn, $empId);
     $is_admin = false;
     $has_cms = false;
     if ($empId) {
-        $res = $conn->query("SELECT e.is_admin, e.is_superadmin, p.permissions FROM employees e LEFT JOIN positions p ON e.position_id = p.id WHERE e.id = '" . $conn->real_escape_string($empId) . "'");
+        $res = $conn->query("SELECT e.is_admin, p.permissions FROM employees e LEFT JOIN positions p ON e.position_id = p.id WHERE e.id = '" . $conn->real_escape_string($empId) . "'");
         if ($res && $row = $res->fetch_assoc()) {
-            $is_superadmin = (bool)$row['is_superadmin'];
             $is_admin = (bool)$row['is_admin'];
             $perms = $row['permissions'] ? json_decode($row['permissions'], true) : [];
             $has_cms = is_array($perms) && in_array('/admin/cms', $perms);

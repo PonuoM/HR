@@ -19,22 +19,8 @@ function require_superadmin($conn) {
     if (!$employeeId) {
         json_response(['error' => 'Unauthorized'], 401);
     }
-    $stmt = $conn->prepare("SELECT e.is_superadmin, p.permissions FROM employees e LEFT JOIN positions p ON e.position_id = p.id WHERE e.id = ?");
-    $stmt->bind_param('s', $employeeId);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $row = $result->fetch_assoc();
     
-    $is_superadmin = $row && $row['is_superadmin'];
-    
-    if (!$is_superadmin) {
-        $perms = ($row && $row['permissions']) ? json_decode($row['permissions'], true) : [];
-        $has_cms = is_array($perms) && in_array('/admin/cms', $perms);
-        
-        // Allow GET if they have CMS permission (acts as global news admin)
-        if ($method === 'GET' && $has_cms) {
-            return;
-        }
+    if (!is_admin_user($conn, $employeeId)) {
         json_response(['error' => 'Access denied: Superadmin only'], 403);
     }
 }
