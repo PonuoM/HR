@@ -6,6 +6,7 @@ import { getDepartments, getPositions, getEmployees, createEmployee, updateEmplo
 import { useToast } from '../../components/Toast';
 import CustomSelect from '../../components/CustomSelect';
 import { useAuth } from '../../contexts/AuthContext';
+import DatePickerModal from '../../components/DatePickerModal';
 
 const AdminEmployeeScreen: React.FC = () => {
     const navigate = useNavigate();
@@ -53,6 +54,8 @@ const AdminEmployeeScreen: React.FC = () => {
     const [addApprover2, setAddApprover2] = useState('');
     const [addHireDate, setAddHireDate] = useState('');
     const [addBirthDate, setAddBirthDate] = useState('');
+    const [addHireCalendarOpen, setAddHireCalendarOpen] = useState(false);
+    const [addBirthCalendarOpen, setAddBirthCalendarOpen] = useState(false);
     const [addAvatarFile, setAddAvatarFile] = useState<File | null>(null);
     const [addAvatarPreview, setAddAvatarPreview] = useState('');
 
@@ -65,6 +68,10 @@ const AdminEmployeeScreen: React.FC = () => {
     const [editNickname, setEditNickname] = useState('');
     const [editScheduleJson, setEditScheduleJson] = useState<ScheduleJson | null>(null);
     const [editLateGrace, setEditLateGrace] = useState<string>('');
+    const [editHireDate, setEditHireDate] = useState('');
+    const [editBirthDate, setEditBirthDate] = useState('');
+    const [editHireCalendarOpen, setEditHireCalendarOpen] = useState(false);
+    const [editBirthCalendarOpen, setEditBirthCalendarOpen] = useState(false);
 
     // Per-employee leave quota + history (loaded only when an employee is being edited)
     const editEmpId = editingEmployee?.id || '';
@@ -88,6 +95,8 @@ const AdminEmployeeScreen: React.FC = () => {
             setEditNickname(editingEmployee.nickname || '');
             setEditScheduleJson(parseScheduleJson(editingEmployee.schedule_json));
             setEditLateGrace(editingEmployee.late_grace_minutes != null ? String(editingEmployee.late_grace_minutes) : '');
+            setEditHireDate(editingEmployee.hire_date || '');
+            setEditBirthDate(editingEmployee.birth_date || '');
         }
     }, [editingEmployee]);
 
@@ -611,23 +620,39 @@ const AdminEmployeeScreen: React.FC = () => {
                                 {/* HIRE DATE INPUT */}
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">วันที่เริ่มงาน</label>
-                                    <input
-                                        type="date"
-                                        value={addHireDate}
-                                        onChange={(e) => setAddHireDate(e.target.value)}
-                                        className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-gray-900 dark:text-white"
-                                    />
+                                    <button type="button" onClick={() => setAddHireCalendarOpen(true)} className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-left flex items-center justify-between">
+                                        <span className={addHireDate ? 'text-gray-900 dark:text-white' : 'text-gray-400'}>
+                                            {addHireDate ? new Date(addHireDate).toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: 'numeric' }) : 'dd/mm/yyyy'}
+                                        </span>
+                                        <span className="material-icons-round text-sm text-gray-400">calendar_today</span>
+                                    </button>
+                                    {addHireCalendarOpen && (
+                                        <DatePickerModal
+                                            title="เลือกวันที่เริ่มงาน"
+                                            value={addHireDate}
+                                            onSelect={(d) => { setAddHireDate(d); setAddHireCalendarOpen(false); }}
+                                            onClose={() => setAddHireCalendarOpen(false)}
+                                        />
+                                    )}
                                 </div>
 
                                 {/* BIRTH DATE INPUT */}
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">วันเกิด</label>
-                                    <input
-                                        type="date"
-                                        value={addBirthDate}
-                                        onChange={(e) => setAddBirthDate(e.target.value)}
-                                        className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-gray-900 dark:text-white"
-                                    />
+                                    <button type="button" onClick={() => setAddBirthCalendarOpen(true)} className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-left flex items-center justify-between">
+                                        <span className={addBirthDate ? 'text-gray-900 dark:text-white' : 'text-gray-400'}>
+                                            {addBirthDate ? new Date(addBirthDate).toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: 'numeric' }) : 'dd/mm/yyyy'}
+                                        </span>
+                                        <span className="material-icons-round text-sm text-gray-400">calendar_today</span>
+                                    </button>
+                                    {addBirthCalendarOpen && (
+                                        <DatePickerModal
+                                            title="เลือกวันเกิด"
+                                            value={addBirthDate}
+                                            onSelect={(d) => { setAddBirthDate(d); setAddBirthCalendarOpen(false); }}
+                                            onClose={() => setAddBirthCalendarOpen(false)}
+                                        />
+                                    )}
                                 </div>
 
                                 <div className="border-t border-gray-100 dark:border-gray-800 pt-4 mt-2">
@@ -640,6 +665,7 @@ const AdminEmployeeScreen: React.FC = () => {
                                             value={addApprover}
                                             onChange={setAddApprover}
                                             placeholder="-- ไม่มี (ส่งตรงไป HR) --"
+                                            searchable
                                             options={(employees || []).filter((emp: any) =>
                                                 (String(emp.can_have_subordinates) === '1' || String(emp.is_admin) === '1') &&
                                                 (String(emp.is_active) !== '0')
@@ -662,6 +688,7 @@ const AdminEmployeeScreen: React.FC = () => {
                                         value={addApprover2}
                                         onChange={setAddApprover2}
                                         placeholder="-- ไม่มี --"
+                                        searchable
                                         options={(employees || []).filter((emp: any) =>
                                             (String(emp.can_have_subordinates) === '1' || String(emp.is_admin) === '1') &&
                                             (String(emp.is_active) !== '0')
@@ -719,8 +746,8 @@ const AdminEmployeeScreen: React.FC = () => {
                                         department_id: Number(formData.get('department_id')),
                                         position_id: Number(formData.get('position_id')),
                                         base_salary: formData.get('base_salary') ? Number(formData.get('base_salary')) : null,
-                                        hire_date: (formData.get('hire_date') as string) || null,
-                                        birth_date: (formData.get('birth_date') as string) || null,
+                                        hire_date: editHireDate || null,
+                                        birth_date: editBirthDate || null,
                                         approver_id: approverVal || null,
                                         approver2_id: approver2Val || null,
                                         is_admin: editIsAdmin ? 1 : 0,
@@ -749,11 +776,37 @@ const AdminEmployeeScreen: React.FC = () => {
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">วันที่เริ่มงาน</label>
-                                    <input name="hire_date" type="date" defaultValue={editingEmployee.hire_date || ''} className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-gray-900 dark:text-white" />
+                                    <button type="button" onClick={() => setEditHireCalendarOpen(true)} className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-left flex items-center justify-between">
+                                        <span className={editHireDate ? 'text-gray-900 dark:text-white' : 'text-gray-400'}>
+                                            {editHireDate ? new Date(editHireDate).toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: 'numeric' }) : 'dd/mm/yyyy'}
+                                        </span>
+                                        <span className="material-icons-round text-sm text-gray-400">calendar_today</span>
+                                    </button>
+                                    {editHireCalendarOpen && (
+                                        <DatePickerModal
+                                            title="เลือกวันที่เริ่มงาน"
+                                            value={editHireDate}
+                                            onSelect={(d) => { setEditHireDate(d); setEditHireCalendarOpen(false); }}
+                                            onClose={() => setEditHireCalendarOpen(false)}
+                                        />
+                                    )}
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">วันเกิด</label>
-                                    <input name="birth_date" type="date" defaultValue={editingEmployee.birth_date || ''} className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-gray-900 dark:text-white" />
+                                    <button type="button" onClick={() => setEditBirthCalendarOpen(true)} className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-primary/50 focus:outline-none text-left flex items-center justify-between">
+                                        <span className={editBirthDate ? 'text-gray-900 dark:text-white' : 'text-gray-400'}>
+                                            {editBirthDate ? new Date(editBirthDate).toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: 'numeric' }) : 'dd/mm/yyyy'}
+                                        </span>
+                                        <span className="material-icons-round text-sm text-gray-400">calendar_today</span>
+                                    </button>
+                                    {editBirthCalendarOpen && (
+                                        <DatePickerModal
+                                            title="เลือกวันเกิด"
+                                            value={editBirthDate}
+                                            onSelect={(d) => { setEditBirthDate(d); setEditBirthCalendarOpen(false); }}
+                                            onClose={() => setEditBirthCalendarOpen(false)}
+                                        />
+                                    )}
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
@@ -799,6 +852,7 @@ const AdminEmployeeScreen: React.FC = () => {
                                         value={editApprover}
                                         onChange={setEditApprover}
                                         placeholder="-- ไม่มี (ส่งตรงไป HR) --"
+                                        searchable
                                         options={(employees || []).filter((emp: any) =>
                                             emp.id !== editingEmployee.id &&
                                             (String(emp.can_have_subordinates) === '1' || String(emp.is_admin) === '1') &&
