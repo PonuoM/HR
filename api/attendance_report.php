@@ -213,7 +213,8 @@ if ($action === 'daily' && $employee_id && ($month || $cutoff_month || ($date_fr
         if ($holidayName) {
             $status = 'holiday';
         } elseif ($leaveType) {
-            $status = 'leave';
+            $isWfh = (stripos($leaveType, 'wfh') !== false || stripos($leaveType, 'work from home') !== false);
+            $status = $isWfh ? 'wfh' : 'leave';
         } elseif ($att && $clockIn) {
             if (!$sched['active']) {
                 // Clocked in on an off-schedule day → flag for HR as OT candidate
@@ -401,7 +402,8 @@ if ($export === 'csv_specific_day' && $date) {
             $status = 'holiday';
             $note = $hdName;
         } elseif ($leaveType) {
-            $status = 'leave';
+            $isWfh = (stripos($leaveType, 'wfh') !== false || stripos($leaveType, 'work from home') !== false);
+            $status = $isWfh ? 'wfh' : 'leave';
             $note = $leaveType;
         } elseif ($att && $clockIn) {
             if (!$sched['active']) {
@@ -751,9 +753,13 @@ if (!empty($employees)) {
                 ];
             }
             $leaveByTypeMap[$ltId]['days'] += $days;
-            $totalLeaveDays += $days;
-            if ($lv['leave_category'] !== 'annual') {
-                $nonAnnualLeaveDays += $days;
+            
+            $isWfh = (stripos($lv['leave_type_name'], 'wfh') !== false || stripos($lv['leave_type_name'], 'work from home') !== false);
+            if (!$isWfh) {
+                $totalLeaveDays += $days;
+                if ($lv['leave_category'] !== 'annual') {
+                    $nonAnnualLeaveDays += $days;
+                }
             }
         }
 
@@ -894,7 +900,7 @@ if ($export === 'csv_daily' && ($month || $cutoff_month)) {
         fputcsv($out, ['วันที่', 'วัน', 'เข้างาน', 'ออกงาน', 'สถานะ', 'สาย (นาที)', 'ชม.ทำงาน', 'หมายเหตุ']);
 
         // Counters for summary
-        $totalPresent = 0; $totalLate = 0; $totalAbsent = 0; $totalLeave = 0; $totalLateMin = 0; $totalHours = 0;
+        $totalPresent = 0; $totalLate = 0; $totalAbsent = 0; $totalLeave = 0; $totalWfh = 0; $totalLateMin = 0; $totalHours = 0;
 
         // Daily loop
         $cur = new DateTime($startDateD);
@@ -920,9 +926,10 @@ if ($export === 'csv_daily' && ($month || $cutoff_month)) {
                 $status = 'holiday';
                 $note = $holidayName;
             } elseif ($leaveType) {
-                $status = 'leave';
+                $isWfh = (stripos($leaveType, 'wfh') !== false || stripos($leaveType, 'work from home') !== false);
+                $status = $isWfh ? 'wfh' : 'leave';
+                if ($isWfh) $totalWfh++; else $totalLeave++;
                 $note = $leaveType;
-                $totalLeave++;
             } elseif ($att && $clockIn) {
                 if (!$sched['active']) {
                     $status = 'offday_work'; // off-schedule day worked → OT candidate
@@ -970,7 +977,7 @@ if ($export === 'csv_daily' && ($month || $cutoff_month)) {
         // Employee summary row
         fputcsv($out, [
             'สรุป', '', '', '',
-            "มา:{$totalPresent} สาย:{$totalLate} ขาด:{$totalAbsent} ลา:{$totalLeave}",
+            "มา:{$totalPresent} สาย:{$totalLate} ขาด:{$totalAbsent} ลา:{$totalLeave} WFH:{$totalWfh}",
             $totalLateMin > 0 ? "รวม {$totalLateMin} นาที" : '',
             $totalHours > 0 ? round($totalHours, 1) . ' ชม.' : '',
             '',

@@ -98,6 +98,7 @@ const STATUS_CONFIG: Record<string, { label: string; icon: string; bg: string; t
     offday_work: { label: 'ทำงานวันหยุด (OT?)', icon: 'more_time', bg: 'bg-amber-100 dark:bg-amber-900/30', text: 'text-amber-700 dark:text-amber-300' },
     future: { label: '-', icon: 'schedule', bg: 'bg-gray-50 dark:bg-gray-800/30', text: 'text-gray-400 dark:text-gray-500' },
     pre_hire: { label: 'ก่อนเข้างาน', icon: 'person_add_disabled', bg: 'bg-slate-100 dark:bg-slate-800/40', text: 'text-slate-500 dark:text-slate-400' },
+    wfh: { label: 'WFH', icon: 'home_work', bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-700 dark:text-blue-400' }
 };
 
 // HTML escape — needed because we build a printable doc as a string and inject
@@ -117,10 +118,10 @@ function buildPrintableReportHtml(
 ): string {
     const dowNames = ['', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์', 'อาทิตย์'];
 
-    const statusLabel = (r: DailyRow): string => {
+    const getStatusBadge = (r: any) => {
         if (r.status === 'leave' && r.leave_type) return `ลา (${r.leave_type})`;
-        if (r.status === 'holiday') return 'หยุดนักขัตฤกษ์';
-        return ({ present: 'มาทำงาน', late: 'สาย', absent: 'ขาดงาน', leave: 'ลา', weekend: 'วันหยุด', offday_work: 'ทำงานวันหยุด (OT?)', future: '-', pre_hire: 'ยังไม่เข้างาน' } as Record<string, string>)[r.status] || r.status;
+        if (r.status === 'wfh' && r.leave_type) return `WFH (${r.leave_type})`;
+        return ({ present: 'มาทำงาน', late: 'สาย', absent: 'ขาดงาน', leave: 'ลา', wfh: 'WFH', weekend: 'วันหยุด', offday_work: 'ทำงานวันหยุด (OT?)', future: '-', pre_hire: 'ยังไม่เข้างาน' } as Record<string, string>)[r.status] || r.status;
     };
     const rowBgClass = (r: DailyRow): string => {
         if (r.status === 'absent') return 'absent';
@@ -1585,7 +1586,7 @@ const AdminAttendanceReportScreen: React.FC = () => {
 
                                     {/* Legend */}
                                     <div className="flex flex-wrap gap-2 mb-4">
-                                        {['present', 'late', 'leave', 'absent', 'holiday', 'weekend'].map(s => {
+                                        {['present', 'late', 'leave', 'wfh', 'absent', 'holiday', 'weekend'].map(s => {
                                             const cfg = STATUS_CONFIG[s];
                                             return (
                                                 <span key={s} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${cfg.bg} ${cfg.text}`}>

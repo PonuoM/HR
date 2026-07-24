@@ -77,8 +77,8 @@ if ($method === 'GET') {
             ORDER BY lr.start_date";
     $result = $conn->query($sql);
     while ($row = $result->fetch_assoc()) {
-        $cur = max($row['start_date'], $startDate);
-        $end = min($row['end_date'], $endDate);
+        $cur = max(substr($row['start_date'], 0, 10), $startDate);
+        $end = min(substr($row['end_date'], 0, 10), $endDate);
         while ($cur <= $end) {
             $leaves[] = [
                 'date' => $cur,
